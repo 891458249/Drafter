@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <title>Claude UI</title>
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="../node_modules/highlight.js/styles/github-dark.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Landing: pick a project directory -->
+  <div id="landing" class="landing">
+    <div class="landing-card">
+      <div class="brand">
+        <div class="brand-mark">✳</div>
+        <h1>Claude UI</h1>
+        <p class="subtitle">为 Claude Code 打造的桌面界面</p>
+      </div>
+      <button id="btn-pick" class="btn btn-primary btn-lg">选择项目目录…</button>
+      <button id="btn-apikey-landing" class="btn btn-lg" style="margin-top:10px">配置 API Key…</button>
+      <div class="recent">
+        <div class="recent-title">最近打开</div>
+        <ul id="recent-list" class="recent-list"></ul>
+      </div>
+      <div id="sdk-warning" class="sdk-warning hidden"></div>
+    </div>
+  </div>
+
+  <!-- Main workspace -->
+  <div id="workspace" class="workspace hidden">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button id="btn-sidebar" class="icon-btn" title="会话列表 (Ctrl+B)">☰</button>
+        <span class="dot"></span>
+        <span id="cwd-label" class="cwd-label" title="当前会话所属项目组及其目录"></span>
+        <span id="branch-label" class="branch-label"></span>
+      </div>
+      <div class="topbar-right">
+        <span id="usage-chip" class="usage-chip" title="本会话累计用量">$0.0000</span>
+        <button id="btn-compact" class="btn btn-sm" title="压缩上下文 (/compact)">压缩</button>
+        <label class="ctrl">模式
+          <select id="perm-mode">
+            <option value="default">默认(询问)</option>
+            <option value="acceptEdits">接受编辑</option>
+            <option value="plan">计划</option>
+            <option value="dontAsk">不询问</option>
+            <option value="bypassPermissions">跳过权限</option>
+          </select>
+        </label>
+        <label class="ctrl">模型
+          <select id="model-sel">
+            <option value="">默认</option>
+            <option value="claude-fable-5">Fable 5</option>
+            <option value="claude-opus-4-8">Opus 4.8</option>
+            <option value="claude-sonnet-5">Sonnet 5</option>
+            <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+          </select>
+        </label>
+        <div class="effort-ctrl">
+          <button id="btn-effort" class="btn btn-sm" title="控制思考深度与 token 消耗(Faster ↔ Smarter)">Effort <b id="effort-btn-label">高</b></button>
+          <div id="effort-pop" class="effort-pop hidden">
+            <div class="effort-pop-head">Effort <b id="effort-pop-level">高</b></div>
+            <div class="effort-scale"><span>Faster</span><span>Smarter</span></div>
+            <input id="effort-slider" type="range" min="0" max="4" step="1" value="2" />
+            <div class="effort-ticks"><span>低</span><span>中</span><span>高</span><span>Extra</span><span>Max</span></div>
+            <div class="effort-hint">档位越低,思考越少、token 消耗越省;对当前会话即时生效,并作为新会话默认值。</div>
+          </div>
+        </div>
+        <label class="ctrl">视图
+          <select id="view-mode">
+            <option value="normal">普通</option>
+            <option value="verbose">详细</option>
+            <option value="summary">摘要</option>
+          </select>
+        </label>
+        <button id="btn-panel" class="btn btn-sm" title="右侧面板 (Ctrl+J)">面板</button>
+        <button id="btn-more" class="btn btn-sm">⋯</button>
+      </div>
+    </header>
+
+    <div class="main-grid" id="main-grid">
+      <!-- Sidebar: sessions -->
+      <aside id="sidebar" class="sidebar">
+        <div class="sidebar-head">
+          <span>项目 / 会话</span>
+          <div class="sidebar-actions">
+            <label class="wt-toggle" title="新会话在独立 git worktree 中运行">
+              <input type="checkbox" id="new-worktree" /> worktree
+            </label>
+            <button id="btn-new-session" class="btn btn-sm btn-primary">＋ 新会话</button>
+          </div>
+        </div>
+        <div class="sidebar-filter">
+          <input id="session-filter" class="input-sm" placeholder="筛选…" />
+          <label class="show-archived"><input type="checkbox" id="show-archived" /> 已归档</label>
+        </div>
+        <ul id="session-list" class="session-list"></ul>
+      </aside>
+
+      <!-- Chat -->
+      <section class="chat-col">
+        <div id="messages" class="messages"></div>
+        <div class="composer">
+          <div id="attachments" class="attachments hidden"></div>
+          <div id="autocomplete" class="autocomplete hidden"></div>
+          <div class="composer-toolbar">
+            <button id="btn-add-file" class="btn btn-sm" title="为当前会话添加文件(自动登记到项目组)">＋文件</button>
+            <button id="btn-add-folder" class="btn btn-sm" title="为当前会话添加文件夹">＋文件夹</button>
+            <button id="btn-add-image" class="btn btn-sm" title="选择图片作为附件">＋图片</button>
+            <label class="ctrl composer-model">本会话模型
+              <select id="model-sel-composer">
+                <option value="">默认</option>
+                <option value="claude-fable-5">Fable 5</option>
+                <option value="claude-opus-4-8">Opus 4.8</option>
+                <option value="claude-sonnet-5">Sonnet 5</option>
+                <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+              </select>
+            </label>
+          </div>
+          <div id="turn-status" class="turn-status hidden">
+            <span class="turn-star">✳</span><span id="turn-status-text"></span>
+          </div>
+          <div class="input-wrap">
+            <textarea id="input" class="input" rows="1"
+              placeholder="给 Claude Code 发送消息…  (Enter 发送 · Shift+Enter 换行 · @文件 · /命令 · 可粘贴图片)"></textarea>
+            <button id="btn-send" class="send-icon" title="发送 (Enter)">
+              <svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M8 1l6 6h-4v8H6V7H2z"/></svg>
+            </button>
+            <button id="btn-stop" class="send-icon stop hidden" title="停止当前回合 (Esc)">
+              <svg viewBox="0 0 16 16" width="12" height="12"><rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/></svg>
+            </button>
+          </div>
+          <div class="composer-foot">
+            <span id="busy-hint" class="busy-hint hidden">运行中,可继续输入追加消息</span>
+            <span class="grow"></span>
+            <div class="usage-ctrl">
+              <button id="btn-usage" class="btn btn-sm" title="Token 用量与上下文窗口">
+                <span class="usage-ring"></span><span id="btn-usage-label">上下文 0%</span>
+              </button>
+              <div id="usage-pop" class="usage-pop hidden"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right panel -->
+      <aside id="right-panel" class="right-panel hidden">
+        <div class="panel-tabs">
+          <button class="ptab active" data-panel="diff">变更</button>
+          <button class="ptab" data-panel="editor">编辑器</button>
+          <button class="ptab" data-panel="preview">预览</button>
+          <button class="ptab" data-panel="tasks">任务</button>
+          <button class="ptab" data-panel="terminal">终端</button>
+          <button id="btn-panel-close" class="icon-btn" title="关闭面板">✕</button>
+        </div>
+
+        <!-- Diff panel -->
+        <div id="panel-diff" class="panel active">
+          <div class="panel-toolbar">
+            <button id="btn-diff-refresh" class="btn btn-sm">刷新</button>
+            <button id="btn-review" class="btn btn-sm">Review code</button>
+            <button id="btn-send-comments" class="btn btn-sm btn-primary hidden">发送评论 (<span id="comment-count">0</span>)</button>
+          </div>
+          <div id="pr-box" class="pr-box hidden"></div>
+          <div id="diff-files" class="diff-files"></div>
+          <div id="diff-view" class="diff-view"></div>
+        </div>
+
+        <!-- Editor panel -->
+        <div id="panel-editor" class="panel">
+          <div class="panel-toolbar">
+            <span id="editor-path" class="editor-path">(未打开文件)</span>
+            <button id="btn-editor-save" class="btn btn-sm btn-primary" disabled>保存</button>
+          </div>
+          <div id="editor-warning" class="editor-warning hidden"></div>
+          <textarea id="editor-area" class="editor-area" spellcheck="false" disabled></textarea>
+        </div>
+
+        <!-- Preview panel -->
+        <div id="panel-preview" class="panel">
+          <div class="panel-toolbar">
+            <input id="preview-url" class="input-sm grow" placeholder="http://localhost:3000" />
+            <button id="btn-preview-go" class="btn btn-sm">打开</button>
+            <button id="btn-preview-reload" class="btn btn-sm">刷新</button>
+          </div>
+          <div id="preview-host" class="preview-host"></div>
+        </div>
+
+        <!-- Tasks panel -->
+        <div id="panel-tasks" class="panel">
+          <div id="tasks-list" class="tasks-list"><div class="empty-hint">子代理 / 后台任务将显示在这里</div></div>
+        </div>
+
+        <!-- Terminal panel -->
+        <div id="panel-terminal" class="panel">
+          <div class="term-tabs" id="term-tabs">
+            <button id="btn-term-new" class="btn btn-sm">＋ 终端</button>
+          </div>
+          <div id="term-host" class="term-host"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- API key modal -->
+  <div id="apikey-modal" class="modal-mask hidden">
+    <div class="modal">
+      <h2>配置 API Key</h2>
+      <p class="modal-hint">填入 Anthropic API Key(sk-ant-…)后直接调用 API;留空保存则清除,回退使用 claude CLI 登录态。</p>
+      <input id="apikey-input" class="input modal-input" type="password" placeholder="sk-ant-api03-…" autocomplete="off" />
+      <div class="modal-status" id="apikey-status"></div>
+      <div class="modal-actions">
+        <button id="apikey-cancel" class="btn">取消</button>
+        <button id="apikey-save" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MCP modal -->
+  <div id="mcp-modal" class="modal-mask hidden">
+    <div class="modal modal-wide">
+      <h2>MCP 服务器</h2>
+      <div id="mcp-list" class="mcp-list"></div>
+      <h3>添加 / 编辑</h3>
+      <div class="form-row">
+        <input id="mcp-name" class="input-sm" placeholder="名称" />
+        <select id="mcp-scope" class="input-sm">
+          <option value="global">全局 (~/.claude.json)</option>
+          <option value="project">项目 (.mcp.json)</option>
+        </select>
+      </div>
+      <textarea id="mcp-config" class="editor-area mcp-config" spellcheck="false"
+        placeholder='{"command": "npx", "args": ["-y", "some-mcp-server"]}'></textarea>
+      <div class="modal-status" id="mcp-status"></div>
+      <div class="modal-actions">
+        <button id="mcp-close" class="btn">关闭</button>
+        <button id="mcp-save" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cron modal -->
+  <div id="cron-modal" class="modal-mask hidden">
+    <div class="modal modal-wide">
+      <h2>定时任务</h2>
+      <div id="cron-list" class="mcp-list"></div>
+      <h3>添加 / 编辑</h3>
+      <div class="form-row">
+        <input id="cron-label" class="input-sm" placeholder="名称" />
+        <select id="cron-type" class="input-sm">
+          <option value="daily">每天定时</option>
+          <option value="interval">间隔执行</option>
+        </select>
+        <input id="cron-time" class="input-sm" type="time" value="09:00" />
+        <input id="cron-minutes" class="input-sm hidden" type="number" min="5" value="60" title="间隔分钟" />
+      </div>
+      <textarea id="cron-prompt" class="editor-area mcp-config" spellcheck="false"
+        placeholder="到点后发送给新会话的 prompt…"></textarea>
+      <div class="modal-status" id="cron-status"></div>
+      <div class="modal-actions">
+        <button id="cron-close" class="btn">关闭</button>
+        <button id="cron-save-btn" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shortcuts modal (Ctrl+/) -->
+  <div id="shortcuts-modal" class="modal-mask hidden">
+    <div class="modal">
+      <h2>快捷键</h2>
+      <table class="kbd-table">
+        <tr><td><kbd>Enter</kbd></td><td>发送</td></tr>
+        <tr><td><kbd>Shift+Enter</kbd></td><td>换行</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>停止当前回合 / 关闭弹窗</td></tr>
+        <tr><td><kbd>Ctrl+N</kbd></td><td>新会话</td></tr>
+        <tr><td><kbd>Ctrl+B</kbd></td><td>切换会话侧边栏</td></tr>
+        <tr><td><kbd>Ctrl+J</kbd></td><td>切换右侧面板</td></tr>
+        <tr><td><kbd>Ctrl+1…5</kbd></td><td>切换面板标签(变更/编辑器/预览/任务/终端)</td></tr>
+        <tr><td><kbd>Ctrl+/</kbd></td><td>本面板</td></tr>
+      </table>
+      <div class="modal-actions"><button id="shortcuts-close" class="btn">关闭</button></div>
+    </div>
+  </div>
+
+  <!-- "More" dropdown -->
+  <div id="more-menu" class="more-menu hidden">
+    <button data-act="apikey">API Key…</button>
+    <button data-act="mcp">MCP 服务器…</button>
+    <button data-act="cron">定时任务…</button>
+    <button data-act="shortcuts">快捷键 (Ctrl+/)</button>
+    <button data-act="switch">打开目录(新项目组)…</button>
+  </div>
+
+  <script src="../node_modules/marked/marked.min.js"></script>
+  <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script type="module" src="renderer/app.js"></script>
+</body>
+</html>
