@@ -89,3 +89,13 @@ Git 工作流:
 - **文件标签**:组内可加载多个文件/文件夹,标签「只读/可改」实时切换;只读通过 SDK PreToolUse hook 硬拦截 Edit/Write/MultiEdit/NotebookEdit(E2E 验证:bypassPermissions 下也拦得住),canUseTool 兜底二道防线,systemPrompt 内同步声明
 - 组内多目录通过 `additionalDirectories` 授权新会话访问
 - **会话内工具条**(输入框上方):＋文件(图片转附件,其他登记项目组并插入 @路径)、＋文件夹(登记 + 自动 /add-dir)、＋图片(文件选择器)、本会话模型切换(与顶栏双向同步)
+
+## 维护记录
+
+### v0.3.0(2026-07-30):权限规则持久化
+「总是允许」规则经 src/main/perms.js 读-改-写持久化到 `<cwd>/.claude/settings.local.json`(`permissions.allow`,对齐官方格式如 `Bash(npm test:*)`);JSON 损坏先备份 `.bak-时间戳` 再重建;更多菜单「权限规则…」可查看 allow/deny/ask 并单条删除。当前会话即时生效靠 autoAllowTools + updatedPermissions,重启后由 SDK 读取 settings.local.json 生效。
+
+### v0.3.1(2026-07-30):GPU/disk cache「拒绝访问」修复
+- **根因诊断**:启动日志中 cache_util_win.cc "Unable to move the cache: 拒绝访问 (0x5)" 与 disk_cache/gpu_disk_cache 创建失败,源于 userData 下默认 Chromium 缓存目录(Cache/GPUCache/Code Cache)的状态问题——开发期反复启动/强杀进程导致缓存文件被残留锁占用或所有者不一致,启动时的缓存迁移因此被拒。非代码逻辑 bug。
+- **修法**(main.js,三管齐下):a) `app.commandLine.appendSwitch('disk-cache-dir', userData/cache)` 把磁盘缓存固定到专用子目录,绕开默认目录的历史状态;b) `app.on('gpu-process-crashed')` 落日志(logger.js),并支持设置项 `disableGpu` 关闭硬件加速(默认仍启用);c) `app.requestSingleInstanceLock()` 单实例锁,杜绝多实例争用缓存,第二实例唤起已有窗口。
+- **验证**:修复后 `npm start` 启动 20 秒,stdout/stderr 全程无 cache/gpu/拒绝访问 相关输出,新缓存目录 `userData/cache/Cache_Data` 正常创建使用。

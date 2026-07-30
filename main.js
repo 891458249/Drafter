@@ -16,6 +16,40 @@ const { SessionManager } = require('./src/main/sessions');
 let mainWindow = null;
 const getWindow = () => mainWindow;
 
+// --- GPU / disk cache hardening ---------------------------------------------
+// Startup logs showed cache_util_win.cc "Unable to move the cache: 拒绝访问
+// (0x5)" and disk_cache / gpu_disk_cache creation failures. Root cause: the
+// default Chromium cache dirs under userData (Cache / GPUCache / Code Cache)
+// can end up locked by a second instance or a killed process, or owned by a
+// different user after runs with different identities, so the cache move at
+// startup fails with access denied. Mitigations:
+//  a. pin the disk cache to a dedicated subdir (userData/cache), sidestepping
+//     whatever state the default dirs are in
+//  b. log GPU process crashes; allow disabling hardware acceleration via the
+//     "disableGpu" setting (default: acceleration stays enabled)
+//  c. single-instance lock so two app instances can never fight over the cache
+app.commandLine.appendSwitch('disk-cache-dir', path.join(app.getPath('userData'), 'cache'));
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
+app.on('gpu-process-crashed', (_e, killed) => {
+  console.error('[main] gpu-process-crashed, killed =', killed);
+  logger.logRendererError({ source: 'gpu-process', message: 'GPU 进程崩溃,killed=' + killed });
+});
+
+if (store.getSetting('disableGpu')) {
+  app.disableHardwareAcceleration();
+}
+
 // Env for child processes: inject configured API key if present.
 function buildEnv(extra = {}) {
   const env = { ...process.env, FORCE_COLOR: '0', ...extra };
