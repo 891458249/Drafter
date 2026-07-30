@@ -10,6 +10,32 @@ import * as tasks from './tasks.js';
 import * as term from './term.js';
 
 // ---------------------------------------------------------------------------
+// Global error reporting → main-process persistent log (metadata only)
+// ---------------------------------------------------------------------------
+window.addEventListener('error', (e) => {
+  try {
+    api.reportError({
+      source: 'onerror',
+      message: e.message,
+      stack: e.error && e.error.stack,
+      url: e.filename,
+      line: e.lineno,
+      col: e.colno,
+    });
+  } catch {}
+});
+window.addEventListener('unhandledrejection', (e) => {
+  try {
+    const r = e.reason;
+    api.reportError({
+      source: 'unhandledrejection',
+      message: (r && r.message) || String(r),
+      stack: r && r.stack,
+    });
+  } catch {}
+});
+
+// ---------------------------------------------------------------------------
 // Landing
 // ---------------------------------------------------------------------------
 async function initLanding() {
@@ -300,6 +326,7 @@ $('more-menu').onclick = async (e) => {
     const res = await api.pickDir();
     if (res && res.dir) openDirAsProject(res.dir);
   }
+  if (act === 'logs') api.openLogs();
 };
 
 // ---------------------------------------------------------------------------

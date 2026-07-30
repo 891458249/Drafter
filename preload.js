@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('api', {
   usageGet: () => ipcRenderer.invoke('usage:get'),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
+  // error reporting / logs (send = fire-and-forget, never blocks the renderer)
+  reportError: (info) => ipcRenderer.send('renderer:error', info),
+  openLogs: () => ipcRenderer.invoke('logs:open'),
+
   // project groups
   projList: () => ipcRenderer.invoke('proj:list'),
   projRename: (id, name) => ipcRenderer.invoke('proj:rename', { id, name }),

@@ -8,6 +8,7 @@ const commands = require('./src/main/commands');
 const mcp = require('./src/main/mcp');
 const scheduler = require('./src/main/scheduler');
 const projects = require('./src/main/projects');
+const logger = require('./src/main/logger');
 const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
 
@@ -42,9 +43,11 @@ function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
-  // surface renderer console messages in the main process log (debugging)
+  // persist renderer errors (level >= 2) to userData/logs/renderer-errors.log
   mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
-    if (level >= 2) console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`);
+    if (level >= 2) {
+      logger.logRendererError({ source: 'console', message, url: sourceId, line });
+    }
   });
 }
 
@@ -148,6 +151,21 @@ ipcMain.handle('apikey:set', (_e, key) => {
 ipcMain.handle('shell:openExternal', (_e, url) => {
   if (/^https?:\/\//.test(url)) shell.openExternal(url);
 });
+
+// renderer error reporting (fire-and-forget; metadata only) + logs folder
+ipcMain.on('renderer:error', (_e, info) => {
+  if (!info || typeof info !== 'object') return;
+  logger.logRendererError({
+    source: info.source,
+    message: info.message,
+    stack: info.stack,
+    url: info.url,
+    line: info.line,
+    col: info.col,
+  });
+});
+
+ipcMain.handle('logs:open', () => shell.openPath(logger.logsDir()));
 
 // ---------------------------------------------------------------------------
 // IPC: sessions
