@@ -75,7 +75,7 @@ Git 工作流:
   - 文件编辑器(点击路径打开、mtime 冲突检测)(B17)、webview 预览(B18)、多终端标签(B23)
 - 已知限制/待打磨:
   - B6:SDK 无 Auto 模式,下拉提供 default/acceptEdits/plan/dontAsk/bypassPermissions
-  - 权限「总是允许」目前为会话级内存记忆 + SDK suggestions 透传,未写入 settings.local.json 独立规则编辑器
+  - ~~权限「总是允许」目前为会话级内存记忆 + SDK suggestions 透传,未写入 settings.local.json 独立规则编辑器~~ **已解决(v0.3.0)**:「总是允许」现在把 SDK suggestions 规则串(如 `Bash(npm test:*)`)读-改-写持久化到 `<cwd>/.claude/settings.local.json` 的 `permissions.allow`(JSON 损坏时先备份 .bak 再重建;src/main/perms.js);更多菜单新增「权限规则」入口,可查看 allow/deny/ask 并单条删除。生效语义:当前会话由内存 autoAllowTools + updatedPermissions 立即覆盖,重启后的会话由 SDK 自身读取 settings.local.json 生效
   - 会话重放基于本地 JSONL 事件日志(SDK 自身 transcript 用于 resume)
   - E2E 已验证:SDK init / 回复 / result 费用统计;其余功能待日常使用中回归
 

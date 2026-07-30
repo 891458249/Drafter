@@ -219,6 +219,18 @@
     </div>
   </div>
 
+  <!-- Permission rules modal -->
+  <div id="perms-modal" class="modal-mask hidden">
+    <div class="modal modal-wide">
+      <h2>权限规则</h2>
+      <p class="modal-hint" id="perms-path">当前项目 .claude/settings.local.json 中的规则。「总是允许」会自动写入 allow。</p>
+      <div id="perms-list"></div>
+      <div class="modal-actions">
+        <button id="perms-close" class="btn">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MCP modal -->
   <div id="mcp-modal" class="modal-mask hidden">
     <div class="modal modal-wide">
@@ -292,6 +304,7 @@
     <button data-act="cron">定时任务…</button>
     <button data-act="shortcuts">快捷键 (Ctrl+/)</button>
     <button data-act="switch">打开目录(新项目组)…</button>
+    <button data-act="perms">权限规则…</button>
     <button data-act="logs">打开日志目录</button>
   </div>
 

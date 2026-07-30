@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('api', {
   reportError: (info) => ipcRenderer.send('renderer:error', info),
   openLogs: () => ipcRenderer.invoke('logs:open'),
 
+  // permission rules
+  permsList: (cwd) => ipcRenderer.invoke('perms:list', cwd),
+  permsRemove: (cwd, kind, rule) => ipcRenderer.invoke('perms:remove', { cwd, kind, rule }),
+
   // project groups
   projList: () => ipcRenderer.invoke('proj:list'),
   projRename: (id, name) => ipcRenderer.invoke('proj:rename', { id, name }),

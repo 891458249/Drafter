@@ -327,7 +327,53 @@ $('more-menu').onclick = async (e) => {
     if (res && res.dir) openDirAsProject(res.dir);
   }
   if (act === 'logs') api.openLogs();
+  if (act === 'perms') openPermsModal();
 };
+
+// ---------------------------------------------------------------------------
+// Permission rules modal (view/delete rules in .claude/settings.local.json)
+// ---------------------------------------------------------------------------
+async function openPermsModal() {
+  $('perms-modal').classList.remove('hidden');
+  await renderPermsList();
+}
+async function renderPermsList() {
+  const box = $('perms-list');
+  if (!state.cwd) {
+    $('perms-path').textContent = '尚未进入项目工作区,无法定位 settings.local.json。';
+    box.innerHTML = '';
+    return;
+  }
+  const res = await api.permsList(state.cwd);
+  if (!res || !res.ok) {
+    $('perms-path').textContent = '读取失败:' + ((res && res.error) || '未知错误');
+    box.innerHTML = '';
+    return;
+  }
+  $('perms-path').textContent = res.path + '(不存在时将在首次「总是允许」后自动创建)';
+  const sections = [['allow', '允许 (allow)'], ['deny', '拒绝 (deny)'], ['ask', '询问 (ask)']];
+  let html = '';
+  for (const [kind, label] of sections) {
+    const rules = res[kind] || [];
+    html += `<h3>${label}</h3><div class="mcp-list">`;
+    if (!rules.length) {
+      html += '<div class="mcp-row"><span style="color:var(--text-dim)">(空)</span></div>';
+    }
+    for (const rule of rules) {
+      html += `<div class="mcp-row"><span class="name">${escapeHtml(rule)}</span>` +
+        `<span class="ops"><button class="btn btn-sm" data-kind="${kind}" data-rule="${escapeHtml(rule)}">删除</button></span></div>`;
+    }
+    html += '</div>';
+  }
+  box.innerHTML = html;
+  for (const btn of box.querySelectorAll('button[data-rule]')) {
+    btn.onclick = async () => {
+      await api.permsRemove(state.cwd, btn.dataset.kind, btn.dataset.rule);
+      await renderPermsList();
+    };
+  }
+}
+$('perms-close').onclick = () => $('perms-modal').classList.add('hidden');
 
 // ---------------------------------------------------------------------------
 // API key modal

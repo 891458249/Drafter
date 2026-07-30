@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { Notification } = require('electron');
 const store = require('./store');
 const projects = require('./projects');
+const perms = require('./perms');
 
 // The Agent SDK is ESM-only — load it via dynamic import().
 let sdk = null;
@@ -283,6 +284,15 @@ class Session {
       this.autoAllowTools.add(p.toolName);
       const res = { behavior: 'allow', updatedInput: p.input };
       if (p.suggestions && p.suggestions.length) res.updatedPermissions = p.suggestions;
+      // persist the rule to <cwd>/.claude/settings.local.json so it survives restarts;
+      // the current session stays covered by autoAllowTools + updatedPermissions above
+      try {
+        const rules = perms.rulesFromSuggestions(p.suggestions);
+        const wr = perms.addAllowRules(this.meta.cwd, rules.length ? rules : [p.toolName]);
+        if (!wr.ok) this._emit({ type: 'ui_error', message: '权限规则持久化失败:' + (wr.error || '未知错误') }, true);
+      } catch (e) {
+        this._emit({ type: 'ui_error', message: '权限规则持久化失败:' + e.message }, true);
+      }
       p.resolve(res);
       return true;
     }

@@ -422,7 +422,7 @@ function addPermissionCard(s, ev, replay) {
         ? `<button class="btn btn-sm btn-primary" data-d="allow">批准并开始</button>
            <button class="btn btn-sm" data-d="deny">继续完善计划</button>`
         : `<button class="btn btn-sm btn-primary" data-d="allow">允许一次</button>
-           <button class="btn btn-sm" data-d="always">本会话总是允许</button>
+           <button class="btn btn-sm" data-d="always">总是允许(写入项目规则)</button>
            <button class="btn btn-sm" data-d="deny">拒绝</button>`}
     </div>`;
 
@@ -454,7 +454,7 @@ function resolvePermCard(s, reqId, decision) {
   if (!card) return;
   const actions = card.querySelector('.perm-actions');
   if (actions) {
-    const label = { allow: '✔ 已允许', always: '✔ 已允许(本会话总是)', deny: '✖ 已拒绝', aborted: '已中断' }[decision] || decision;
+    const label = { allow: '✔ 已允许', always: '✔ 已允许(总是,已写入项目规则)', deny: '✖ 已拒绝', aborted: '已中断' }[decision] || decision;
     actions.innerHTML = `<div class="perm-done">${label}</div>`;
   }
 }

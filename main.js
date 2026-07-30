@@ -9,6 +9,7 @@ const mcp = require('./src/main/mcp');
 const scheduler = require('./src/main/scheduler');
 const projects = require('./src/main/projects');
 const logger = require('./src/main/logger');
+const perms = require('./src/main/perms');
 const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
 
@@ -166,6 +167,10 @@ ipcMain.on('renderer:error', (_e, info) => {
 });
 
 ipcMain.handle('logs:open', () => shell.openPath(logger.logsDir()));
+
+// permission rules (<cwd>/.claude/settings.local.json)
+ipcMain.handle('perms:list', (_e, cwd) => perms.listRules(cwd));
+ipcMain.handle('perms:remove', (_e, { cwd, kind, rule }) => perms.removeRule(cwd, kind, rule));
 
 // ---------------------------------------------------------------------------
 // IPC: sessions
