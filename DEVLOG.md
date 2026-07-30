@@ -11,40 +11,40 @@
 
 ### B. 缺口清单(对照 2026-07-24 官方桌面端文档)
 核心交互:
-- [x] B1 权限确认 UI(canUseTool,Allow once/Always/Deny,Edit 显示 diff)
-- [x] B2 中断不销毁会话(interrupt)
-- [x] B3 会话历史与恢复(持久化 + resume)
-- [x] B4 多会话并行(侧边栏,独立上下文)
-- [x] B5 运行中追加消息(streaming input,不打断)
-- [x] B6 Auto 模式 → SDK 无此模式,降级:下拉提供全部 SDK 支持模式(default/acceptEdits/plan/bypassPermissions/dontAsk)
+- [x] (已回归) B1 权限确认 UI(canUseTool,Allow once/Always/Deny,Edit 显示 diff)
+- [x] (未回归) B2 中断不销毁会话(interrupt)
+- [x] (未回归) B3 会话历史与恢复(持久化 + resume)
+- [x] (未回归) B4 多会话并行(侧边栏,独立上下文)
+- [x] (未回归) B5 运行中追加消息(streaming input,不打断)
+- [x] (未回归) B6 Auto 模式 → SDK 无此模式,降级:下拉提供全部 SDK 支持模式(default/acceptEdits/plan/bypassPermissions/dontAsk)
 Git 工作流:
-- [x] B7 Diff 视图(+n -n 指示器,逐文件)
-- [x] B8 Diff 行内评论 → 批量回传给 Claude
-- [x] B9 Review code 按钮
-- [x] B10 PR 监控(gh CLI 轮询 checks,Auto-fix 提示)
-- [x] B11 每会话 Git worktree 隔离(可选开关)+ 归档清理
+- [x] (未回归) B7 Diff 视图(+n -n 指示器,逐文件)
+- [x] (未回归) B8 Diff 行内评论 → 批量回传给 Claude
+- [x] (未回归) B9 Review code 按钮
+- [x] (未回归) B10 PR 监控(gh CLI 轮询 checks,Auto-fix 提示)
+- [x] (未回归) B11 每会话 Git worktree 隔离(可选开关)+ 归档清理
 输入:
-- [x] B12 @文件引用自动补全
-- [x] B13 图片粘贴/拖拽附件(content blocks)
-- [x] B14 斜杠命令列表(内置 + ~/.claude/commands + 项目 .claude/commands)
-- [x] B15 Plan 模式审批面板(ExitPlanMode → 批准/继续计划)
+- [x] (未回归) B12 @文件引用自动补全
+- [x] (未回归) B13 图片粘贴/拖拽附件(content blocks)
+- [x] (未回归) B14 斜杠命令列表(内置 + ~/.claude/commands + 项目 .claude/commands)
+- [x] (未回归) B15 Plan 模式审批面板(ExitPlanMode → 批准/继续计划)
 面板:
-- [x] B16 多面板布局(chat/diff/终端/文件/预览/任务,可显隐+分栏)
-- [x] B17 文件编辑器面板(点路径打开、编辑、保存、外部变更警告)
-- [x] B18 浏览器预览面板(webview,localhost 预览 + 外部站点确认)
-- [x] B19 任务面板(子代理/后台命令,parent_tool_use_id 归组)
-- [x] B20 视图模式 Normal/Verbose/Summary
-- [x] B21 用量显示(context tokens/费用)+ /compact 按钮
-- [x] B22 快捷键体系 + Ctrl+/ 面板
-- [x] B23 多终端标签
+- [x] (未回归) B16 多面板布局(chat/diff/终端/文件/预览/任务,可显隐+分栏)
+- [x] (未回归) B17 文件编辑器面板(点路径打开、编辑、保存、外部变更警告)
+- [x] (未回归) B18 浏览器预览面板(webview,localhost 预览 + 外部站点确认)
+- [x] (未回归) B19 任务面板(子代理/后台命令,parent_tool_use_id 归组)
+- [x] (未回归) B20 视图模式 Normal/Verbose/Summary
+- [x] (未回归) B21 用量显示(context tokens/费用)+ /compact 按钮
+- [x] (未回归) B22 快捷键体系 + Ctrl+/ 面板
+- [x] (未回归) B23 多终端标签
 会话形态:
-- [x] B24 Side chat(forkSession,不污染主线)
-- [x] B25 会话重命名/归档/筛选
+- [x] (未回归) B24 Side chat(forkSession,不污染主线)
+- [x] (未回归) B25 会话重命名/归档/筛选
 系统集成:
-- [x] B26 OS 通知(任务完成且非当前会话)
-- [x] B27 定时任务(简易调度器,cron 到点自动向新会话发 prompt)
-- [x] B28 MCP servers 管理 UI(读写 ~/.claude.json mcpServers)
-- [x] B29 自动更新占位(electron-builder nsis;仅打包配置,不接更新服务器)
+- [x] (未回归) B26 OS 通知(任务完成且非当前会话)
+- [x] (未回归) B27 定时任务(简易调度器,cron 到点自动向新会话发 prompt)
+- [x] (未回归) B28 MCP servers 管理 UI(读写 ~/.claude.json mcpServers)
+- [x] (未回归) B29 自动更新占位(electron-builder nsis;仅打包配置,不接更新服务器)
 
 ### C. 明确不落地(超出本地工具能力,记录原因)
 - 云端会话 / SSH / WSL 会话(依赖 Anthropic 云与远程装配基建)
