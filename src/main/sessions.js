@@ -197,6 +197,14 @@ class Session {
         : (msg.cost && msg.cost.total_cost_usd != null ? msg.cost.total_cost_usd : null);
       if (cost != null) this.cumCostUsd += cost;
       this.lastUsage = msg.usage || null;
+      // 真实上下文窗口大小:result.modelUsage 按模型给出 contextWindow;
+      // usage 字段是整轮多次 API 调用的输入加总,不能当上下文大小用
+      let contextWindow = null;
+      try {
+        const mu = msg.modelUsage || {};
+        const vals = Object.values(mu);
+        if (vals.length) contextWindow = Math.max(...vals.map((v) => v.contextWindow || 0)) || null;
+      } catch {}
       // 累计各模型 token 消耗(用量弹层)
       try {
         if (msg.usage) store.addModelUsage(this.meta.model || this.lastInitModel || 'default', msg.usage, cost || 0);
@@ -210,6 +218,7 @@ class Session {
         total_cost_usd: cost,
         cum_cost_usd: this.cumCostUsd,
         usage: msg.usage || null,
+        contextWindow,
         result: typeof msg.result === 'string' ? msg.result.slice(0, 2000) : undefined,
       };
       this._emit(ev, true);

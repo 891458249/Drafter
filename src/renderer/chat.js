@@ -50,9 +50,10 @@ export function updateTopbarForSession(sid) {
   const m = s.meta;
   if (m.permissionMode) $('perm-mode').value = m.permissionMode;
   $('model-sel').value = m.model || '';
-  emit('session-effort', m.effort || null);
   const composerModel = $('model-sel-composer');
   if (composerModel) composerModel.value = m.model || '';
+  const composerEffort = $('effort-sel-composer');
+  if (composerEffort) composerEffort.value = m.effort || '';
   $('usage-chip').textContent = fmtCost(s.ui.cumCost) +
     (s.ui.lastUsage ? ` · ↑${fmtTokens(ctxTokens(s.ui.lastUsage))}` : '');
   setBusyUI(s.ui.busy);
@@ -550,6 +551,7 @@ export function renderEvent(sid, ev, { replay }) {
     if (ev.cum_cost_usd != null) s.ui.cumCost = ev.cum_cost_usd;
     else if (ev.total_cost_usd != null) s.ui.cumCost += ev.total_cost_usd;
     if (ev.usage) s.ui.lastUsage = ev.usage;
+    if (ev.contextWindow) s.ui.contextWindow = ev.contextWindow;
     const parts = [];
     if (ev.duration_ms != null) parts.push((ev.duration_ms / 1000).toFixed(1) + 's');
     if (ev.num_turns != null) parts.push(ev.num_turns + ' 轮');

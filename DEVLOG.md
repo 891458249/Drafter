@@ -104,3 +104,7 @@ Git 工作流:
 - **自动更新接线(B29 落地)**:引入 electron-updater(本任务明确允许的唯一新依赖),`build.publish` 指向 GitHub Releases(仓库 public,已用 REST API 确认);src/main/updater.js 在 ready 后后台检查,状态经 `update:status` 推送顶栏 chip(检查中/新版本+版本号/下载进度/已就绪点击重启);检查失败一律静默降级;发布流程与私有仓库备选方案见 RELEASE.md
 - **品牌**:`build/icon.ico` 占位图标(node build/make-icon.js 纯 node 生成 256x256 PNG → ICO,深底 #1a1815 + 珊瑚色 CU);NSIS 改为非一键安装、可自选目录、快捷方式「Claude UI」;补齐 copyright/author 等 exe 元信息
 - **首次启动引导卡**:首屏顶部三步卡(配置 API Key → 选项目目录 → 权限模式说明),全部完成或手动关闭后写 `firstRunCompleted` 设置项,之后不再显示;已配置 key 时直接跳过
+
+### v0.4.1(2026-07-31):推理深度会话级化 + 上下文窗口真实值(回归陪跑中发现)
+- **推理深度(Effort)改为会话级设置**:移除顶栏全局滑块与 defaultEffort 设置;输入框工具条新增「推理深度」下拉(默认/低/中/高/Extra/Max,与「本会话模型」并列),仅约束当前会话;新建会话 effort 一律 null(跟随 SDK/模型默认),消除「档位粘性传播」(F-002)
+- **上下文窗口显示修正**:原用 result.usage(整轮 API 调用输入加总)当上下文大小,含工具调用的轮次显示值约为真实值 2 倍;改用 SDK `result.modelUsage[].contextWindow` 真实值,旧事件退化原启发值(F-003)

@@ -1,7 +1,7 @@
 // Sidebar: project groups with sessions nested under each group.
 // Group header: editable name, per-group "+" (new session), file manager
 // (load files/folders with live read-only/editable tags).
-import { api, state, $, escapeHtml, emit, on, currentEffort } from './state.js';
+import { api, state, $, escapeHtml, emit, on } from './state.js';
 import { ensureSession, setActiveSession } from './chat.js';
 
 const attention = new Set();
@@ -169,7 +169,7 @@ function renderSessionItem(p, m) {
   li.querySelector('[data-op="side"]').onclick = async () => {
     const meta = await api.sessCreate({
       cwd: m.cwd, model: m.model, permissionMode: m.permissionMode,
-      effort: m.effort || currentEffort(),
+      effort: m.effort || null, // side chat 继承父会话的推理深度设置
       title: (m.title || '会话') + ' · side', parentId: m.id,
       projectId: m.projectId, forkFrom: m.sdkSessionId || null,
     });
@@ -205,7 +205,7 @@ async function createSessionInProject(p) {
     projectId: p.id,
     model: $('model-sel').value || null,
     permissionMode: $('perm-mode').value,
-    effort: currentEffort(),
+    effort: null, // 推理深度跟随默认,由会话内下拉按需约束
     useWorktree: $('new-worktree').checked,
   });
   ensureSession(meta.id, meta);
@@ -229,7 +229,7 @@ export async function createSession(extra = {}) {
     cwd, projectId,
     model: $('model-sel').value || null,
     permissionMode: $('perm-mode').value,
-    effort: currentEffort(),
+    effort: null, // 推理深度跟随默认,由会话内下拉按需约束
     useWorktree: $('new-worktree').checked,
     ...extra,
   });

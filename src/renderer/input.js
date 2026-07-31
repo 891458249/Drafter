@@ -265,4 +265,13 @@ export function init() {
     $('model-sel').value = model || '';
     emit('session-status', { sid: state.activeSid });
   };
+
+  // 会话级推理深度:仅约束当前会话,空值 = 跟随 SDK/模型默认
+  $('effort-sel-composer').onchange = async () => {
+    if (!state.activeSid) return;
+    const effort = $('effort-sel-composer').value || null;
+    await api.sessSetEffort(state.activeSid, effort);
+    const s = state.sessions.get(state.activeSid);
+    if (s) s.meta.effort = effort;
+  };
 }

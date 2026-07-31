@@ -15,11 +15,6 @@ export const state = {
 
 export const $ = (id) => document.getElementById(id);
 
-// Effort 档位(控制思考深度与 token 消耗): 与 Agent SDK 的 EffortLevel 对应
-export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
-export const EFFORT_NAMES = { low: '低', medium: '中', high: '高', xhigh: 'Extra', max: 'Max' };
-export const currentEffort = () => EFFORT_LEVELS[+($('effort-slider').value || 2)];
-
 export function escapeHtml(s) {
   return (s || '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]

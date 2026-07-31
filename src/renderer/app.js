@@ -1,5 +1,5 @@
 // App entry: landing, project open, topbar, panels, modals, shortcuts, wiring.
-import { api, state, $, escapeHtml, on, emit, EFFORT_LEVELS, EFFORT_NAMES, currentEffort, fmtTokens } from './state.js';
+import { api, state, $, escapeHtml, on, emit, fmtTokens } from './state.js';
 import * as chat from './chat.js';
 import * as sessionsUi from './sessions-ui.js';
 import * as input from './input.js';
@@ -72,7 +72,6 @@ async function initLanding() {
   const store = await api.getStore();
   const recent = store.recentProjects || [];
   renderRecent(recent);
-  initEffort(store.settings || {});
   initOnboarding(store.settings || {});
   const sdk = await api.sdkStatus();
   if (!sdk.ok) {
@@ -173,7 +172,7 @@ async function openDirAsProject(dir) {
       cwd: dir,
       model: $('model-sel').value || null,
       permissionMode: $('perm-mode').value,
-      effort: currentEffort(),
+      effort: null, // 推理深度:默认跟随 SDK/模型,由会话内下拉按需约束
     });
     chat.ensureSession(meta.id, meta);
     chat.setActiveSession(meta.id);
@@ -205,45 +204,6 @@ $('model-sel').onchange = async () => {
 $('view-mode').onchange = () => chat.setViewMode($('view-mode').value);
 
 // ---------------------------------------------------------------------------
-// Effort 滑块(Faster ↔ Smarter):控制思考深度与 token 消耗
-// ---------------------------------------------------------------------------
-function effortUiSet(level) {
-  const idx = Math.max(0, EFFORT_LEVELS.indexOf(level || 'high'));
-  $('effort-slider').value = idx;
-  $('effort-btn-label').textContent = EFFORT_NAMES[EFFORT_LEVELS[idx]];
-  $('effort-pop-level').textContent = EFFORT_NAMES[EFFORT_LEVELS[idx]];
-}
-
-function initEffort(settings) {
-  effortUiSet(settings.defaultEffort || 'high');
-
-  $('btn-effort').onclick = (e) => {
-    e.stopPropagation();
-    $('effort-pop').classList.toggle('hidden');
-  };
-  $('effort-pop').onclick = (e) => e.stopPropagation();
-  document.addEventListener('click', () => $('effort-pop').classList.add('hidden'));
-
-  $('effort-slider').oninput = () => {
-    const level = currentEffort();
-    $('effort-btn-label').textContent = EFFORT_NAMES[level];
-    $('effort-pop-level').textContent = EFFORT_NAMES[level];
-  };
-  $('effort-slider').onchange = async () => {
-    const level = currentEffort();
-    await api.setSetting('defaultEffort', level); // 新会话默认值
-    if (state.activeSid) {
-      await api.sessSetEffort(state.activeSid, level);
-      const s = state.sessions.get(state.activeSid);
-      if (s) s.meta.effort = level;
-    }
-  };
-}
-
-// 切换会话时同步显示该会话的 effort(chat.js 触发)
-on('session-effort', (level) => effortUiSet(level || 'high'));
-
-// ---------------------------------------------------------------------------
 // Token 用量 / 上下文窗口弹层(输入框右下角)
 // ---------------------------------------------------------------------------
 function modelCtxMax(model) { return /haiku/i.test(model || '') ? 200000 : 1000000; }
@@ -261,9 +221,11 @@ function ctxInfo() {
   const s = state.sessions.get(state.activeSid);
   const u = s && s.ui.lastUsage;
   const model = (s && (s.meta.model || s.ui.initModel)) || '';
-  const used = u
+  // 优先用 SDK result.modelUsage 里的真实上下文窗口大小;
+  // 没有时(旧事件)退化为整轮输入 token 加总的启发值(会偏高,仅供参考)
+  const used = (s && s.ui.contextWindow) || (u
     ? (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
-    : 0;
+    : 0);
   const max = modelCtxMax(model);
   return { used, max, pct: Math.min(100, Math.round((used / max) * 100)) };
 }

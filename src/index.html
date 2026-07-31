@@ -84,16 +84,6 @@
             <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
           </select>
         </label>
-        <div class="effort-ctrl">
-          <button id="btn-effort" class="btn btn-sm" title="控制思考深度与 token 消耗(Faster ↔ Smarter)">Effort <b id="effort-btn-label">高</b></button>
-          <div id="effort-pop" class="effort-pop hidden">
-            <div class="effort-pop-head">Effort <b id="effort-pop-level">高</b></div>
-            <div class="effort-scale"><span>Faster</span><span>Smarter</span></div>
-            <input id="effort-slider" type="range" min="0" max="4" step="1" value="2" />
-            <div class="effort-ticks"><span>低</span><span>中</span><span>高</span><span>Extra</span><span>Max</span></div>
-            <div class="effort-hint">档位越低,思考越少、token 消耗越省;对当前会话即时生效,并作为新会话默认值。</div>
-          </div>
-        </div>
         <label class="ctrl">视图
           <select id="view-mode">
             <option value="normal">普通</option>
@@ -142,6 +132,16 @@
                 <option value="claude-opus-4-8">Opus 4.8</option>
                 <option value="claude-sonnet-5">Sonnet 5</option>
                 <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+              </select>
+            </label>
+            <label class="ctrl composer-effort" title="约束本会话的推理深度(档位越低思考越少、token 越省);默认=跟随模型/SDK(高)">推理深度
+              <select id="effort-sel-composer">
+                <option value="">默认</option>
+                <option value="low">低</option>
+                <option value="medium">中</option>
+                <option value="high">高</option>
+                <option value="xhigh">Extra</option>
+                <option value="max">Max</option>
               </select>
             </label>
           </div>
