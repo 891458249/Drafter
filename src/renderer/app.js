@@ -36,6 +36,36 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// Update status chip (topbar) — fed by the main process via 'update:status'
+// ---------------------------------------------------------------------------
+api.on('update:status', (st) => {
+  const chip = $('update-chip');
+  if (!chip) return;
+  if (!st || st.state === 'idle') { chip.classList.add('hidden'); return; }
+  chip.classList.remove('hidden', 'available', 'downloading', 'downloaded');
+  if (st.state === 'checking') {
+    chip.textContent = '检查更新…';
+  } else if (st.state === 'available') {
+    chip.textContent = `发现新版本 v${st.version || ''},下载中…`;
+    chip.classList.add('available');
+  } else if (st.state === 'downloading') {
+    chip.textContent = `下载更新 ${st.percent || 0}%`;
+    chip.classList.add('downloading');
+  } else if (st.state === 'downloaded') {
+    chip.textContent = `v${st.version || ''} 已就绪 · 点击重启`;
+    chip.classList.add('downloaded');
+  } else if (st.state === 'latest') {
+    chip.textContent = '已是最新';
+    setTimeout(() => chip.classList.add('hidden'), 5000);
+  }
+});
+$('update-chip').onclick = () => {
+  const chip = $('update-chip');
+  if (chip.classList.contains('downloaded')) api.updateInstall(); // 重启并安装
+  else api.updateCheck(); // 手动触发一次检查
+};
+
+// ---------------------------------------------------------------------------
 // Landing
 // ---------------------------------------------------------------------------
 async function initLanding() {
@@ -43,6 +73,7 @@ async function initLanding() {
   const recent = store.recentProjects || [];
   renderRecent(recent);
   initEffort(store.settings || {});
+  initOnboarding(store.settings || {});
   const sdk = await api.sdkStatus();
   if (!sdk.ok) {
     const w = $('sdk-warning');
@@ -86,6 +117,40 @@ $('btn-pick').onclick = async () => {
   const res = await api.pickDir();
   if (res && res.dir) openDirAsProject(res.dir);
 };
+
+// ---------------------------------------------------------------------------
+// First-run onboarding card (landing; shows once until completed or dismissed)
+// ---------------------------------------------------------------------------
+const obState = { apikey: false, dir: false, mode: false };
+
+async function initOnboarding(settings) {
+  if (settings && settings.firstRunCompleted) return;
+  const keyInfo = await api.apiKeyGet();
+  if (keyInfo.configured) return; // 已有 key,无需引导
+  $('onboarding').classList.remove('hidden');
+}
+
+function obMark(step) {
+  const el = document.querySelector(`.ob-step[data-step="${step}"]`);
+  if (!el || el.classList.contains('done')) return;
+  el.classList.add('done');
+  el.querySelector('.ob-state').textContent = '✓';
+  obState[step] = true;
+  if (obState.apikey && obState.dir && obState.mode) obFinish();
+}
+
+async function obFinish() {
+  await api.setSetting('firstRunCompleted', true);
+  $('onboarding').classList.add('hidden');
+}
+
+$('ob-close').onclick = obFinish;
+document.querySelector('.ob-step[data-step="apikey"]').onclick = () => openApiKeyModal();
+document.querySelector('.ob-step[data-step="dir"]').onclick = async () => {
+  const res = await api.pickDir();
+  if (res && res.dir) { obMark('dir'); openDirAsProject(res.dir); }
+};
+document.querySelector('.ob-step[data-step="mode"]').onclick = () => obMark('mode');
 
 function enterWorkspace() {
   $('landing').classList.add('hidden');
@@ -394,6 +459,7 @@ $('apikey-cancel').onclick = () => $('apikey-modal').classList.add('hidden');
 $('apikey-save').onclick = async () => {
   const key = $('apikey-input').value.trim();
   await api.apiKeySet(key);
+  if (key) obMark('apikey'); // 引导卡第一步(若在展示中)
   const st = $('apikey-status');
   st.className = 'modal-status ok';
   st.textContent = key ? 'API key 已保存,新会话生效。' : 'API key 已清除。';

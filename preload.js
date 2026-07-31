@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('api', {
   permsList: (cwd) => ipcRenderer.invoke('perms:list', cwd),
   permsRemove: (cwd, kind, rule) => ipcRenderer.invoke('perms:remove', { cwd, kind, rule }),
 
+  // auto-update
+  updateCheck: () => ipcRenderer.invoke('update:check'),
+  updateInstall: () => ipcRenderer.invoke('update:install'),
+
   // project groups
   projList: () => ipcRenderer.invoke('proj:list'),
   projRename: (id, name) => ipcRenderer.invoke('proj:rename', { id, name }),
@@ -84,7 +88,7 @@ contextBridge.exposeInMainWorld('api', {
     const allowed = [
       'sess:event', 'sess:attention', 'cron:fired',
       'term:data', 'term:exit',
-      'file:changed',
+      'file:changed', 'update:status',
     ];
     if (!allowed.includes(channel)) return () => {};
     const listener = (_e, payload) => cb(payload);

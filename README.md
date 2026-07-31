@@ -31,11 +31,12 @@ npm run dist   # electron-builder 打包,输出 dist/(Windows nsis 安装包)
 - **内嵌终端**:node-pty + xterm,多终端标签。
 - **输入增强**:@文件引用自动补全、斜杠命令下拉、图片粘贴/拖拽附件。
 - **面板体系**:chat / diff / 终端 / 文件 / 预览 / 任务多面板显隐分栏;视图模式 Normal/Verbose/Summary;用量显示 + /compact;快捷键体系(Ctrl+/ 面板)。
-- **其他**:定时任务(cron 到点自动向新会话发 prompt)、MCP servers 管理 UI、OS 通知、electron-builder 打包配置(自动更新仅占位)。
+- **其他**:定时任务(cron 到点自动向新会话发 prompt)、MCP servers 管理 UI、OS 通知、electron-builder 打包 + electron-updater 自动更新(发布流程见 RELEASE.md)、首次启动引导卡、权限规则管理。
 
 ## 已知事项
 
 - **终端** 依赖 node-pty 原生模块。安装时若缺少 Visual Studio C++ 工具链,`electron-rebuild` 编译会失败,但 node-pty 自带 win32-x64 预编译二进制,通常仍可用;若终端报错,安装「Visual Studio Build Tools(含 Desktop development with C++)」后运行 `npm run rebuild`。
+- **图标** `build/icon.ico` 是脚本生成的占位图标(深底 + CU 字母,`node build/make-icon.js` 可重新生成),可替换为正式图标后重新 `npm run dist`。
 - 对话等核心功能不依赖任何原生模块,开箱即用。
 
 ## 版本与提交规范

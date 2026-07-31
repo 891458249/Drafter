@@ -10,6 +10,7 @@ const scheduler = require('./src/main/scheduler');
 const projects = require('./src/main/projects');
 const logger = require('./src/main/logger');
 const perms = require('./src/main/perms');
+const updater = require('./src/main/updater');
 const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
 
@@ -87,6 +88,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // auto-update: check GitHub Releases in the background (silent on failure)
+  updater.start(getWindow, store);
   // migration: attach legacy sessions (created before project groups) to projects
   try {
     for (const meta of store.listSessions()) {
@@ -205,6 +208,10 @@ ipcMain.handle('logs:open', () => shell.openPath(logger.logsDir()));
 // permission rules (<cwd>/.claude/settings.local.json)
 ipcMain.handle('perms:list', (_e, cwd) => perms.listRules(cwd));
 ipcMain.handle('perms:remove', (_e, { cwd, kind, rule }) => perms.removeRule(cwd, kind, rule));
+
+// auto-update
+ipcMain.handle('update:check', () => { updater.checkNow(getWindow); return true; });
+ipcMain.handle('update:install', () => { updater.installAndRestart(); return true; });
 
 // ---------------------------------------------------------------------------
 // IPC: sessions

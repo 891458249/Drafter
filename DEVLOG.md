@@ -44,7 +44,7 @@ Git 工作流:
 - [x] (未回归) B26 OS 通知(任务完成且非当前会话)
 - [x] (未回归) B27 定时任务(简易调度器,cron 到点自动向新会话发 prompt)
 - [x] (未回归) B28 MCP servers 管理 UI(读写 ~/.claude.json mcpServers)
-- [x] (未回归) B29 自动更新占位(electron-builder nsis;仅打包配置,不接更新服务器)
+- [x] (未回归) B29 自动更新(electron-builder nsis + electron-updater 接 GitHub Releases,发布流程见 RELEASE.md;v0.4.0 起不再是占位)
 
 ### C. 明确不落地(超出本地工具能力,记录原因)
 - 云端会话 / SSH / WSL 会话(依赖 Anthropic 云与远程装配基建)
@@ -99,3 +99,8 @@ Git 工作流:
 - **根因诊断**:启动日志中 cache_util_win.cc "Unable to move the cache: 拒绝访问 (0x5)" 与 disk_cache/gpu_disk_cache 创建失败,源于 userData 下默认 Chromium 缓存目录(Cache/GPUCache/Code Cache)的状态问题——开发期反复启动/强杀进程导致缓存文件被残留锁占用或所有者不一致,启动时的缓存迁移因此被拒。非代码逻辑 bug。
 - **修法**(main.js,三管齐下):a) `app.commandLine.appendSwitch('disk-cache-dir', userData/cache)` 把磁盘缓存固定到专用子目录,绕开默认目录的历史状态;b) `app.on('gpu-process-crashed')` 落日志(logger.js),并支持设置项 `disableGpu` 关闭硬件加速(默认仍启用);c) `app.requestSingleInstanceLock()` 单实例锁,杜绝多实例争用缓存,第二实例唤起已有窗口。
 - **验证**:修复后 `npm start` 启动 20 秒,stdout/stderr 全程无 cache/gpu/拒绝访问 相关输出,新缓存目录 `userData/cache/Cache_Data` 正常创建使用。
+
+### v0.4.0(2026-07-31):发布体验(自动更新/品牌/首启引导)
+- **自动更新接线(B29 落地)**:引入 electron-updater(本任务明确允许的唯一新依赖),`build.publish` 指向 GitHub Releases(仓库 public,已用 REST API 确认);src/main/updater.js 在 ready 后后台检查,状态经 `update:status` 推送顶栏 chip(检查中/新版本+版本号/下载进度/已就绪点击重启);检查失败一律静默降级;发布流程与私有仓库备选方案见 RELEASE.md
+- **品牌**:`build/icon.ico` 占位图标(node build/make-icon.js 纯 node 生成 256x256 PNG → ICO,深底 #1a1815 + 珊瑚色 CU);NSIS 改为非一键安装、可自选目录、快捷方式「Claude UI」;补齐 copyright/author 等 exe 元信息
+- **首次启动引导卡**:首屏顶部三步卡(配置 API Key → 选项目目录 → 权限模式说明),全部完成或手动关闭后写 `firstRunCompleted` 设置项,之后不再显示;已配置 key 时直接跳过

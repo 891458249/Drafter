@@ -13,6 +13,30 @@
 <body>
   <!-- Landing: pick a project directory -->
   <div id="landing" class="landing">
+    <!-- First-run onboarding card (hidden after completion/dismiss) -->
+    <div id="onboarding" class="onboarding hidden">
+      <div class="ob-head">
+        <span class="ob-title">👋 欢迎使用 Claude UI,三步开始</span>
+        <button id="ob-close" class="ob-close" title="关闭,不再显示">✕</button>
+      </div>
+      <div class="ob-steps">
+        <button class="ob-step" data-step="apikey">
+          <span class="ob-num">1</span>
+          <span class="ob-text"><b>配置 API Key</b><small>填入 Anthropic Key;留空则沿用 claude CLI 登录态</small></span>
+          <span class="ob-state">→</span>
+        </button>
+        <button class="ob-step" data-step="dir">
+          <span class="ob-num">2</span>
+          <span class="ob-text"><b>选择项目目录</b><small>每个目录自动成为一个项目组,会话按组管理</small></span>
+          <span class="ob-state">→</span>
+        </button>
+        <button class="ob-step" data-step="mode">
+          <span class="ob-num">3</span>
+          <span class="ob-text"><b>了解权限模式</b><small>顶栏下拉切换:default 逐项询问;acceptEdits 自动接受编辑;plan 先出计划再执行</small></span>
+          <span class="ob-state">→</span>
+        </button>
+      </div>
+    </div>
     <div class="landing-card">
       <div class="brand">
         <div class="brand-mark">✳</div>
@@ -39,6 +63,7 @@
         <span id="branch-label" class="branch-label"></span>
       </div>
       <div class="topbar-right">
+        <span id="update-chip" class="usage-chip update-chip hidden" title="应用更新状态"></span>
         <span id="usage-chip" class="usage-chip" title="本会话累计用量">$0.0000</span>
         <button id="btn-compact" class="btn btn-sm" title="压缩上下文 (/compact)">压缩</button>
         <label class="ctrl">模式
