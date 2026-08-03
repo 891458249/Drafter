@@ -24,10 +24,10 @@ Git 工作流:
 - [x] (未回归) B10 PR 监控(gh CLI 轮询 checks,Auto-fix 提示)——2026-08-03 环境不具备(无 gh/PR),仅验证优雅降级
 - [x] (已回归) B11 每会话 Git worktree 隔离(可选开关)+ 归档清理
 输入:
-- [x] (未回归) B12 @文件引用自动补全
-- [x] (未回归) B13 图片粘贴/拖拽附件(content blocks)
-- [x] (未回归) B14 斜杠命令列表(内置 + ~/.claude/commands + 项目 .claude/commands)
-- [x] (未回归) B15 Plan 模式审批面板(ExitPlanMode → 批准/继续计划)
+- [x] (已回归) B12 @文件引用自动补全
+- [x] (已回归) B13 图片粘贴/拖拽附件(content blocks)
+- [x] (已回归) B14 斜杠命令列表(内置 + ~/.claude/commands + 项目 .claude/commands)
+- [x] (已回归) B15 Plan 模式审批面板(ExitPlanMode → 批准/继续计划)
 面板:
 - [x] (未回归) B16 多面板布局(chat/diff/终端/文件/预览/任务,可显隐+分栏)
 - [x] (未回归) B17 文件编辑器面板(点路径打开、编辑、保存、外部变更警告)
