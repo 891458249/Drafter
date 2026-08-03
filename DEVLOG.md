@@ -38,13 +38,13 @@ Git 工作流:
 - [x] (已回归) B22 快捷键体系 + Ctrl+/ 面板
 - [x] (回归失败) B23 多终端标签——shell 硬编码 powershell.exe 无回退(F-005)
 会话形态:
-- [x] (未回归) B24 Side chat(forkSession,不污染主线)
-- [x] (未回归) B25 会话重命名/归档/筛选
+- [x] (已回归) B24 Side chat(forkSession,不污染主线)
+- [x] (已回归) B25 会话重命名/归档/筛选
 系统集成:
-- [x] (未回归) B26 OS 通知(任务完成且非当前会话)
-- [x] (未回归) B27 定时任务(简易调度器,cron 到点自动向新会话发 prompt)
-- [x] (未回归) B28 MCP servers 管理 UI(读写 ~/.claude.json mcpServers)
-- [x] (未回归) B29 自动更新(electron-builder nsis + electron-updater 接 GitHub Releases,发布流程见 RELEASE.md;v0.4.0 起不再是占位)
+- [x] (已回归) B26 OS 通知(任务完成且非当前会话)
+- [x] (已回归) B27 定时任务(简易调度器,cron 到点自动向新会话发 prompt)
+- [x] (已回归) B28 MCP servers 管理 UI(读写 ~/.claude.json mcpServers)
+- [x] (已回归) B29 自动更新(electron-builder nsis + electron-updater 接 GitHub Releases,发布流程见 RELEASE.md;v0.4.0 起不再是占位)
 
 ### C. 明确不落地(超出本地工具能力,记录原因)
 - 云端会话 / SSH / WSL 会话(依赖 Anthropic 云与远程装配基建)
