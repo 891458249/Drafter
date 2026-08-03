@@ -29,14 +29,14 @@ Git 工作流:
 - [x] (已回归) B14 斜杠命令列表(内置 + ~/.claude/commands + 项目 .claude/commands)
 - [x] (已回归) B15 Plan 模式审批面板(ExitPlanMode → 批准/继续计划)
 面板:
-- [x] (未回归) B16 多面板布局(chat/diff/终端/文件/预览/任务,可显隐+分栏)
-- [x] (未回归) B17 文件编辑器面板(点路径打开、编辑、保存、外部变更警告)
-- [x] (未回归) B18 浏览器预览面板(webview,localhost 预览 + 外部站点确认)
-- [x] (未回归) B19 任务面板(子代理/后台命令,parent_tool_use_id 归组)
-- [x] (未回归) B20 视图模式 Normal/Verbose/Summary
-- [x] (未回归) B21 用量显示(context tokens/费用)+ /compact 按钮
-- [x] (未回归) B22 快捷键体系 + Ctrl+/ 面板
-- [x] (未回归) B23 多终端标签
+- [x] (已回归) B16 多面板布局(chat/diff/终端/文件/预览/任务,可显隐+分栏)
+- [x] (已回归) B17 文件编辑器面板(点路径打开、编辑、保存、外部变更警告)
+- [x] (已回归) B18 浏览器预览面板(webview,localhost 预览 + 外部站点确认)
+- [x] (已回归) B19 任务面板(子代理/后台命令,parent_tool_use_id 归组)
+- [x] (已回归) B20 视图模式 Normal/Verbose/Summary
+- [x] (已回归) B21 用量显示(context tokens/费用)+ /compact 按钮
+- [x] (已回归) B22 快捷键体系 + Ctrl+/ 面板
+- [x] (回归失败) B23 多终端标签——shell 硬编码 powershell.exe 无回退(F-005)
 会话形态:
 - [x] (未回归) B24 Side chat(forkSession,不污染主线)
 - [x] (未回归) B25 会话重命名/归档/筛选
