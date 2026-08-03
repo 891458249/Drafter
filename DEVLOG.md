@@ -12,11 +12,11 @@
 ### B. 缺口清单(对照 2026-07-24 官方桌面端文档)
 核心交互:
 - [x] (已回归) B1 权限确认 UI(canUseTool,Allow once/Always/Deny,Edit 显示 diff)
-- [x] (未回归) B2 中断不销毁会话(interrupt)
-- [x] (未回归) B3 会话历史与恢复(持久化 + resume)
-- [x] (未回归) B4 多会话并行(侧边栏,独立上下文)
-- [x] (未回归) B5 运行中追加消息(streaming input,不打断)
-- [x] (未回归) B6 Auto 模式 → SDK 无此模式,降级:下拉提供全部 SDK 支持模式(default/acceptEdits/plan/bypassPermissions/dontAsk)
+- [x] (已回归) B2 中断不销毁会话(interrupt)
+- [x] (回归失败) B3 会话历史与恢复(持久化 + resume)——后台会话先收事件后点开时历史不加载(F-004)
+- [x] (已回归) B4 多会话并行(侧边栏,独立上下文)
+- [x] (已回归) B5 运行中追加消息(streaming input,不打断)
+- [x] (已回归) B6 Auto 模式 → SDK 无此模式,降级:下拉提供全部 SDK 支持模式(default/acceptEdits/plan/bypassPermissions/dontAsk)
 Git 工作流:
 - [x] (未回归) B7 Diff 视图(+n -n 指示器,逐文件)
 - [x] (未回归) B8 Diff 行内评论 → 批量回传给 Claude

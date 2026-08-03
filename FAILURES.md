@@ -11,6 +11,14 @@
 - **建议修法**:sessions.js 构建 query options 时显式传 `pathToClaudeCodeExecutable`,路径取 SDK win32-x64 包的 claude.exe 并把 `app.asar` 替换为 `app.asar.unpacked`(仅打包环境生效);修复后重跑 `npm run dist` 验证安装版能发起会话。
 - **状态**:**已修复(v0.4.2,2026-08-03)**:sessions.js 新增 `resolveClaudeExe()`,多布局兜底(hoisted/嵌套/resourcesPath)解析 claude.exe 并把 `app.asar` 替换为 `app.asar.unpacked`,显式传给 `options.pathToClaudeCodeExecutable`;test/sessions-bin.test.js 覆盖解析有效性;dist 重打包验证见 DEVLOG v0.4.2 记录。
 
+## F-004 后台会话历史重放被永久跳过【高 · 未修】
+
+- **发现**:2026-08-03,B3 自动化回归:应用重启后,未被 landing 恢复的会话(REG-B1)收到新事件,点击切换后只见新事件,重启前全部历史不渲染。
+- **根因**:`src/renderer/chat.js` handleSessEvent 第 488 行——`if (!s.ui.replayed) s.ui.replayed = true`,live 事件到达即把"已重放"置真(意图是防重复渲染);之后 setActiveSession 的 `if (!s.ui.replayed) replayHistory(sid)` 永远不再触发,历史永久隐身。影响场景:cron 触发的会话、通知后点开的后台会话、任何"先收事件后点开"的会话。
+- **验证旁证**:landing 恢复的最近会话(REG-B4)重放完整 ✓;重启后 SDK resume 上下文保留(模型记得 edit-me.txt)✓ —— 仅渲染层历史加载被跳过。
+- **建议修法**:live 事件到达且未重放时,先触发 replayHistory 再渲染(需处理"刚持久化的事件同时出现在 JSONL 里"的去重);非一行级改动,需要专门设计。
+- **状态**:未修
+
 ## F-002 Effort 档位「粘性传播」+ 无跟随默认选项,token 消耗体感异常【中 · 未修】
 
 - **发现**:2026-07-31,所有者反馈 token 消耗疑似异常,怀疑 Effort(推理深度)模块有 bug。
