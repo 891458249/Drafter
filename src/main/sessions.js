@@ -5,6 +5,8 @@
 //  - surface permission requests to the renderer via canUseTool (B1)
 //  - resume persisted sessions (B3) and fork side chats (B24)
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { Notification } = require('electron');
 const store = require('./store');
 const projects = require('./projects');
@@ -13,6 +15,32 @@ const perms = require('./perms');
 // The Agent SDK is ESM-only — load it via dynamic import().
 let sdk = null;
 let sdkError = null;
+
+// Resolve the SDK's bundled claude.exe explicitly. In a packaged app the SDK
+// computes a path inside app.asar: fs.exists passes (Electron redirects reads
+// to app.asar.unpacked) but the OS cannot spawn a binary out of an archive —
+// the real file is under app.asar.unpacked. The win32-x64 package is hoisted
+// in dev and nested under the SDK package in the asar, so try all layouts.
+function resolveClaudeExe() {
+  const BIN = ['@anthropic-ai', 'claude-agent-sdk-win32-x64', 'claude.exe'];
+  const candidates = [];
+  try { candidates.push(require.resolve(BIN.join('/'))); } catch {} // hoisted(开发态)
+  try { // 嵌套在 SDK 包下(打包态实际布局)
+    const sdkEntry = require.resolve('@anthropic-ai/claude-agent-sdk');
+    candidates.push(path.join(path.dirname(sdkEntry), 'node_modules', ...BIN));
+  } catch {}
+  try { // Electron resources 兜底
+    if (process.resourcesPath) {
+      candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked',
+        'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'node_modules', ...BIN));
+    }
+  } catch {}
+  for (const c of candidates) {
+    const unpacked = path.normalize(c).replace(/app\.asar(?!\.unpacked)/, 'app.asar.unpacked');
+    if (fs.existsSync(unpacked)) return unpacked;
+  }
+  return null; // 找不到就让 SDK 自行解析(开发态默认可用)
+}
 let sdkPromise = null;
 function loadSdk() {
   if (sdk) return Promise.resolve(true);
@@ -95,6 +123,8 @@ class Session {
     };
     if (this.meta.model) options.model = this.meta.model;
     if (this.meta.effort) options.effort = this.meta.effort;
+    const exe = resolveClaudeExe();
+    if (exe) options.pathToClaudeCodeExecutable = exe; // 打包态指向 app.asar.unpacked(F-001)
     if (resume && this.meta.sdkSessionId) {
       options.resume = this.meta.sdkSessionId;
       if (fork) options.forkSession = true;
@@ -486,4 +516,4 @@ function safeJson(obj) {
   try { return JSON.parse(JSON.stringify(obj)); } catch { return String(obj); }
 }
 
-module.exports = { SessionManager };
+module.exports = { SessionManager, resolveClaudeExe };

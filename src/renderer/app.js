@@ -265,10 +265,13 @@ async function renderUsagePop() {
       const tokOut = v.output || 0;
       const real = v.cost || 0;
       const cost = real > 0 ? real : estCost(m, v);
+      const cachePart = (v.cacheRead || v.cacheWrite)
+        ? `(读${fmtTokens(v.cacheRead || 0)}/写${fmtTokens(v.cacheWrite || 0)})`
+        : '';
       totalIn += tokIn; totalOut += tokOut; totalCost += cost;
       rows += `<div class="usage-row">
         <span class="um">${escapeHtml(shortModelName(m))}</span>
-        <span class="ut">↑${fmtTokens(tokIn)} ↓${fmtTokens(tokOut)}</span>
+        <span class="ut">↑${fmtTokens(tokIn)}${cachePart} ↓${fmtTokens(tokOut)}</span>
         <span class="uc">${real > 0 ? '' : '≈'}${fmtMoney(cost)}</span>
       </div>`;
     }
@@ -286,9 +289,9 @@ async function renderUsagePop() {
       <div class="usage-bar"><div class="usage-bar-fill" style="width:${pct}%"></div></div>
     </div>
     <div class="usage-sec">
-      <div class="usage-row head"><span>各模型累计 token 消耗</span><span>↑输入 ↓输出 · 折合金额</span></div>
+      <div class="usage-row head"><span>各模型累计 token 消耗</span><span>↑输入(缓存读/写) ↓输出 · 折合金额</span></div>
       ${rows || '<div class="usage-row"><span class="um">(暂无记录,完成一轮对话后开始统计)</span></div>'}
-      ${rows ? '<div class="usage-note">带 ≈ 为按官方单价折算(API 未返回实际费用时)</div>' : ''}
+      ${rows ? '<div class="usage-note">缓存读≈0.1×输入价、缓存写≈1.25×输入价;带 ≈ 为按官方单价折算(API 未返回实际费用时)</div>' : ''}
     </div>`;
 }
 

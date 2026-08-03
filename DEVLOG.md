@@ -108,3 +108,7 @@ Git 工作流:
 ### v0.4.1(2026-07-31):推理深度会话级化 + 上下文窗口真实值(回归陪跑中发现)
 - **推理深度(Effort)改为会话级设置**:移除顶栏全局滑块与 defaultEffort 设置;输入框工具条新增「推理深度」下拉(默认/低/中/高/Extra/Max,与「本会话模型」并列),仅约束当前会话;新建会话 effort 一律 null(跟随 SDK/模型默认),消除「档位粘性传播」(F-002)
 - **上下文窗口显示修正**:原用 result.usage(整轮 API 调用输入加总)当上下文大小,含工具调用的轮次显示值约为真实值 2 倍;改用 SDK `result.modelUsage[].contextWindow` 真实值,旧事件退化原启发值(F-003)
+
+### v0.4.2(2026-08-03):安装包 asar 会话修复 + 用量缓存细分
+- **F-001 修复(安装包会话不可用)**:根因为 SDK 内部把 claude.exe 解析到 app.asar 归档内路径,OS 无法 spawn;sessions.js 新增 `resolveClaudeExe()` 显式解析真实二进制位置并替换为 app.asar.unpacked(hoisted/嵌套/resourcesPath 三层兜底,win32-x64 包无 exports 限制可直接解析),传入 `options.pathToClaudeCodeExecutable`。test/sessions-bin.test.js 断言解析结果存在且不在 asar 内
+- **用量弹层缓存细分**:各模型输入拆出(缓存读/写),附 0.1×/1.25× 计价说明——用于观察 prompt caching 写读比(实测缓存工作正常:全价输入≈0,写 84%/读 16% 为慢节奏测试模式的正常形态)

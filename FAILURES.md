@@ -9,7 +9,7 @@
 - **根因**:SDK 原生二进制经 electron-builder asarUnpack 解包到了 `app.asar.unpacked`,但 SDK 内部解析的 `pathToClaudeCodeExecutable` 仍是 `app.asar` 内路径;`fs.exists` 被 Electron 重定向所以检查通过,但 OS 无法从 asar 归档内 spawn 可执行文件。开发版(npm start)无此问题。
 - **影响**:v0.4.0 安装包的核心会话功能完全不可用,**阻断 GitHub Release 发布**。
 - **建议修法**:sessions.js 构建 query options 时显式传 `pathToClaudeCodeExecutable`,路径取 SDK win32-x64 包的 claude.exe 并把 `app.asar` 替换为 `app.asar.unpacked`(仅打包环境生效);修复后重跑 `npm run dist` 验证安装版能发起会话。
-- **状态**:未修(待所有者确认后处理)
+- **状态**:**已修复(v0.4.2,2026-08-03)**:sessions.js 新增 `resolveClaudeExe()`,多布局兜底(hoisted/嵌套/resourcesPath)解析 claude.exe 并把 `app.asar` 替换为 `app.asar.unpacked`,显式传给 `options.pathToClaudeCodeExecutable`;test/sessions-bin.test.js 覆盖解析有效性;dist 重打包验证见 DEVLOG v0.4.2 记录。
 
 ## F-002 Effort 档位「粘性传播」+ 无跟随默认选项,token 消耗体感异常【中 · 未修】
 
