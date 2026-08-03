@@ -18,11 +18,11 @@
 - [x] (已回归) B5 运行中追加消息(streaming input,不打断)
 - [x] (已回归) B6 Auto 模式 → SDK 无此模式,降级:下拉提供全部 SDK 支持模式(default/acceptEdits/plan/bypassPermissions/dontAsk)
 Git 工作流:
-- [x] (未回归) B7 Diff 视图(+n -n 指示器,逐文件)
-- [x] (未回归) B8 Diff 行内评论 → 批量回传给 Claude
-- [x] (未回归) B9 Review code 按钮
-- [x] (未回归) B10 PR 监控(gh CLI 轮询 checks,Auto-fix 提示)
-- [x] (未回归) B11 每会话 Git worktree 隔离(可选开关)+ 归档清理
+- [x] (已回归) B7 Diff 视图(+n -n 指示器,逐文件)
+- [x] (已回归) B8 Diff 行内评论 → 批量回传给 Claude
+- [x] (已回归) B9 Review code 按钮
+- [x] (未回归) B10 PR 监控(gh CLI 轮询 checks,Auto-fix 提示)——2026-08-03 环境不具备(无 gh/PR),仅验证优雅降级
+- [x] (已回归) B11 每会话 Git worktree 隔离(可选开关)+ 归档清理
 输入:
 - [x] (未回归) B12 @文件引用自动补全
 - [x] (未回归) B13 图片粘贴/拖拽附件(content blocks)
