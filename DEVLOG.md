@@ -13,7 +13,7 @@
 核心交互:
 - [x] (已回归) B1 权限确认 UI(canUseTool,Allow once/Always/Deny,Edit 显示 diff)
 - [x] (已回归) B2 中断不销毁会话(interrupt)
-- [x] (回归失败) B3 会话历史与恢复(持久化 + resume)——后台会话先收事件后点开时历史不加载(F-004)
+- [x] (已回归) B3 会话历史与恢复(持久化 + resume)——初测失败(F-004),v0.4.9 修复后复测通过
 - [x] (已回归) B4 多会话并行(侧边栏,独立上下文)
 - [x] (已回归) B5 运行中追加消息(streaming input,不打断)
 - [x] (已回归) B6 Auto 模式 → SDK 无此模式,降级:下拉提供全部 SDK 支持模式(default/acceptEdits/plan/bypassPermissions/dontAsk)
@@ -36,7 +36,7 @@ Git 工作流:
 - [x] (已回归) B20 视图模式 Normal/Verbose/Summary
 - [x] (已回归) B21 用量显示(context tokens/费用)+ /compact 按钮
 - [x] (已回归) B22 快捷键体系 + Ctrl+/ 面板
-- [x] (回归失败) B23 多终端标签——shell 硬编码 powershell.exe 无回退(F-005)
+- [x] (已回归) B23 多终端标签——初测失败(F-005 shell 硬编码),v0.4.9 修复后复测通过
 会话形态:
 - [x] (已回归) B24 Side chat(forkSession,不污染主线)
 - [x] (已回归) B25 会话重命名/归档/筛选
@@ -112,3 +112,7 @@ Git 工作流:
 ### v0.4.2(2026-08-03):安装包 asar 会话修复 + 用量缓存细分
 - **F-001 修复(安装包会话不可用)**:根因为 SDK 内部把 claude.exe 解析到 app.asar 归档内路径,OS 无法 spawn;sessions.js 新增 `resolveClaudeExe()` 显式解析真实二进制位置并替换为 app.asar.unpacked(hoisted/嵌套/resourcesPath 三层兜底,win32-x64 包无 exports 限制可直接解析),传入 `options.pathToClaudeCodeExecutable`。test/sessions-bin.test.js 断言解析结果存在且不在 asar 内
 - **用量弹层缓存细分**:各模型输入拆出(缓存读/写),附 0.1×/1.25× 计价说明——用于观察 prompt caching 写读比(实测缓存工作正常:全价输入≈0,写 84%/读 16% 为慢节奏测试模式的正常形态)
+
+### v0.4.9(2026-08-03):回归修复(F-004 历史重放 / F-005 终端 shell 回退)
+- **F-004**:chat.js handleSessEvent 不再把 live 事件到达标记为"已重放";首个 live 事件先触发 replayHistory,live 事件缓冲,历史渲染后按 eventKey 去重补渲染。B3 复测通过
+- **F-005**:terminal.js Windows shell 回退链 powershell.exe → cmd.exe,报错含 shell 名。B23 复测通过(cmd.exe 回退建标签、多标签/关闭/双 pty 独立均正常)

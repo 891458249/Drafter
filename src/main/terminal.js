@@ -22,13 +22,30 @@ class TermManager {
   open({ cwd, cols = 80, rows = 24, command }) {
     if (!pty) return { ok: false, error: 'node-pty 不可用,终端无法启动' };
     const id = 't' + this.nextId++;
-    const shell = process.platform === 'win32' ? 'powershell.exe' : (process.env.SHELL || 'bash');
+    // Windows shell 回退链:powershell.exe 可能不在 PATH(企业受限机),F-005
+    const shells = process.platform === 'win32'
+      ? ['powershell.exe', 'cmd.exe']
+      : [process.env.SHELL || 'bash'];
+    let term = null;
+    let lastErr = null;
+    let usedShell = null;
+    for (const shell of shells) {
+      try {
+        term = pty.spawn(shell, [], {
+          name: 'xterm-color', cols, rows,
+          cwd: cwd || os.homedir(),
+          env: this.buildEnv(),
+        });
+        usedShell = shell;
+        break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (!term) {
+      return { ok: false, error: `终端 shell 启动失败(${shells.join(' / ')}):${lastErr && lastErr.message}` };
+    }
     try {
-      const term = pty.spawn(shell, [], {
-        name: 'xterm-color', cols, rows,
-        cwd: cwd || os.homedir(),
-        env: this.buildEnv(),
-      });
       if (command) term.write(command + '\r');
       term.onData((data) => this._send('term:data', { id, data }));
       term.onExit(({ exitCode }) => {
@@ -36,7 +53,7 @@ class TermManager {
         this.terms.delete(id);
       });
       this.terms.set(id, { term, cwd });
-      return { ok: true, id };
+      return { ok: true, id, shell: usedShell };
     } catch (e) {
       return { ok: false, error: e.message };
     }

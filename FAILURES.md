@@ -17,15 +17,15 @@
 - **根因**:`src/renderer/chat.js` handleSessEvent 第 488 行——`if (!s.ui.replayed) s.ui.replayed = true`,live 事件到达即把"已重放"置真(意图是防重复渲染);之后 setActiveSession 的 `if (!s.ui.replayed) replayHistory(sid)` 永远不再触发,历史永久隐身。影响场景:cron 触发的会话、通知后点开的后台会话、任何"先收事件后点开"的会话。
 - **验证旁证**:landing 恢复的最近会话(REG-B4)重放完整 ✓;重启后 SDK resume 上下文保留(模型记得 edit-me.txt)✓ —— 仅渲染层历史加载被跳过。
 - **建议修法**:live 事件到达且未重放时,先触发 replayHistory 再渲染(需处理"刚持久化的事件同时出现在 JSONL 里"的去重);非一行级改动,需要专门设计。
-- **状态**:未修
+- **状态**:**已修复(v0.4.9,2026-08-03)**:handleSessEvent 不再把 live 事件到达当作"已重放";首个 live 事件先触发 replayHistory,live 事件进缓冲区,历史渲染后按 eventKey(JSON 序列化)去重补渲染。B3 复测通过:重启后非恢复会话先收事件,点开后 TURN1 历史完整可见、TURN2 无重复渲染。
 
-## F-005 终端无法启动:Windows shell 硬编码 powershell.exe 无回退【中 · 未修】
+## F-005 终端无法启动:Windows shell 硬编码 powershell.exe 无回退【中 · 已修】
 
 - **发现**:2026-08-03,B23 自动化回归:点「＋终端」无标签创建,api.termOpen 返回 `{ok:false, error:"File not found: "}`。
 - **根因**:`src/main/terminal.js` 在 win32 固定 `pty.spawn('powershell.exe', …)`;本机 PATH 无 powershell.exe(企业受限机,Git Bash 亦 not found,需全路径 `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`)。实测:`cmd.exe` 在 conpty 与 winpty 后端下均正常 spawn —— 即 node-pty 与二进制完好,仅 shell 路径写死且无回退。
 - **影响**:无 powershell.exe 的 Windows 机器上内嵌终端完全不可用(B23);有 powershell 的机器不受影响。
 - **建议修法**:spawn 失败时回退链 `powershell.exe → cmd.exe`(或启动前 which 探测);报错文案带上 shell 名。
-- **状态**:未修
+- **状态**:**已修复(v0.4.9,2026-08-03)**:terminal.js 实现 shell 回退链(powershell.exe → cmd.exe),报错文案含 shell 名与全部候选。B23 复测通过:＋终端正常建标签(经 cmd.exe 回退)、多标签切换/关闭正常、双 pty 输出独立。
 
 ## F-002 Effort 档位「粘性传播」+ 无跟随默认选项,token 消耗体感异常【中 · 未修】
 

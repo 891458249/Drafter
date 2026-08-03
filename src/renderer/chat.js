@@ -97,6 +97,7 @@ async function replayHistory(sid) {
   if (!s || s.ui.replayed) return;
   s.ui.replayed = true;
   const events = await api.sessHistory(sid);
+  s.ui.historyKeys = new Set(events.map(eventKey)); // F-004 去重:供 live 事件比对
   for (const ev of events) renderEvent(sid, ev, { replay: true });
   finalizeAssistant(s);
   scrollBottom(sid);
@@ -477,6 +478,12 @@ function renderEditDiff(input) {
   return rows.join('');
 }
 
+// Dedupe key: persisted-then-emitted events serialize identically, so an exact
+// JSON match reliably identifies "already rendered from history".
+function eventKey(ev) {
+  try { return JSON.stringify(ev); } catch { return String(ev); }
+}
+
 // --- main event entry ---------------------------------------------------------
 export function handleSessEvent({ sid, ev }) {
   if (!sid) { // global error
@@ -484,8 +491,35 @@ export function handleSessEvent({ sid, ev }) {
     return;
   }
   const s = ensureSession(sid);
-  // live events only render if history already replayed (avoid duplication)
-  if (!s.ui.replayed) s.ui.replayed = true;
+  if (!s.ui.replayed) {
+    // F-004: live event before history replay — do NOT mark replayed (that used
+    // to suppress history forever). Load history first, buffer live events,
+    // then flush only those not already rendered from history.
+    if (!s.ui.replayPromise) {
+      s.ui.liveBuffer = [ev];
+      s.ui.replayPromise = replayHistory(sid).then(() => {
+        const buf = s.ui.liveBuffer || [];
+        s.ui.liveBuffer = null;
+        const seen = s.ui.historyKeys || new Set();
+        for (const e of buf) {
+          const k = eventKey(e);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          renderEvent(sid, e, { replay: false });
+        }
+      }).catch(() => {
+        // history load failed: fall back to rendering live events directly
+        const buf = s.ui.liveBuffer || [];
+        s.ui.liveBuffer = null;
+        for (const e of buf) renderEvent(sid, e, { replay: false });
+      });
+    } else if (s.ui.liveBuffer) {
+      s.ui.liveBuffer.push(ev);
+    } else {
+      renderEvent(sid, ev, { replay: false });
+    }
+    return;
+  }
   renderEvent(sid, ev, { replay: false });
 }
 
