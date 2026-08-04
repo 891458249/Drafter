@@ -2,6 +2,11 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const os = require('os');
 
+// 允许通过环境变量覆盖 userData(便携模式/并行实例/隔离测试)
+if (process.env.CLAUDE_UI_USERDATA) {
+  app.setPath('userData', process.env.CLAUDE_UI_USERDATA);
+}
+
 const store = require('./src/main/store');
 const git = require('./src/main/git');
 const files = require('./src/main/files');
@@ -174,6 +179,7 @@ ipcMain.handle('proj:addDir', (_e, { id, dir }) => projects.addDir(id, dir));
 ipcMain.handle('proj:addFiles', (_e, { id, paths, tag }) => projects.addFiles(id, paths, tag));
 ipcMain.handle('proj:setTag', (_e, { id, path: fp, tag }) => projects.setTag(id, fp, tag));
 ipcMain.handle('proj:removeFile', (_e, { id, path: fp }) => projects.removeFile(id, fp));
+ipcMain.handle('proj:prune', () => projects.pruneMissing());
 ipcMain.handle('proj:memory', (_e, id) => {
   const p = projects.get(id);
   return p ? { path: projects.memoryPath(p), content: projects.readMemory(p) } : null;

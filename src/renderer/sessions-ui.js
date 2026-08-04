@@ -275,6 +275,17 @@ export function init() {
   $('btn-new-session').onclick = () => createSession();
   $('session-filter').oninput = refreshList;
   $('show-archived').onchange = refreshList;
+  $('btn-proj-refresh').onclick = async () => {
+    const r = await api.projPrune();
+    refreshList();
+    if (r && (r.groups.length || r.dirs || r.files)) {
+      const parts = [];
+      if (r.groups.length) parts.push(`移除空项目组:${r.groups.join('、')}`);
+      if (r.dirs) parts.push(`${r.dirs} 个失效目录`);
+      if (r.files) parts.push(`${r.files} 个失效文件`);
+      alert('刷新完成,已清理 ' + parts.join(';'));
+    }
+  };
 
   api.on('sess:attention', ({ sid }) => {
     if (sid !== state.activeSid) { attention.add(sid); refreshList(); }

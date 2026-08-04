@@ -95,6 +95,34 @@ function removeFile(id, filePath) {
 
 function remove(id) { store.deleteProject(id); }
 
+// Sync project registry with disk reality (手动「刷新」按钮):
+// - 主目录之外、磁盘上已不存在的登记目录/文件 → 移除登记
+// - 主目录已不存在且组内无任何会话 → 移除整个项目组
+// Returns { groups: [name], dirs: n, files: n } 供界面反馈
+function pruneMissing() {
+  const sessions = store.listSessions();
+  const byPid = new Map();
+  for (const s of sessions) byPid.set(s.projectId, (byPid.get(s.projectId) || 0) + 1);
+  const result = { groups: [], dirs: 0, files: 0 };
+  for (const p of store.listProjects()) {
+    const dirs = (p.dirs || []).filter((d, i) => i === 0 || fs.existsSync(d));
+    result.dirs += (p.dirs || []).length - dirs.length;
+    const files = (p.files || []).filter((f) => fs.existsSync(f.path));
+    result.files += (p.files || []).length - files.length;
+    const primaryGone = !dirs.length || !fs.existsSync(dirs[0]);
+    const sessCount = byPid.get(p.id) || 0;
+    if (primaryGone && sessCount === 0) {
+      store.deleteProject(p.id);
+      result.groups.push(p.name || p.id);
+      continue;
+    }
+    if (dirs.length !== (p.dirs || []).length || files.length !== (p.files || []).length) {
+      store.upsertProject({ id: p.id, dirs, files });
+    }
+  }
+  return result;
+}
+
 // --- read-only enforcement (consulted LIVE on every tool call) ---
 function isReadonly(projectId, filePath) {
   const p = get(projectId);
@@ -157,6 +185,6 @@ function contextFor(projectId, cwd) {
 
 module.exports = {
   list, get, findByDir, findContaining, ensureForDir,
-  rename, addDir, addFiles, setTag, removeFile, remove,
+  rename, addDir, addFiles, setTag, removeFile, remove, pruneMissing,
   isReadonly, memoryPath, readMemory, ensureMemoryFile, contextFor,
 };

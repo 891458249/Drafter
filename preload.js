@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('api', {
   projAddFiles: (id, paths, tag) => ipcRenderer.invoke('proj:addFiles', { id, paths, tag }),
   projSetTag: (id, path, tag) => ipcRenderer.invoke('proj:setTag', { id, path, tag }),
   projRemoveFile: (id, path) => ipcRenderer.invoke('proj:removeFile', { id, path }),
+  projPrune: () => ipcRenderer.invoke('proj:prune'),
   projMemory: (id) => ipcRenderer.invoke('proj:memory', id),
 
   // api key
