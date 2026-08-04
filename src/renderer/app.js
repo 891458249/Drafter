@@ -597,7 +597,7 @@ api.on('sess:event', (payload) => chat.handleSessEvent(payload));
 on('session-activated', async (sid) => {
   const s = state.sessions.get(sid);
   if (!s) return;
-  if (s.meta.projectId) state.projectId = s.meta.projectId;
+  state.projectId = s.meta.projectId || null; // 独立会话不继承上个会话的项目
   const cwd = s.meta.cwd;
   const cwdChanged = cwd && cwd !== state.cwd;
   if (cwdChanged) {
@@ -605,13 +605,6 @@ on('session-activated', async (sid) => {
     state.filesCache = null;
     state.commandsCache = null;
   }
-  let projName = '';
-  try {
-    const projs = await api.projList();
-    const p = projs.find((x) => x.id === s.meta.projectId);
-    if (p) projName = p.name;
-  } catch {}
-  $('cwd-label').textContent = (projName ? projName + ' · ' : '') + (cwd || '');
   const b = await api.gitBranch(cwd);
   $('branch-label').textContent = b.branch ? ' ' + b.branch : '';
   if (cwdChanged) diff.refreshDiff();

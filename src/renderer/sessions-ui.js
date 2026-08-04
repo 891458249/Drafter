@@ -85,6 +85,26 @@ export async function refreshList() {
     for (const m of sessions) sessUl.appendChild(renderSessionItem(p, m));
     ul.appendChild(li);
   }
+
+  // --- 独立会话区(不属于任何项目组;chat 板块会话只在 chat 模式显示) ---
+  const standalone = (byProject.get('_none') || [])
+    .filter((m) => m.standalone && m.kind !== 'chat')
+    .filter((m) => showArchived ? true : !m.archived)
+    .filter((m) => !filter || (m.title || '').toLowerCase().includes(filter))
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  if (standalone.length) {
+    const li = document.createElement('li');
+    li.className = 'proj-group standalone-group';
+    li.innerHTML = `
+      <div class="proj-head">
+        <span class="proj-name">独立会话</span>
+        <span class="proj-count">${standalone.length}</span>
+      </div>
+      <ul class="proj-sessions"></ul>`;
+    const sessUl = li.querySelector('.proj-sessions');
+    for (const m of standalone) sessUl.appendChild(renderSessionItem(null, m));
+    ul.appendChild(li);
+  }
 }
 
 function renderProjectFiles(box, p) {
@@ -172,6 +192,7 @@ function renderSessionItem(p, m) {
       effort: m.effort || null, // side chat 继承父会话的推理深度设置
       title: (m.title || '会话') + ' · side', parentId: m.id,
       projectId: m.projectId, forkFrom: m.sdkSessionId || null,
+      standalone: m.standalone || undefined, kind: m.kind || undefined, // 独立/chat 会话的 side 不进项目组
     });
     ensureSession(meta.id, meta);
     setActiveSession(meta.id);
@@ -214,23 +235,16 @@ async function createSessionInProject(p) {
   return meta;
 }
 
-// New session in the currently active project; if none, pick a directory
-// (auto-creates a project group for a path never used before).
+// New session: standalone by default (v0.5.0) — lives outside project groups
+// with the home directory as cwd unless a specific folder is given.
+// Project sessions are created via the group's own ＋ button or the landing
+// "选择项目目录" flow.
 export async function createSession(extra = {}) {
-  let cwd = state.cwd;
-  let projectId = state.projectId || null;
-  if (!cwd) {
-    const res = await api.pickDir();
-    if (!res || !res.dir) return null;
-    cwd = res.dir;
-    projectId = null; // main process resolves/auto-creates the group
-  }
   const meta = await api.sessCreate({
-    cwd, projectId,
+    standalone: true,
     model: $('model-sel').value || null,
     permissionMode: $('perm-mode').value,
     effort: null, // 推理深度跟随默认,由会话内下拉按需约束
-    useWorktree: $('new-worktree').checked,
     ...extra,
   });
   ensureSession(meta.id, meta);

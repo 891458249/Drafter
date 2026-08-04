@@ -436,7 +436,7 @@ class SessionManager {
     });
   }
 
-  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, projectId, effort }) {
+  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, projectId, effort, standalone, kind }) {
     const id = 's_' + crypto.randomUUID().slice(0, 12);
     const meta = {
       id, cwd, model: model || null,
@@ -446,6 +446,8 @@ class SessionManager {
       worktreePath: worktreePath || null,
       projectId: projectId || null,
       sdkSessionId: forkFrom || null, archived: false,
+      standalone: !!standalone, // 独立会话:不属于任何项目组(v0.5.0 起新会话默认)
+      kind: kind || null, // 'chat' = chat 板块会话(v0.6.0)
     };
     store.upsertSession(meta);
     const s = new Session(this, meta);

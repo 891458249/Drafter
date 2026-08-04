@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
+const os = require('os');
 
 const store = require('./src/main/store');
 const git = require('./src/main/git');
@@ -91,9 +92,10 @@ app.whenReady().then(() => {
   // auto-update: check GitHub Releases in the background (silent on failure)
   updater.start(getWindow, store);
   // migration: attach legacy sessions (created before project groups) to projects
+  // (standalone/chat sessions are intentionally project-less — never migrate them)
   try {
     for (const meta of store.listSessions()) {
-      if (meta.projectId || !meta.cwd) continue;
+      if (meta.projectId || !meta.cwd || meta.standalone || meta.kind === 'chat') continue;
       const baseDir = meta.worktreePath
         ? path.dirname(path.dirname(meta.worktreePath))
         : meta.cwd;
@@ -219,8 +221,11 @@ ipcMain.handle('update:install', () => { updater.installAndRestart(); return tru
 ipcMain.handle('sess:sdkStatus', () => sessions.sdkAvailable());
 ipcMain.handle('sess:list', () => sessions.list());
 ipcMain.handle('sess:create', async (_e, opts) => {
-  // resolve the project group: explicit id, or auto-create for a new path
-  if (!opts.projectId && opts.cwd) {
+  if (opts.standalone || opts.kind === 'chat') {
+    // 独立会话 / chat 板块会话:不指定目录时用主目录,绝不自动建项目组
+    opts = { ...opts, cwd: opts.cwd || os.homedir(), projectId: null };
+  } else if (!opts.projectId && opts.cwd) {
+    // resolve the project group: explicit id, or auto-create for a new path
     opts = { ...opts, projectId: projects.ensureForDir(opts.cwd).id };
   }
   // optional per-session worktree isolation

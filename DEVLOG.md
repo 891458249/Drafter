@@ -116,3 +116,8 @@ Git 工作流:
 ### v0.4.9(2026-08-03):回归修复(F-004 历史重放 / F-005 终端 shell 回退)
 - **F-004**:chat.js handleSessEvent 不再把 live 事件到达标记为"已重放";首个 live 事件先触发 replayHistory,live 事件缓冲,历史渲染后按 eventKey 去重补渲染。B3 复测通过
 - **F-005**:terminal.js Windows shell 回退链 powershell.exe → cmd.exe,报错含 shell 名。B23 复测通过(cmd.exe 回退建标签、多标签/关闭/双 pty 独立均正常)
+
+### v0.5.0(2026-08-04):去除全局目录 + 新会话默认独立
+- **去除全局目录**:顶栏不再显示「项目名 · cwd」路径(cwd-label 移除),顶栏左侧只留侧边栏开关与 git 分支
+- **新会话默认独立**:「＋新会话」不再强制选目录/建项目组,默认创建**独立会话**(cwd=用户主目录,projectId=null,meta.standalone=true);侧边栏新增「独立会话」区收纳;独立会话的 side chat 继承 standalone 不会被自动建组;项目迁移逻辑跳过 standalone/chat 会话
+- 项目组会话仍通过组内 ＋ 或落地页「选择项目目录」创建(行为不变)
