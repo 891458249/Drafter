@@ -597,6 +597,9 @@ api.on('sess:event', (payload) => chat.handleSessEvent(payload));
 on('session-activated', async (sid) => {
   const s = state.sessions.get(sid);
   if (!s) return;
+  // 板块跟随会话类型:chat 会话激活时自动切到 chat 板块(反之亦然)
+  const kind = (s.meta.kind === 'chat') ? 'chat' : 'code';
+  if (state.section !== kind) setSection(kind, { skipSessionPick: true });
   state.projectId = s.meta.projectId || null; // 独立会话不继承上个会话的项目
   const cwd = s.meta.cwd;
   const cwdChanged = cwd && cwd !== state.cwd;
@@ -609,6 +612,40 @@ on('session-activated', async (sid) => {
   $('branch-label').textContent = b.branch ? ' ' + b.branch : '';
   if (cwdChanged) diff.refreshDiff();
 });
+
+// ---------------------------------------------------------------------------
+// 板块切换:Code(面向项目的完整工作区)vs Chat(纯对话 AI,不服务项目)
+// ---------------------------------------------------------------------------
+function setSection(sec, { skipSessionPick } = {}) {
+  if (state.section === sec) return;
+  state.section = sec;
+  document.body.classList.toggle('sec-chat', sec === 'chat');
+  for (const b of document.querySelectorAll('#section-switch button')) {
+    b.classList.toggle('active', b.dataset.sec === sec);
+  }
+  $('sidebar-head-label').textContent = sec === 'chat' ? '会话' : '项目 / 会话';
+  if (sec === 'chat') $('right-panel').classList.add('hidden'); // chat 板块无项目面板
+  sessionsUi.refreshList();
+  if (!skipSessionPick) {
+    // 当前会话不属于该板块时,切到该板块最近的会话
+    const cur = state.sessions.get(state.activeSid);
+    const curKind = (cur && cur.meta.kind === 'chat') ? 'chat' : 'code';
+    if (curKind !== sec) {
+      api.sessList().then((list) => {
+        const latest = list
+          .filter((m) => !m.archived && ((m.kind === 'chat') === (sec === 'chat')))
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+        if (latest) {
+          chat.ensureSession(latest.id, latest);
+          chat.setActiveSession(latest.id);
+        }
+      });
+    }
+  }
+}
+for (const b of document.querySelectorAll('#section-switch button')) {
+  b.onclick = () => setSection(b.dataset.sec);
+}
 
 // open the project group's shared memory file in the editor panel
 on('open-project-memory', async (pid) => {

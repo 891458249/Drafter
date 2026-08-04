@@ -59,7 +59,11 @@
       <div class="topbar-left">
         <button id="btn-sidebar" class="icon-btn" title="会话列表 (Ctrl+B)">☰</button>
         <span class="dot"></span>
-        <span id="branch-label" class="branch-label"></span>
+        <div id="section-switch" class="section-switch">
+          <button data-sec="code" class="active" title="Code 板块:面向项目的完整工作区">Code</button>
+          <button data-sec="chat" title="Chat 板块:纯对话 AI,不服务项目">Chat</button>
+        </div>
+        <span id="branch-label" class="branch-label code-only"></span>
       </div>
       <div class="topbar-right">
         <span id="update-chip" class="usage-chip update-chip hidden" title="应用更新状态"></span>
@@ -90,7 +94,7 @@
             <option value="summary">摘要</option>
           </select>
         </label>
-        <button id="btn-panel" class="btn btn-sm" title="右侧面板 (Ctrl+J)">面板</button>
+        <button id="btn-panel" class="btn btn-sm code-only" title="右侧面板 (Ctrl+J)">面板</button>
         <button id="btn-more" class="btn btn-sm">⋯</button>
       </div>
     </header>
@@ -99,9 +103,9 @@
       <!-- Sidebar: sessions -->
       <aside id="sidebar" class="sidebar">
         <div class="sidebar-head">
-          <span>项目 / 会话</span>
+          <span id="sidebar-head-label">项目 / 会话</span>
           <div class="sidebar-actions">
-            <label class="wt-toggle" title="新会话在独立 git worktree 中运行">
+            <label class="wt-toggle code-only" title="新会话在独立 git worktree 中运行">
               <input type="checkbox" id="new-worktree" /> worktree
             </label>
             <button id="btn-new-session" class="btn btn-sm btn-primary">＋ 新会话</button>
@@ -123,7 +127,7 @@
           <div id="folder-chips" class="folder-chips hidden"></div>
           <div class="composer-toolbar">
             <button id="btn-add-attach" class="btn btn-sm" title="添加附件(图片或文本文件,随下一条消息发送)">＋附件</button>
-            <button id="btn-add-folder" class="btn btn-sm" title="为当前项目添加文件夹(常驻共享)">＋文件夹</button>
+            <button id="btn-add-folder" class="btn btn-sm code-only" title="为当前项目添加文件夹(常驻共享)">＋文件夹</button>
             <label class="ctrl composer-model">本会话模型
               <select id="model-sel-composer">
                 <option value="">默认</option>

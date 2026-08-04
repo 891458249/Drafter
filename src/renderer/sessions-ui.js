@@ -22,6 +22,23 @@ export async function refreshList() {
     byProject.get(pid).push(m);
   }
 
+  // --- chat 板块:纯对话会话平铺列表(无项目组、无独立会话) ---
+  if (state.section === 'chat') {
+    const chats = (byProject.get('_none') || [])
+      .filter((m) => m.kind === 'chat')
+      .filter((m) => showArchived ? true : !m.archived)
+      .filter((m) => !filter || (m.title || '').toLowerCase().includes(filter))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const li = document.createElement('li');
+    li.className = 'proj-group';
+    const sessUl = document.createElement('ul');
+    sessUl.className = 'proj-sessions';
+    for (const m of chats) sessUl.appendChild(renderSessionItem(null, m));
+    li.appendChild(sessUl);
+    ul.appendChild(li);
+    return;
+  }
+
   const projs = [...projList];
   // sort project groups by their most recent session activity
   projs.sort((a, b) => {
@@ -242,6 +259,7 @@ async function createSessionInProject(p) {
 export async function createSession(extra = {}) {
   const meta = await api.sessCreate({
     standalone: true,
+    kind: state.section === 'chat' ? 'chat' : undefined, // chat 板块的新会话打 chat 标记
     model: $('model-sel').value || null,
     permissionMode: $('perm-mode').value,
     effort: null, // 推理深度跟随默认,由会话内下拉按需约束

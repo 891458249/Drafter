@@ -3,7 +3,8 @@ export const api = window.api;
 
 export const state = {
   cwd: null,
-  projectId: null,       // active project group
+  projectId: null,
+  section: 'code', // 'code' = 项目工作区;'chat' = 纯对话板块(v0.6.0)       // active project group
   activeSid: null,
   sessions: new Map(),   // sid -> { meta, ui }
   viewMode: 'normal',
