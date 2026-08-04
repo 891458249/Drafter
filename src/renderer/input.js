@@ -1,6 +1,6 @@
 // Composer: send, @file autocomplete, slash commands, image attachments,
 // append-while-running.
-import { api, state, $, escapeHtml, emit } from './state.js';
+import { api, state, $, escapeHtml, emit, on } from './state.js';
 import { addUserMessage, setBusyUI } from './chat.js';
 
 const inputEl = () => $('input');
@@ -20,11 +20,22 @@ export async function sendMessage() {
 
   let content;
   if (state.attachments.length) {
-    content = [];
-    for (const att of state.attachments) {
-      content.push({ type: 'image', source: { type: 'base64', media_type: att.mediaType, data: att.data } });
+    const images = state.attachments.filter((a) => a.kind !== 'file');
+    const files = state.attachments.filter((a) => a.kind === 'file');
+    // 文本附件内联进消息文本(图片仍走原生 content block)
+    let fullText = text || '';
+    for (const f of files) {
+      fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}">\n${f.text}\n</附件>`;
     }
-    if (text) content.push({ type: 'text', text });
+    if (images.length) {
+      content = [];
+      for (const att of images) {
+        content.push({ type: 'image', source: { type: 'base64', media_type: att.mediaType, data: att.data } });
+      }
+      if (fullText) content.push({ type: 'text', text: fullText });
+    } else {
+      content = fullText;
+    }
   } else {
     content = text;
   }
@@ -45,14 +56,32 @@ export async function sendMessage() {
 }
 
 // --- attachments ----------------------------------------------------------------
+// 附件两种形态:图片(content block 原生视觉)与文本文件(内联进消息文本)。
+// 附件随下一条消息发送后清空;文件夹是项目级常驻共享,走另一条通道。
+const FILE_ATTACH_LIMIT = 50 * 1024; // 文本附件截断阈值
+const TEXT_EXTS = new Set(('md,txt,js,mjs,cjs,ts,jsx,tsx,json,py,css,html,htm,sh,bash,ps1,bat,cmd,'
+  + 'yml,yaml,toml,ini,cfg,conf,log,csv,xml,svg,c,h,cpp,hpp,java,go,rs,rb,php,vue,sql,'
+  + 'gitignore,env,example,lock,diff,patch').split(','));
+
+function looksTextual(content) {
+  if (content.includes('\uFFFD') || content.includes('\0')) return false;
+  const sample = content.slice(0, 2000);
+  const controls = (sample.match(/[\x00-\x08\x0e-\x1f]/g) || []).length;
+  return controls < sample.length * 0.02;
+}
+
 function renderAttachments() {
   const box = $('attachments');
   box.innerHTML = '';
   box.classList.toggle('hidden', state.attachments.length === 0);
   state.attachments.forEach((att, i) => {
     const d = document.createElement('div');
-    d.className = 'attach-item';
-    d.innerHTML = `<img src="data:${att.mediaType};base64,${att.data}" alt="" /><button class="rm">✕</button>`;
+    d.className = 'attach-item' + (att.kind === 'file' ? ' attach-file' : '');
+    if (att.kind === 'file') {
+      d.innerHTML = `<span class="af-icon">📄</span><span class="af-name" title="${escapeHtml(att.name)}">${escapeHtml(att.name)}</span><button class="rm">✕</button>`;
+    } else {
+      d.innerHTML = `<img src="data:${att.mediaType};base64,${att.data}" alt="" /><button class="rm">✕</button>`;
+    }
     d.querySelector('.rm').onclick = () => { state.attachments.splice(i, 1); renderAttachments(); };
     box.appendChild(d);
   });
@@ -63,15 +92,54 @@ function clearAttachments() {
   renderAttachments();
 }
 
+// 项目文件夹常驻 chips(输入框上方):当前会话所属项目组共享的目录
+async function renderFolderChips() {
+  const box = $('folder-chips');
+  if (!box) return;
+  const s = state.sessions.get(state.activeSid);
+  const pid = (s && s.meta.projectId) || null;
+  if (!pid) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  try {
+    const projs = await api.projList();
+    const p = projs.find((x) => x.id === pid);
+    const dirs = (p && p.dirs) || [];
+    if (!dirs.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.innerHTML = dirs.map((d) =>
+      `<span class="folder-chip" title="${escapeHtml(d)}">📂 ${escapeHtml(d.split(/[\\/]/).filter(Boolean).pop() || d)}</span>`
+    ).join('');
+    box.classList.remove('hidden');
+  } catch { box.classList.add('hidden'); }
+}
+
 function addImageFile(file) {
-  if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) return;
+  if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) return addAnyFile(file);
   const reader = new FileReader();
   reader.onload = () => {
     const data = String(reader.result).split(',')[1];
-    state.attachments.push({ mediaType: file.type, data, name: file.name });
+    state.attachments.push({ kind: 'image', mediaType: file.type, data, name: file.name });
     renderAttachments();
   };
   reader.readAsDataURL(file);
+}
+
+// 粘贴/拖拽/＋附件 的统一入口:图片走 base64,文本文件读内容,二进制拒收
+function addAnyFile(file) {
+  if (/^image\/(png|jpeg|gif|webp)$/.test(file.type)) return addImageFile(file);
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const reader = new FileReader();
+  reader.onload = () => {
+    let text = String(reader.result);
+    if (!TEXT_EXTS.has(ext) && !looksTextual(text)) {
+      alert(`不支持的二进制文件:${file.name}(附件仅支持图片与文本类文件)`);
+      return;
+    }
+    if (text.length > FILE_ATTACH_LIMIT) {
+      text = text.slice(0, FILE_ATTACH_LIMIT) + `\n… (已截断,原 ${text.length} 字符)`;
+    }
+    state.attachments.push({ kind: 'file', name: file.name, text });
+    renderAttachments();
+  };
+  reader.readAsText(file);
 }
 
 // --- autocomplete ----------------------------------------------------------------
@@ -194,9 +262,13 @@ export function init() {
   document.addEventListener('drop', (e) => {
     e.preventDefault();
     if (e.dataTransfer && e.dataTransfer.files) {
-      for (const f of e.dataTransfer.files) addImageFile(f);
+      for (const f of e.dataTransfer.files) addAnyFile(f); // 拖拽:图片与文本文件均可
     }
   });
+
+  // --- 项目文件夹常驻显示(输入框上方):表示当前项目共享了哪些目录 ---
+  on('session-activated', renderFolderChips);
+  on('project-files-changed', renderFolderChips);
 
   $('btn-send').onclick = sendMessage;
   $('btn-stop').onclick = async () => {
@@ -208,26 +280,32 @@ export function init() {
     await api.sessSend(state.activeSid, '/compact');
   };
 
-  // --- composer toolbar: add file / folder / image, per-session model ---
-  $('btn-add-file').onclick = async () => {
+  // --- composer toolbar: attachments / folder / per-session model & effort ---
+  $('btn-add-attach').onclick = async () => {
     if (!state.activeSid) return;
     const paths = await api.pickFiles({});
-    if (!paths.length) return;
-    const s = state.sessions.get(state.activeSid);
-    const pid = (s && s.meta.projectId) || state.projectId;
-    const images = paths.filter((p) => /\.(png|jpe?g|gif|webp)$/i.test(p));
-    const others = paths.filter((p) => !/\.(png|jpe?g|gif|webp)$/i.test(p));
-    for (const img of images) {
-      const r = await api.fileReadImage(img);
-      if (r.ok) state.attachments.push({ mediaType: r.mediaType, data: r.data, name: r.name });
+    for (const p of paths) {
+      const name = p.split(/[\\/]/).pop();
+      if (/\.(png|jpe?g|gif|webp)$/i.test(p)) {
+        const r = await api.fileReadImage(p);
+        if (r.ok) state.attachments.push({ kind: 'image', mediaType: r.mediaType, data: r.data, name: r.name });
+        else alert(r.error);
+      } else {
+        const r = await api.fileRead({ cwd: state.cwd, path: p });
+        if (!r.ok) { alert(r.error); continue; }
+        let text = r.content;
+        const ext = (name.split('.').pop() || '').toLowerCase();
+        if (!TEXT_EXTS.has(ext) && !looksTextual(text)) {
+          alert(`不支持的二进制文件:${name}(附件仅支持图片与文本类文件)`);
+          continue;
+        }
+        if (text.length > FILE_ATTACH_LIMIT) {
+          text = text.slice(0, FILE_ATTACH_LIMIT) + `\n… (已截断,原 ${r.content.length} 字符)`;
+        }
+        state.attachments.push({ kind: 'file', name, text });
+      }
     }
-    if (images.length) renderAttachments();
-    if (others.length) {
-      if (pid) await api.projAddFiles(pid, others, 'editable'); // register with editable tag
-      el.value += (el.value && !el.value.endsWith(' ') ? ' ' : '') + others.map((p) => '@' + p).join(' ') + ' ';
-      el.dispatchEvent(new Event('input'));
-      emit('project-files-changed', pid);
-    }
+    if (paths.length) renderAttachments();
     el.focus();
   };
 
@@ -242,17 +320,7 @@ export function init() {
     await api.sessSend(state.activeSid, '/add-dir ' + res.dir);
     addUserMessage(state.activeSid, '/add-dir ' + res.dir);
     emit('project-files-changed', pid);
-    el.focus();
-  };
-
-  $('btn-add-image').onclick = async () => {
-    const paths = await api.pickFiles({ imagesOnly: true });
-    for (const p of paths) {
-      const r = await api.fileReadImage(p);
-      if (r.ok) state.attachments.push({ mediaType: r.mediaType, data: r.data, name: r.name });
-      else alert(r.error);
-    }
-    if (paths.length) renderAttachments();
+    renderFolderChips();
     el.focus();
   };
 
