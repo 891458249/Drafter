@@ -413,6 +413,18 @@ async function openApiKeyModal() {
   $('apikey-status').textContent = '';
   $('apikey-modal').classList.remove('hidden');
   await renderKeysList();
+  // v0.8.1:弹窗打开时对命中余额映射的活跃 Key 自动查一次(失败仅行内提示,不打断)
+  const { list, activeId } = await api.keysList();
+  const active = list.find((k) => k.id === activeId);
+  if (active && active.canBalance) {
+    const r = await api.keysQueryBalance(active.id);
+    if (r.ok) {
+      await renderKeysList();
+    } else {
+      const row = document.querySelector(`[data-quota="${active.id}"] .quota-usage`);
+      if (row) row.textContent = '自动查询余额失败:' + (r.error || '未知错误') + ' · ' + row.textContent;
+    }
+  }
 }
 
 async function renderKeysList() {
@@ -436,15 +448,19 @@ async function renderKeysList() {
       <span class="scope">${escapeHtml(k.keyHint)}${k.baseUrl ? ' · ' + escapeHtml(k.baseUrl) : ''} · ${k.kind === 'authToken' ? 'Token' : 'Key'}${k.models && k.models.length ? ' · ' + k.models.length + ' 模型' : ''}${k.modelsEnabled ? '(已勾选 ' + k.modelsEnabled.length + ')' : ''}</span>
       <span class="ops">
         ${k.models && k.models.length ? `<button class="btn btn-sm" data-op="models" data-id="${k.id}">模型勾选</button>` : ''}
+        ${k.canBalance ? `<button class="btn btn-sm" data-op="balance" data-id="${k.id}" title="按 Base URL 自动查询余额">查余额</button>` : ''}
+        ${k.usageUrl ? `<button class="btn btn-sm" data-op="usage" data-id="${k.id}" data-url="${escapeHtml(k.usageUrl)}" title="在浏览器打开用量页">打开用量页</button>` : ''}
         <button class="btn btn-sm" data-op="refresh" data-id="${k.id}" title="按此 Key 拉取模型列表">刷新模型</button>
         <button class="btn btn-sm" data-op="del" data-id="${k.id}">删除</button>
       </span>
     </div>
     <div class="key-quota" data-quota="${k.id}">
-      <span class="quota-usage">${usageText(k.usage, k.quotaWeek, '本周')} · ${usageText(k.usage, k.quotaMonth, '本月')}</span>
+      <span class="quota-usage">${k.balanceCache ? escapeHtml(k.balanceCache.text) + ' · ' : ''}${usageText(k.usage, k.quotaWeek, '本周')} · ${usageText(k.usage, k.quotaMonth, '本月')}</span>
+      <input class="input-sm u-url" data-id="${k.id}" value="${escapeHtml(k.usageUrl || '')}" placeholder="用量查询网址" title="用量查询网页地址(https://…)" />
       <input class="input-sm q-week" data-id="${k.id}" value="${k.quotaWeek || ''}" placeholder="周额度($)" title="每周一 0 点重置,0/留空 = 不限" />
       <input class="input-sm q-month" data-id="${k.id}" value="${k.quotaMonth || ''}" placeholder="月额度($)" title="每月 1 号 0 点重置,0/留空 = 不限" />
       <button class="btn btn-sm q-save" data-id="${k.id}">存</button>
+      ${k.usageUrl ? '<span class="quota-hint">可不设额度,直接网页查用量</span>' : ''}
     </div>
     ${k.models && k.models.length ? `<div class="key-models hidden" data-models="${k.id}"></div>` : ''}`).join('');
   for (const r of box.querySelectorAll('input[name="active-key"]')) {
@@ -473,6 +489,20 @@ async function renderKeysList() {
         } else {
           panel.classList.add('hidden');
         }
+      } else if (b.dataset.op === 'balance') {
+        b.disabled = true;
+        b.textContent = '查询中…';
+        const r = await api.keysQueryBalance(b.dataset.id);
+        b.disabled = false;
+        b.textContent = '查余额';
+        if (r.ok) {
+          await renderKeysList();
+        } else {
+          const row = box.querySelector(`[data-quota="${b.dataset.id}"] .quota-usage`);
+          if (row) row.textContent = '余额查询失败:' + (r.error || '未知错误');
+        }
+      } else if (b.dataset.op === 'usage') {
+        api.openExternal(b.dataset.url);
       } else {
         await api.keysDelete(b.dataset.id);
         await populateModelSelects();
@@ -485,7 +515,14 @@ async function renderKeysList() {
       const id = b.dataset.id;
       const w = box.querySelector(`.q-week[data-id="${id}"]`).value.trim();
       const m = box.querySelector(`.q-month[data-id="${id}"]`).value.trim();
-      await api.keysSave({ id, quotaWeek: w, quotaMonth: m });
+      const u = box.querySelector(`.u-url[data-id="${id}"]`).value.trim();
+      const r = await api.keysSave({ id, quotaWeek: w, quotaMonth: m, usageUrl: u });
+      if (!r.ok) {
+        const st = $('apikey-status');
+        st.className = 'modal-status err';
+        st.textContent = r.error || '保存失败';
+        return;
+      }
       await renderKeysList();
     };
   }
@@ -529,6 +566,7 @@ $('apikey-save').onclick = async () => {
     key: $('key-secret').value.trim(),
     baseUrl: $('key-baseurl').value.trim(),
     kind: $('key-kind').value || undefined,
+    usageUrl: $('key-usageurl').value.trim(),
   };
   const st = $('apikey-status');
   const r = await api.keysSave(entry);

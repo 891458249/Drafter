@@ -210,6 +210,7 @@ ipcMain.handle('keys:setActive', (_e, id) => keys.setActive(id));
 ipcMain.handle('keys:refreshModels', (_e, id) => keys.refreshModels(id));
 ipcMain.handle('keys:activeModels', () => keys.activeModels());
 ipcMain.handle('keys:setModelsEnabled', (_e, { id, enabled }) => keys.setModelsEnabled(id, enabled));
+ipcMain.handle('keys:queryBalance', (_e, id) => keys.queryBalance(id)); // v0.8.1 自动余额查询
 
 ipcMain.handle('shell:openExternal', (_e, url) => {
   if (/^https?:\/\//.test(url)) shell.openExternal(url);

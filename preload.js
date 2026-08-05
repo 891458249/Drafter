@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('api', {
   keysRefreshModels: (id) => ipcRenderer.invoke('keys:refreshModels', id),
   keysActiveModels: () => ipcRenderer.invoke('keys:activeModels'),
   keysSetModelsEnabled: (id, enabled) => ipcRenderer.invoke('keys:setModelsEnabled', { id, enabled }),
+  keysQueryBalance: (id) => ipcRenderer.invoke('keys:queryBalance', id),
 
   // sessions
   sdkStatus: () => ipcRenderer.invoke('sess:sdkStatus'),

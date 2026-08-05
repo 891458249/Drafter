@@ -771,7 +771,9 @@ body.sec-chat .code-only { display: none !important; }
   border-bottom: 1px solid var(--border); flex-wrap: wrap;
 }
 .key-quota .input-sm { width: 90px; }
+.key-quota .input-sm.u-url { width: 200px; }
 .key-quota .quota-usage { margin-right: auto; }
+.key-quota .quota-hint { width: 100%; color: var(--text-dim); }
 .key-models { border-bottom: 1px solid var(--border); padding: 8px 10px; }
 .km-ops { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
 .km-list { max-height: 180px; overflow-y: auto; columns: 2; }
