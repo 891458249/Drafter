@@ -56,3 +56,24 @@ test('modelUsage: 同模型用量累加', () => {
   assert.strictEqual(usage.output, 12);
   assert.ok(Math.abs(usage.cost - 0.003) < 1e-9);
 });
+
+test('keyUsage: 周/月桶累加与周期锚点正确', () => {
+  store.addKeyUsage('k1', 1.5, { input_tokens: 100, output_tokens: 10 });
+  store.addKeyUsage('k1', 2.5, { input_tokens: 50, output_tokens: 5 });
+  const u = store.getKeyUsage('k1');
+  const now = Date.now();
+  assert.strictEqual(u.weekStart, store.weekStartOf(now));
+  assert.strictEqual(u.monthStart, store.monthStartOf(now));
+  assert.ok(Math.abs(u.weekCost - 4) < 1e-9);
+  assert.ok(Math.abs(u.monthCost - 4) < 1e-9);
+  assert.strictEqual(u.weekInput, 150);
+  assert.strictEqual(u.monthOutput, 15);
+  // 周期锚点:本周一 0 点、本月 1 号 0 点(本地)
+  const ws = new Date(store.weekStartOf(now));
+  assert.strictEqual(ws.getDay() === 0 ? 7 : ws.getDay(), 1, '周锚点必须是周一');
+  assert.strictEqual(ws.getHours() + ws.getMinutes() + ws.getSeconds(), 0);
+  const ms = new Date(store.monthStartOf(now));
+  assert.strictEqual(ms.getDate(), 1, '月锚点必须是 1 号');
+  // 未知 key 返回 null
+  assert.strictEqual(store.getKeyUsage('nope'), null);
+});

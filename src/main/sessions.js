@@ -238,6 +238,7 @@ class Session {
       // 累计各模型 token 消耗(用量弹层)
       try {
         if (msg.usage) store.addModelUsage(this.meta.model || this.lastInitModel || 'default', msg.usage, cost || 0);
+        if (msg.usage || cost != null) store.addKeyUsage(this.meta.keyId, cost || 0, msg.usage || {}); // 按 key 归账(v0.8.0)
       } catch {}
       const ev = {
         type: 'result',
@@ -436,7 +437,7 @@ class SessionManager {
     });
   }
 
-  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, projectId, effort, standalone, kind }) {
+  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, projectId, effort, standalone, kind, keyId }) {
     const id = 's_' + crypto.randomUUID().slice(0, 12);
     const meta = {
       id, cwd, model: model || null,
@@ -448,6 +449,7 @@ class SessionManager {
       sdkSessionId: forkFrom || null, archived: false,
       standalone: !!standalone, // 独立会话:不属于任何项目组(v0.5.0 起新会话默认)
       kind: kind || null, // 'chat' = chat 板块会话(v0.6.0)
+      keyId: keyId || null, // 创建时活跃的 API key(额度归账,v0.8.0)
     };
     store.upsertSession(meta);
     const s = new Session(this, meta);

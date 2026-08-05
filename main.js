@@ -209,6 +209,7 @@ ipcMain.handle('keys:delete', (_e, id) => keys.remove(id));
 ipcMain.handle('keys:setActive', (_e, id) => keys.setActive(id));
 ipcMain.handle('keys:refreshModels', (_e, id) => keys.refreshModels(id));
 ipcMain.handle('keys:activeModels', () => keys.activeModels());
+ipcMain.handle('keys:setModelsEnabled', (_e, { id, enabled }) => keys.setModelsEnabled(id, enabled));
 
 ipcMain.handle('shell:openExternal', (_e, url) => {
   if (/^https?:\/\//.test(url)) shell.openExternal(url);
@@ -256,6 +257,8 @@ ipcMain.handle('sess:create', async (_e, opts) => {
     if (wt.ok) { opts = { ...opts, worktreePath: wt.dir, cwd: wt.dir, title: opts.title }; }
     else sessions.send('sess:event', { sid: null, ev: { type: 'ui_error', message: 'worktree 创建失败:' + wt.error } });
   }
+  // 记录创建时活跃的 key,用于按 key 归账额度(v0.8.0)
+  if (!opts.keyId) opts = { ...opts, keyId: (keys.activeKey() || {}).id || null };
   return sessions.create(opts);
 });
 ipcMain.handle('sess:send', (_e, { sid, content }) => {

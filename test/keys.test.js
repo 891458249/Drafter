@@ -69,3 +69,21 @@ test('refreshModels: 按 key 拉取并缓存模型列表(mock fetch)', async () 
     global.fetch = origFetch;
   }
 });
+
+test('额度字段保存 + 模型勾选白名单优先', () => {
+  const kuro = keys.list().find((k) => k.name === '库洛');
+  // 额度保存不影响 key 本体
+  const r = keys.save({ id: kuro.id, quotaWeek: '50', quotaMonth: '200' });
+  assert.strictEqual(r.ok, true);
+  const after = keys.list().find((k) => k.id === kuro.id);
+  assert.strictEqual(after.quotaWeek, 50);
+  assert.strictEqual(after.quotaMonth, 200);
+  assert.ok(after.keyHint.endsWith('9999'), 'key 本体不应被额度保存破坏');
+  // 勾选白名单优先于全量缓存
+  assert.deepStrictEqual(keys.activeModels(), ['claude-fable-5', 'claude-haiku-4-5']);
+  keys.setModelsEnabled(kuro.id, ['claude-fable-5']);
+  assert.deepStrictEqual(keys.activeModels(), ['claude-fable-5']);
+  // 恢复全量
+  keys.setModelsEnabled(kuro.id, null);
+  assert.deepStrictEqual(keys.activeModels(), ['claude-fable-5', 'claude-haiku-4-5']);
+});

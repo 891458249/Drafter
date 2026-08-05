@@ -31,7 +31,9 @@ function listRaw() {
 
 const sanitize = ({ key, ...rest }) => ({ ...rest, keyHint: key ? '…' + key.slice(-4) : '' });
 
-function list() { return listRaw().map(sanitize); }
+function list() {
+  return listRaw().map((k) => ({ ...sanitize(k), usage: store.getKeyUsage(k.id) }));
+}
 
 function activeKey() {
   ensureMigrated();
@@ -60,6 +62,9 @@ function save(entry) {
     kind: entry.kind || prev.kind || guessKind(entry.key || prev.key),
     models: prev.models || [],
     modelsAt: prev.modelsAt || 0,
+    modelsEnabled: entry.modelsEnabled !== undefined ? entry.modelsEnabled : (prev.modelsEnabled ?? null), // null = 全部显示
+    quotaWeek: entry.quotaWeek !== undefined ? (Number(entry.quotaWeek) || 0) : (prev.quotaWeek || 0), // 0 = 不限
+    quotaMonth: entry.quotaMonth !== undefined ? (Number(entry.quotaMonth) || 0) : (prev.quotaMonth || 0),
   };
   if (!next.key) return { ok: false, error: 'Key 不能为空' };
   if (i >= 0) list[i] = next; else list.push(next);
@@ -119,10 +124,22 @@ async function refreshModels(id) {
   return { ok: true, models: r.models };
 }
 
-// 当前活跃 key 的可用模型(优先缓存;无缓存则 null,由调用方回退默认列表)
+// 当前活跃 key 的可用模型(勾选白名单优先;无缓存则 null,由调用方回退默认列表)
 function activeModels() {
   const k = activeKey();
-  return k && k.models && k.models.length ? k.models : null;
+  if (!k) return null;
+  if (Array.isArray(k.modelsEnabled) && k.modelsEnabled.length) return k.modelsEnabled;
+  return k.models && k.models.length ? k.models : null;
 }
 
-module.exports = { list, save, remove, setActive, activeKey, activeModels, refreshModels };
+// 保存模型勾选白名单(null = 恢复全部显示)
+function setModelsEnabled(id, enabled) {
+  const list = listRaw();
+  const i = list.findIndex((x) => x.id === id);
+  if (i < 0) return { ok: false, error: 'Key 不存在' };
+  list[i] = { ...list[i], modelsEnabled: enabled && enabled.length ? enabled : null };
+  store.setSetting('apiKeys', list);
+  return { ok: true };
+}
+
+module.exports = { list, save, remove, setActive, activeKey, activeModels, refreshModels, setModelsEnabled };

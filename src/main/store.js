@@ -148,6 +148,50 @@ function deleteProject(id) {
   });
 }
 
+// --- per-key weekly/monthly quota buckets (v0.8.0) ---------------------------
+// 滚动重置:周桶周一 00:00 起算,月桶每月 1 号 00:00 起算(本地时间)
+function weekStartOf(t) {
+  const d = new Date(t);
+  const day = (d.getDay() + 6) % 7; // 周一 = 0
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - day);
+  return d.getTime();
+}
+function monthStartOf(t) {
+  const d = new Date(t);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(1);
+  return d.getTime();
+}
+
+function addKeyUsage(keyId, costUsd = 0, usage = {}) {
+  if (!keyId) keyId = 'unknown';
+  const now = Date.now();
+  const ws = weekStartOf(now), ms = monthStartOf(now);
+  update((s) => {
+    s.keyUsage = s.keyUsage || {};
+    const u = s.keyUsage[keyId] || {};
+    if (u.weekStart !== ws) { u.weekStart = ws; u.weekCost = 0; u.weekInput = 0; u.weekOutput = 0; }
+    if (u.monthStart !== ms) { u.monthStart = ms; u.monthCost = 0; u.monthInput = 0; u.monthOutput = 0; }
+    const it = (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+    const ot = usage.output_tokens || 0;
+    u.weekCost += costUsd; u.monthCost += costUsd;
+    u.weekInput += it; u.weekOutput += ot;
+    u.monthInput += it; u.monthOutput += ot;
+    s.keyUsage[keyId] = u;
+  });
+}
+
+// 读取时也滚动(跨边界未写入的桶按新周期归零)
+function getKeyUsage(keyId) {
+  const u = (loadStore().keyUsage || {})[keyId];
+  if (!u) return null;
+  const now = Date.now();
+  if (u.weekStart !== weekStartOf(now)) { u.weekStart = weekStartOf(now); u.weekCost = 0; u.weekInput = 0; u.weekOutput = 0; }
+  if (u.monthStart !== monthStartOf(now)) { u.monthStart = monthStartOf(now); u.monthCost = 0; u.monthInput = 0; u.monthOutput = 0; }
+  return u;
+}
+
 module.exports = {
   loadStore, saveStore, update,
   addRecentProject,
@@ -157,4 +201,5 @@ module.exports = {
   addModelUsage,
   listCronJobs, saveCronJobs,
   listProjects, upsertProject, deleteProject,
+  addKeyUsage, getKeyUsage, weekStartOf, monthStartOf,
 };

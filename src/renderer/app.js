@@ -422,16 +422,31 @@ async function renderKeysList() {
     box.innerHTML = '<div class="mcp-row"><span style="color:var(--text-dim)">(暂无 Key,请在下方添加;未配置时回退 claude CLI 登录态)</span></div>';
     return;
   }
+  const usageText = (u, quota, label) => {
+    if (!u) return quota ? `${label} $0/${fmtMoney(quota)}(剩 100%)` : `${label} $0(不限)`;
+    const cost = label === '本周' ? u.weekCost : u.monthCost;
+    if (!quota) return `${label} ${fmtMoney(cost)}(不限)`;
+    const left = Math.max(0, 100 - (cost / quota) * 100).toFixed(0);
+    return `${label} ${fmtMoney(cost)}/${fmtMoney(quota)}(剩 ${left}%)`;
+  };
   box.innerHTML = list.map((k) => `
     <div class="mcp-row">
       <input type="radio" name="active-key" data-id="${k.id}" ${k.id === activeId ? 'checked' : ''} title="设为默认" />
       <span class="name">${escapeHtml(k.name)}</span>
-      <span class="scope">${escapeHtml(k.keyHint)}${k.baseUrl ? ' · ' + escapeHtml(k.baseUrl) : ''} · ${k.kind === 'authToken' ? 'Token' : 'Key'}${k.models && k.models.length ? ' · ' + k.models.length + ' 模型' : ''}</span>
+      <span class="scope">${escapeHtml(k.keyHint)}${k.baseUrl ? ' · ' + escapeHtml(k.baseUrl) : ''} · ${k.kind === 'authToken' ? 'Token' : 'Key'}${k.models && k.models.length ? ' · ' + k.models.length + ' 模型' : ''}${k.modelsEnabled ? '(已勾选 ' + k.modelsEnabled.length + ')' : ''}</span>
       <span class="ops">
+        ${k.models && k.models.length ? `<button class="btn btn-sm" data-op="models" data-id="${k.id}">模型勾选</button>` : ''}
         <button class="btn btn-sm" data-op="refresh" data-id="${k.id}" title="按此 Key 拉取模型列表">刷新模型</button>
         <button class="btn btn-sm" data-op="del" data-id="${k.id}">删除</button>
       </span>
-    </div>`).join('');
+    </div>
+    <div class="key-quota" data-quota="${k.id}">
+      <span class="quota-usage">${usageText(k.usage, k.quotaWeek, '本周')} · ${usageText(k.usage, k.quotaMonth, '本月')}</span>
+      <input class="input-sm q-week" data-id="${k.id}" value="${k.quotaWeek || ''}" placeholder="周额度($)" title="每周一 0 点重置,0/留空 = 不限" />
+      <input class="input-sm q-month" data-id="${k.id}" value="${k.quotaMonth || ''}" placeholder="月额度($)" title="每月 1 号 0 点重置,0/留空 = 不限" />
+      <button class="btn btn-sm q-save" data-id="${k.id}">存</button>
+    </div>
+    ${k.models && k.models.length ? `<div class="key-models hidden" data-models="${k.id}"></div>` : ''}`).join('');
   for (const r of box.querySelectorAll('input[name="active-key"]')) {
     r.onchange = async () => {
       await api.keysSetActive(r.dataset.id);
@@ -447,9 +462,17 @@ async function renderKeysList() {
         st.textContent = '正在按该 Key 拉取模型列表…';
         const r = await api.keysRefreshModels(b.dataset.id);
         st.className = 'modal-status ' + (r.ok ? 'ok' : 'err');
-        st.textContent = r.ok ? `识别到 ${r.models.length} 个模型。` : '模型识别失败:' + r.error;
+        st.textContent = r.ok ? `识别到 ${r.models.length} 个模型,可在「模型勾选」里挑选要显示的。` : '模型识别失败:' + r.error;
         await populateModelSelects();
         await renderKeysList();
+      } else if (b.dataset.op === 'models') {
+        const panel = box.querySelector(`[data-models="${b.dataset.id}"]`);
+        if (panel.classList.contains('hidden')) {
+          await renderModelsPanel(panel, b.dataset.id);
+          panel.classList.remove('hidden');
+        } else {
+          panel.classList.add('hidden');
+        }
       } else {
         await api.keysDelete(b.dataset.id);
         await populateModelSelects();
@@ -457,6 +480,45 @@ async function renderKeysList() {
       }
     };
   }
+  for (const b of box.querySelectorAll('.q-save')) {
+    b.onclick = async () => {
+      const id = b.dataset.id;
+      const w = box.querySelector(`.q-week[data-id="${id}"]`).value.trim();
+      const m = box.querySelector(`.q-month[data-id="${id}"]`).value.trim();
+      await api.keysSave({ id, quotaWeek: w, quotaMonth: m });
+      await renderKeysList();
+    };
+  }
+}
+
+// 模型勾选面板:只有勾选的模型出现在前端下拉里
+async function renderModelsPanel(panel, keyId) {
+  const { list } = await api.keysList();
+  const k = list.find((x) => x.id === keyId);
+  if (!k) return;
+  const enabled = k.modelsEnabled ? new Set(k.modelsEnabled) : null;
+  panel.innerHTML = `
+    <div class="km-ops">
+      <button class="btn btn-sm" data-all="1">全选</button>
+      <button class="btn btn-sm" data-all="0">全不选</button>
+      <button class="btn btn-sm btn-primary" data-save="1">保存勾选</button>
+      <span class="scope">勾选后下拉只显示选中项;全选 = 不限制</span>
+    </div>
+    <div class="km-list">${k.models.map((m) => `
+      <label class="km-item"><input type="checkbox" value="${escapeHtml(m)}" ${!enabled || enabled.has(m) ? 'checked' : ''} /> ${escapeHtml(m)}</label>`).join('')}
+    </div>`;
+  panel.querySelector('[data-all="1"]').onclick = () => {
+    for (const c of panel.querySelectorAll('input[type="checkbox"]')) c.checked = true;
+  };
+  panel.querySelector('[data-all="0"]').onclick = () => {
+    for (const c of panel.querySelectorAll('input[type="checkbox"]')) c.checked = false;
+  };
+  panel.querySelector('[data-save="1"]').onclick = async () => {
+    const checked = [...panel.querySelectorAll('input[type="checkbox"]:checked')].map((c) => c.value);
+    await api.keysSetModelsEnabled(keyId, checked.length === k.models.length ? null : checked);
+    await populateModelSelects();
+    await renderKeysList();
+  };
 }
 
 $('btn-apikey-landing').onclick = openApiKeyModal;

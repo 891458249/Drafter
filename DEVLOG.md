@@ -139,3 +139,7 @@ Git 工作流:
 - **多 Key 管理**(src/main/keys.js):API Keys 弹窗支持任意个 Key(名称/内容/Base URL/类型自动猜测),radio 切换「默认」Key;旧单 apiKey 自动迁移;完整 key 不出主进程(列表仅 …后4位)
 - **按 Key 自动识别模型**:每个 Key 可「刷新模型」——按其 Base URL 与认证方式(apiKey→x-api-key 头,authToken→Bearer)拉 /v1/models 并缓存;顶栏与输入框的模型下拉改为按活跃 Key 的模型列表动态填充(无缓存回退内置列表),实测库洛网关识别 243 个模型并动态填充
 - **切换隔离**:buildEnv 按活跃 Key 注入并显式清空另一套凭据(API_KEY/AUTH_TOKEN 互清,BASE_URL 缺省归位官方),避免 ~/.claude/settings.json env 串扰
+
+### v0.8.0(2026-08-05):Key 模型勾选 + 周/月额度
+- **模型勾选**:每个 Key 的识别模型在弹窗内可勾选(全选/全不选/保存),下拉只显示勾选项;全选等同不限制;实测 243 个模型勾选 3 个后下拉精确过滤
+- **周/月额度**:每个 Key 可设周额度(周一 0 点重置)与月额度(每月 1 号 0 点重置),弹窗实时显示「本周/本月已用/额度(剩余 %)」;消耗按会话创建时的 keyId 归账(store.addKeyUsage 滚动桶,读写双向滚动重置)
