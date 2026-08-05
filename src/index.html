@@ -236,13 +236,28 @@
 
   <!-- API key modal -->
   <div id="apikey-modal" class="modal-mask hidden">
-    <div class="modal">
-      <h2>配置 API Key</h2>
-      <p class="modal-hint">填入 Anthropic API Key(sk-ant-…)后直接调用 API;留空保存则清除,回退使用 claude CLI 登录态。</p>
-      <input id="apikey-input" class="input modal-input" type="password" placeholder="sk-ant-api03-…" autocomplete="off" />
+    <div class="modal modal-wide">
+      <h2>API Keys</h2>
+      <p class="modal-hint">支持多个 Key 灵活切换,「默认」Key 用于新会话;模型列表按 Key 自动识别(/v1/models)。</p>
+      <div id="keys-list" class="mcp-list"></div>
+      <h3>添加 / 编辑</h3>
+      <div class="form-row">
+        <input id="key-name" class="input-sm" placeholder="名称(如 库洛网关 / 官方)" />
+        <select id="key-kind" class="input-sm">
+          <option value="">类型:自动</option>
+          <option value="apiKey">API Key(sk-ant-…)</option>
+          <option value="authToken">Auth Token(网关 Bearer)</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <input id="key-secret" class="input-sm grow" type="password" placeholder="Key 内容" autocomplete="off" />
+      </div>
+      <div class="form-row">
+        <input id="key-baseurl" class="input-sm grow" placeholder="Base URL(可选,留空 = 官方 api.anthropic.com)" />
+      </div>
       <div class="modal-status" id="apikey-status"></div>
       <div class="modal-actions">
-        <button id="apikey-cancel" class="btn">取消</button>
+        <button id="apikey-cancel" class="btn">关闭</button>
         <button id="apikey-save" class="btn btn-primary">保存</button>
       </div>
     </div>

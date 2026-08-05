@@ -17,6 +17,7 @@ const projects = require('./src/main/projects');
 const logger = require('./src/main/logger');
 const perms = require('./src/main/perms');
 const updater = require('./src/main/updater');
+const keys = require('./src/main/keys');
 const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
 
@@ -57,11 +58,22 @@ if (store.getSetting('disableGpu')) {
   app.disableHardwareAcceleration();
 }
 
-// Env for child processes: inject configured API key if present.
+// Env for child processes: inject the ACTIVE API key if present.
+// Explicitly neutralize the other credential/env vars so per-key switching
+// wins over ~/.claude/settings.json env and inherited process env.
 function buildEnv(extra = {}) {
   const env = { ...process.env, FORCE_COLOR: '0', ...extra };
-  const key = store.getSetting('apiKey');
-  if (key) env.ANTHROPIC_API_KEY = key;
+  const k = keys.activeKey();
+  if (k) {
+    if (k.kind === 'authToken') {
+      env.ANTHROPIC_AUTH_TOKEN = k.key;
+      env.ANTHROPIC_API_KEY = '';
+    } else {
+      env.ANTHROPIC_API_KEY = k.key;
+      env.ANTHROPIC_AUTH_TOKEN = '';
+    }
+    env.ANTHROPIC_BASE_URL = k.baseUrl || 'https://api.anthropic.com';
+  }
   return env;
 }
 
@@ -140,7 +152,7 @@ app.on('window-all-closed', () => {
 ipcMain.handle('store:get', () => {
   const s = store.loadStore();
   const { settings = {}, ...rest } = s;
-  const { apiKey, ...safe } = settings;
+  const { apiKey, apiKeys, ...safe } = settings; // 完整 key 不出主进程(多 key 见 keys:list)
   return { ...rest, settings: safe };
 });
 
@@ -185,14 +197,18 @@ ipcMain.handle('proj:memory', (_e, id) => {
   return p ? { path: projects.memoryPath(p), content: projects.readMemory(p) } : null;
 });
 
+// --- API keys(多 key 管理,v0.7.0) ---
 ipcMain.handle('apikey:get', () => {
-  const key = store.getSetting('apiKey');
-  return key ? { configured: true, hint: '…' + key.slice(-4) } : { configured: false };
+  const k = keys.activeKey();
+  return k ? { configured: true, hint: '…' + k.key.slice(-4), name: k.name } : { configured: false };
 });
-ipcMain.handle('apikey:set', (_e, key) => {
-  store.setSetting('apiKey', (key || '').trim() || null);
-  return true;
-});
+ipcMain.handle('apikey:set', (_e, key) => keys.save({ name: '默认 Key', key: (key || '').trim() }));
+ipcMain.handle('keys:list', () => ({ list: keys.list(), activeId: store.getSetting('activeKeyId') }));
+ipcMain.handle('keys:save', (_e, entry) => keys.save(entry));
+ipcMain.handle('keys:delete', (_e, id) => keys.remove(id));
+ipcMain.handle('keys:setActive', (_e, id) => keys.setActive(id));
+ipcMain.handle('keys:refreshModels', (_e, id) => keys.refreshModels(id));
+ipcMain.handle('keys:activeModels', () => keys.activeModels());
 
 ipcMain.handle('shell:openExternal', (_e, url) => {
   if (/^https?:\/\//.test(url)) shell.openExternal(url);

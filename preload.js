@@ -34,9 +34,17 @@ contextBridge.exposeInMainWorld('api', {
   projPrune: () => ipcRenderer.invoke('proj:prune'),
   projMemory: (id) => ipcRenderer.invoke('proj:memory', id),
 
-  // api key
+  // api key(单 key 兼容入口;多 key 管理用 keys:*)
   apiKeyGet: () => ipcRenderer.invoke('apikey:get'),
   apiKeySet: (key) => ipcRenderer.invoke('apikey:set', key),
+
+  // multi api keys
+  keysList: () => ipcRenderer.invoke('keys:list'),
+  keysSave: (entry) => ipcRenderer.invoke('keys:save', entry),
+  keysDelete: (id) => ipcRenderer.invoke('keys:delete', id),
+  keysSetActive: (id) => ipcRenderer.invoke('keys:setActive', id),
+  keysRefreshModels: (id) => ipcRenderer.invoke('keys:refreshModels', id),
+  keysActiveModels: () => ipcRenderer.invoke('keys:activeModels'),
 
   // sessions
   sdkStatus: () => ipcRenderer.invoke('sess:sdkStatus'),

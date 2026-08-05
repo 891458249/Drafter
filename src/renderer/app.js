@@ -73,6 +73,7 @@ async function initLanding() {
   const recent = store.recentProjects || [];
   renderRecent(recent);
   initOnboarding(store.settings || {});
+  populateModelSelects(); // 按活跃 Key 填充模型下拉(v0.7.0)
   const sdk = await api.sdkStatus();
   if (!sdk.ok) {
     const w = $('sdk-warning');
@@ -406,30 +407,99 @@ async function renderPermsList() {
 $('perms-close').onclick = () => $('perms-modal').classList.add('hidden');
 
 // ---------------------------------------------------------------------------
-// API key modal
+// API keys modal(多 Key 管理 + 按 Key 识别模型)
 // ---------------------------------------------------------------------------
 async function openApiKeyModal() {
-  $('apikey-input').value = '';
-  const info = await api.apiKeyGet();
-  const st = $('apikey-status');
-  st.className = 'modal-status';
-  st.textContent = info.configured
-    ? `当前已配置 key(${info.hint})。输入新值覆盖,或留空保存以清除。`
-    : '当前未配置 key。将回退使用系统 claude CLI 的登录状态(如有)。';
+  $('apikey-status').textContent = '';
   $('apikey-modal').classList.remove('hidden');
-  $('apikey-input').focus();
+  await renderKeysList();
 }
+
+async function renderKeysList() {
+  const box = $('keys-list');
+  const { list, activeId } = await api.keysList();
+  if (!list.length) {
+    box.innerHTML = '<div class="mcp-row"><span style="color:var(--text-dim)">(暂无 Key,请在下方添加;未配置时回退 claude CLI 登录态)</span></div>';
+    return;
+  }
+  box.innerHTML = list.map((k) => `
+    <div class="mcp-row">
+      <input type="radio" name="active-key" data-id="${k.id}" ${k.id === activeId ? 'checked' : ''} title="设为默认" />
+      <span class="name">${escapeHtml(k.name)}</span>
+      <span class="scope">${escapeHtml(k.keyHint)}${k.baseUrl ? ' · ' + escapeHtml(k.baseUrl) : ''} · ${k.kind === 'authToken' ? 'Token' : 'Key'}${k.models && k.models.length ? ' · ' + k.models.length + ' 模型' : ''}</span>
+      <span class="ops">
+        <button class="btn btn-sm" data-op="refresh" data-id="${k.id}" title="按此 Key 拉取模型列表">刷新模型</button>
+        <button class="btn btn-sm" data-op="del" data-id="${k.id}">删除</button>
+      </span>
+    </div>`).join('');
+  for (const r of box.querySelectorAll('input[name="active-key"]')) {
+    r.onchange = async () => {
+      await api.keysSetActive(r.dataset.id);
+      await populateModelSelects();
+      await renderKeysList();
+    };
+  }
+  for (const b of box.querySelectorAll('button[data-op]')) {
+    b.onclick = async () => {
+      const st = $('apikey-status');
+      if (b.dataset.op === 'refresh') {
+        st.className = 'modal-status';
+        st.textContent = '正在按该 Key 拉取模型列表…';
+        const r = await api.keysRefreshModels(b.dataset.id);
+        st.className = 'modal-status ' + (r.ok ? 'ok' : 'err');
+        st.textContent = r.ok ? `识别到 ${r.models.length} 个模型。` : '模型识别失败:' + r.error;
+        await populateModelSelects();
+        await renderKeysList();
+      } else {
+        await api.keysDelete(b.dataset.id);
+        await populateModelSelects();
+        await renderKeysList();
+      }
+    };
+  }
+}
+
 $('btn-apikey-landing').onclick = openApiKeyModal;
 $('apikey-cancel').onclick = () => $('apikey-modal').classList.add('hidden');
 $('apikey-save').onclick = async () => {
-  const key = $('apikey-input').value.trim();
-  await api.apiKeySet(key);
-  if (key) obMark('apikey'); // 引导卡第一步(若在展示中)
+  const entry = {
+    name: $('key-name').value.trim() || 'Key',
+    key: $('key-secret').value.trim(),
+    baseUrl: $('key-baseurl').value.trim(),
+    kind: $('key-kind').value || undefined,
+  };
   const st = $('apikey-status');
-  st.className = 'modal-status ok';
-  st.textContent = key ? 'API key 已保存,新会话生效。' : 'API key 已清除。';
-  setTimeout(() => $('apikey-modal').classList.add('hidden'), 900);
+  const r = await api.keysSave(entry);
+  st.className = 'modal-status ' + (r.ok ? 'ok' : 'err');
+  if (!r.ok) { st.textContent = r.error || '保存失败'; return; }
+  obMark('apikey'); // 引导卡第一步(若在展示中)
+  st.textContent = '已保存。建议点「刷新模型」按此 Key 识别可用模型。';
+  $('key-secret').value = '';
+  await populateModelSelects();
+  await renderKeysList();
 };
+
+// --- 模型下拉动态化(按活跃 Key 的模型列表,无缓存时回退内置列表) ---
+const FALLBACK_MODELS = ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'];
+function modelLabel(id) {
+  let s = String(id).replace(/^claude-/, '');
+  const bracket = (s.match(/(\[.*\])$/) || [null, ''])[1];
+  s = s.replace(/\[.*\]$/, '').replace(/-?20\d{6}$/, '').replace(/(\d)-(\d)/g, '$1.$2');
+  const m = s.match(/^([a-z]+)-?(.*)$/i);
+  if (!m) return s + bracket;
+  return m[1][0].toUpperCase() + m[1].slice(1) + (m[2] ? ' ' + m[2] : '') + bracket;
+}
+async function populateModelSelects() {
+  let models = null;
+  try { models = await api.keysActiveModels(); } catch {}
+  const ids = (models && models.length) ? models : FALLBACK_MODELS;
+  const html = '<option value="">默认</option>' + ids.map((id) => `<option value="${id}">${escapeHtml(modelLabel(id))}</option>`).join('');
+  for (const sel of [$('model-sel'), $('model-sel-composer')]) {
+    const cur = sel.value;
+    sel.innerHTML = html;
+    sel.value = sel.querySelector(`option[value="${cur}"]`) ? cur : '';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // MCP modal
