@@ -44,3 +44,9 @@ electron-updater 的 github provider 对私有仓库读取 Release 需要 token:
 
 - 非一键安装(`oneClick: false`),用户可自选安装目录;
 - 快捷方式名「Claude UI」;安装器/卸载器图标为 `build/icon.ico`(占位图标,可替换后重新 `npm run dist`)。
+
+## 安装 / 覆盖安装 / 卸载(已静默实测,v0.6.3)
+
+- **安装**:运行 `Claude UI Setup x.y.z.exe`,可选安装目录(默认 `%LocalAppData%\Programs\Claude UI`)。
+- **覆盖安装(升级/重装)**:直接运行新版安装包即可——NSIS 会处理旧版替换,无需先手动卸载;静默实测同目录二次安装成功。自动更新走的也是这条路径。
+- **卸载**:控制面板/开始菜单的「Uninstall Claude UI」,静默实测卸载后安装目录清空。**卸载默认保留用户数据**(会话记录、API Key、项目组配置在 `%AppData%\claude-ui`,`deleteAppDataOnUninstall: false`);要彻底删除请手动删该目录。
