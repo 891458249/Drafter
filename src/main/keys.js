@@ -1,6 +1,7 @@
 // Multi-API-key management + per-key model discovery (/v1/models).
 // Data lives in store settings:
-//   apiKeys: [{ id, name, key, baseUrl, kind: 'apiKey'|'authToken', models: [id…], modelsAt, usageUrl, balanceCache? }]
+//   apiKeys: [{ id, name, key, baseUrl, kind: 'apiKey'|'authToken', models: [id…], modelsAt,
+//              modelGroups: [{category, model_type, models}]|null, usageUrl, balanceCache? }]
 //   activeKeyId: string
 // Renderer never receives full keys — only hints (…last4).
 const crypto = require('crypto');
@@ -14,7 +15,7 @@ function ensureMigrated() {
   if (Array.isArray(s.settings?.apiKeys)) return;
   const legacy = store.getSetting('apiKey');
   const list = legacy
-    ? [{ id: 'k_' + crypto.randomUUID().slice(0, 8), name: '默认 Key', key: legacy, baseUrl: '', kind: 'apiKey', models: [], modelsAt: 0 }]
+    ? [{ id: 'k_' + crypto.randomUUID().slice(0, 8), name: 'Kuro', key: legacy, baseUrl: '', kind: 'apiKey', models: [], modelsAt: 0 }]
     : [];
   store.update((st) => {
     st.settings = st.settings || {};
@@ -26,13 +27,19 @@ function ensureMigrated() {
 
 function listRaw() {
   ensureMigrated();
-  return store.getSetting('apiKeys', []) || [];
+  const list = store.getSetting('apiKeys', []) || [];
+  // 一次性迁移:旧版默认名「默认 Key」统一改名为「Kuro」,随 store 保存生效
+  if (list.some((k) => k.name === '默认 Key')) {
+    for (const k of list) if (k.name === '默认 Key') k.name = 'Kuro';
+    store.setSetting('apiKeys', list);
+  }
+  return list;
 }
 
 const sanitize = ({ key, ...rest }) => ({ ...rest, keyHint: key ? '…' + key.slice(-4) : '' });
 
 function list() {
-  return listRaw().map((k) => ({ ...sanitize(k), usage: store.getKeyUsage(k.id), canBalance: !!balanceProvider(k.baseUrl) }));
+  return listRaw().map((k) => ({ ...sanitize(k), enabled: k.enabled !== false, usage: store.getKeyUsage(k.id), canBalance: !!balanceProvider(k.baseUrl) }));
 }
 
 function activeKey() {
@@ -40,6 +47,11 @@ function activeKey() {
   const id = store.getSetting('activeKeyId');
   const k = listRaw().find((x) => x.id === id);
   return k || null;
+}
+
+// 主进程内部使用(含完整 key,不得回传渲染端)
+function byId(id) {
+  return listRaw().find((x) => x.id === id) || null;
 }
 
 function guessKind(key) {
@@ -59,7 +71,7 @@ function save(entry) {
     ...prev,
     id,
     name: String(entry.name || prev.name || 'Key').trim() || 'Key',
-    key: entry.key !== undefined ? String(entry.key).trim() : (prev.key || ''),
+    key: entry.key !== undefined && String(entry.key).trim() !== '' ? String(entry.key).trim() : (prev.key || ''), // 编辑时留空 = 保留原 secret
     baseUrl: entry.baseUrl !== undefined ? String(entry.baseUrl || '').trim() : (prev.baseUrl || ''),
     kind: entry.kind || prev.kind || guessKind(entry.key || prev.key),
     usageUrl,
@@ -68,6 +80,7 @@ function save(entry) {
     modelsEnabled: entry.modelsEnabled !== undefined ? entry.modelsEnabled : (prev.modelsEnabled ?? null), // null = 全部显示
     quotaWeek: entry.quotaWeek !== undefined ? (Number(entry.quotaWeek) || 0) : (prev.quotaWeek || 0), // 0 = 不限
     quotaMonth: entry.quotaMonth !== undefined ? (Number(entry.quotaMonth) || 0) : (prev.quotaMonth || 0),
+    enabled: entry.enabled !== undefined ? !!entry.enabled : (prev.enabled ?? true), // 勾选激活:模型加入下拉(v0.8.2)
   };
   if (!next.key) return { ok: false, error: 'Key 不能为空' };
   if (i >= 0) list[i] = next; else list.push(next);
@@ -92,9 +105,38 @@ function setActive(id) {
   return { ok: true };
 }
 
+// 勾选激活(v0.8.2):启用的 Key 的模型才进入会话模型下拉;可多选
+function setEnabled(id, enabled) {
+  const list = listRaw();
+  const i = list.findIndex((x) => x.id === id);
+  if (i < 0) return { ok: false, error: 'Key 不存在' };
+  list[i] = { ...list[i], enabled: !!enabled };
+  store.setSetting('apiKeys', list);
+  return { ok: true };
+}
+
+// 所有启用 Key 的模型聚合(模型勾选白名单优先),供会话下拉分组展示
+// 返回 [{ keyId, keyName, model }];无任何启用 Key 的模型缓存时返回 null(调用方回退内置列表)
+function enabledModels() {
+  const out = [];
+  for (const k of listRaw()) {
+    if (k.enabled === false) continue;
+    const models = (Array.isArray(k.modelsEnabled) && k.modelsEnabled.length) ? k.modelsEnabled : k.models;
+    if (!models || !models.length) continue;
+    for (const m of models) out.push({ keyId: k.id, keyName: k.name, model: m });
+  }
+  return out.length ? out : null;
+}
+
+// baseUrl 可能自带 /v1 后缀(如 https://api.kimi.com/coding/v1),统一归一到
+// 不含 /v1 的根再拼端点,避免 /v1/v1/... 双重路径导致 404
+function apiRoot(baseUrl) {
+  return (baseUrl || OFFICIAL_API).replace(/\/+$/, '').replace(/\/v1$/i, '');
+}
+
 // --- model discovery --------------------------------------------------------
 async function fetchModels(entry) {
-  const base = (entry.baseUrl || OFFICIAL_API).replace(/\/+$/, '');
+  const base = apiRoot(entry.baseUrl);
   const headers = { 'anthropic-version': '2023-06-01' };
   if (entry.kind === 'authToken') headers['authorization'] = `Bearer ${entry.key}`;
   else headers['x-api-key'] = entry.key;
@@ -114,17 +156,60 @@ async function fetchModels(entry) {
   }
 }
 
-// 拉取并缓存某个 key 的模型列表
+// Kuro 网关分组接口:GET {apiRoot}/my-models/api → { groups: [{category, model_type, models}] }
+// model_type ∈ chat/embedding/rerank/image/video/audio/model(model = 3D 生成);非 Kuro 网关无此端点(404)
+async function fetchMyModels(entry) {
+  const base = apiRoot(entry.baseUrl);
+  const headers = {};
+  if (entry.kind === 'authToken') headers['authorization'] = `Bearer ${entry.key}`;
+  else headers['x-api-key'] = entry.key;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const res = await fetch(`${base}/my-models/api`, { headers, signal: ctrl.signal });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const json = await res.json();
+    const groups = (Array.isArray(json.groups) ? json.groups : [])
+      .filter((g) => g && Array.isArray(g.models) && g.models.length)
+      .map((g) => ({ category: String(g.category || ''), model_type: String(g.model_type || 'model'), models: g.models }));
+    if (!groups.length) return { ok: false, error: '接口返回空分组' };
+    return { ok: true, groups };
+  } catch (e) {
+    return { ok: false, error: e.name === 'AbortError' ? '请求超时' : e.message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 拉取并缓存某个 key 的模型列表:优先 Kuro 分组接口(/my-models/api),失败回退 /v1/models
 async function refreshModels(id) {
   const k = listRaw().find((x) => x.id === id);
   if (!k) return { ok: false, error: 'Key 不存在' };
+  const g = await fetchMyModels(k);
+  if (g.ok) {
+    // 分组成功:存 modelGroups,models 为各组并集(平铺语义不变,同组重复去重)
+    const models = [...new Set(g.groups.flatMap((x) => x.models))];
+    const list = listRaw();
+    const i = list.findIndex((x) => x.id === id);
+    list[i] = { ...list[i], models, modelsAt: Date.now(), modelGroups: g.groups };
+    store.setSetting('apiKeys', list);
+    return { ok: true, models };
+  }
   const r = await fetchModels(k);
   if (!r.ok) return r;
   const list = listRaw();
   const i = list.findIndex((x) => x.id === id);
-  list[i] = { ...list[i], models: r.models, modelsAt: Date.now() };
+  list[i] = { ...list[i], models: r.models, modelsAt: Date.now(), modelGroups: null }; // 回退路径无分组信息
   store.setSetting('apiKeys', list);
   return { ok: true, models: r.models };
+}
+
+// 模型的类别(查该 key 的 modelGroups;无分组信息或未收录一律视为 chat)
+function modelType(keyId, model) {
+  const k = listRaw().find((x) => x.id === keyId);
+  if (!k || !Array.isArray(k.modelGroups)) return 'chat';
+  const g = k.modelGroups.find((x) => Array.isArray(x.models) && x.models.includes(model));
+  return g ? g.model_type : 'chat';
 }
 
 // --- provider balance lookup(v0.8.1) -----------------------------------------
@@ -184,7 +269,7 @@ async function queryBalance(id) {
   if (!k) return { ok: false, error: 'Key 不存在' };
   const provider = balanceProvider(k.baseUrl);
   if (!provider) return { ok: false, error: '该 Key 的 Base URL 未匹配自动余额查询' };
-  const r = await provider.query(k, k.baseUrl.replace(/\/+$/, ''));
+  const r = await provider.query(k, apiRoot(k.baseUrl));
   if (!r.ok) return r;
   const list = listRaw();
   const i = list.findIndex((x) => x.id === id);
@@ -211,4 +296,4 @@ function setModelsEnabled(id, enabled) {
   return { ok: true };
 }
 
-module.exports = { list, save, remove, setActive, activeKey, activeModels, refreshModels, setModelsEnabled, queryBalance, balanceProvider };
+module.exports = { list, save, remove, setActive, setEnabled, activeKey, byId, activeModels, enabledModels, refreshModels, setModelsEnabled, queryBalance, balanceProvider, modelType };

@@ -4,17 +4,20 @@ export const api = window.api;
 export const state = {
   cwd: null,
   projectId: null,
-  section: 'code', // 'code' = 项目工作区;'chat' = 纯对话板块(v0.6.0)       // active project group
+  section: 'code', // 板块:'code' 项目工作区;'chat' 纯对话(v0.6.0);'image'/'video'/'audio'/'model' 新媒体(v0.9.0)
   activeSid: null,
   sessions: new Map(),   // sid -> { meta, ui }
   viewMode: 'normal',
   filesCache: null,      // [paths] for @ autocomplete
   commandsCache: null,   // slash commands
-  attachments: [],       // pending image attachments {mediaType, data(base64), name}
+  attachments: [],       // 待发送附件:image {mediaType, data(base64)} / file 文本 / media {mediaKind, path, size}
   diffComments: [],      // [{file, line, side, text}]
 };
 
 export const $ = (id) => document.getElementById(id);
+
+// 新媒体板块 kind(v0.9.0):这些会话不走 Agent SDK,走 AIGC 生成任务闭环
+export const MEDIA_KINDS = ['image', 'video', 'audio', 'model'];
 
 export function escapeHtml(s) {
   return (s || '').replace(/[&<>"']/g, (c) => (
@@ -46,7 +49,53 @@ export function fmtTokens(n) {
   return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
 }
 
+// 模型 id → 展示名(claude-opus-4-8 → Opus 4.8;非 claude 模型去日期后缀),供输入框
+// placeholder 与助手气泡身份使用(v0.9.2);app.js 有同名实现用于下拉列表
+export function modelLabel(id) {
+  let s = String(id || '').replace(/^claude-/, '');
+  const bracket = (s.match(/(\[.*\])$/) || [null, ''])[1];
+  s = s.replace(/\[.*\]$/, '').replace(/-?20\d{6}$/, '').replace(/(\d)-(\d)/g, '$1.$2');
+  const m = s.match(/^([a-z]+)-?(.*)$/i);
+  if (!m) return s + bracket;
+  return m[1][0].toUpperCase() + m[1].slice(1) + (m[2] ? ' ' + m[2] : '') + bracket;
+}
+
+// 会话当前模型的展示名:所选模型 > SDK init 回传模型 > 默认模型
+export function sessionModelName(s) {
+  if (!s) return '默认模型';
+  return modelLabel(s.meta.model || s.ui.initModel || '') || '默认模型';
+}
+
 // simple pub/sub so modules can react without circular imports
 const listeners = {};
 export function on(evt, cb) { (listeners[evt] = listeners[evt] || []).push(cb); }
 export function emit(evt, data) { for (const cb of (listeners[evt] || [])) cb(data); }
+
+// 模型下拉值编码(v0.8.2):"keyId|modelId" = 启用 Key 分组下的模型;
+// 无前缀 = 内置回退列表(走活跃 Key / CLI 登录态)
+export function parseModelValue(v) {
+  if (!v) return { keyId: null, model: null };
+  const i = v.indexOf('|');
+  return i > 0 ? { keyId: v.slice(0, i), model: v.slice(i + 1) } : { keyId: null, model: v };
+}
+
+export function modelSelValue(meta) {
+  return meta.model ? (meta.keyId ? `${meta.keyId}|${meta.model}` : meta.model) : '';
+}
+
+// 会话 Key chip:在模型下拉旁显示所选模型所属 Key 的名称,无匹配(内置回退)时隐藏
+export async function updateKeyChips() {
+  const pairs = [['model-sel', 'model-key-chip']];
+  let list = null;
+  for (const [selId, chipId] of pairs) {
+    const sel = $(selId), chip = $(chipId);
+    if (!sel || !chip) continue;
+    const { keyId } = parseModelValue(sel.value);
+    if (keyId && !list) {
+      try { list = (await api.keysList()).list; } catch { list = []; }
+    }
+    const name = keyId && list ? ((list.find((k) => k.id === keyId) || {}).name || '') : '';
+    chip.textContent = name;
+    chip.classList.toggle('hidden', !name);
+  }
+}

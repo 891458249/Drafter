@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const invoke = (ch) => (payload) => ipcRenderer.invoke(ch, payload);
 
@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   projSetTag: (id, path, tag) => ipcRenderer.invoke('proj:setTag', { id, path, tag }),
   projRemoveFile: (id, path) => ipcRenderer.invoke('proj:removeFile', { id, path }),
   projPrune: () => ipcRenderer.invoke('proj:prune'),
+  projAdoptDir: (sid, dir) => ipcRenderer.invoke('proj:adoptDir', { sid, dir }),
+  projOpenFolder: (id) => ipcRenderer.invoke('proj:openFolder', id),
   projMemory: (id) => ipcRenderer.invoke('proj:memory', id),
 
   // api key(单 key 兼容入口;多 key 管理用 keys:*)
@@ -47,6 +49,12 @@ contextBridge.exposeInMainWorld('api', {
   keysActiveModels: () => ipcRenderer.invoke('keys:activeModels'),
   keysSetModelsEnabled: (id, enabled) => ipcRenderer.invoke('keys:setModelsEnabled', { id, enabled }),
   keysQueryBalance: (id) => ipcRenderer.invoke('keys:queryBalance', id),
+  keysSetEnabled: (id, enabled) => ipcRenderer.invoke('keys:setEnabled', { id, enabled }),
+  keysEnabledModels: () => ipcRenderer.invoke('keys:enabledModels'),
+
+  // 辅助模型配置(Code/Chat 分析媒体附件,v0.9.1)
+  auxModelsGet: () => ipcRenderer.invoke('settings:getAuxModels'),
+  auxModelsSet: (m) => ipcRenderer.invoke('settings:setAuxModels', m),
 
   // sessions
   sdkStatus: () => ipcRenderer.invoke('sess:sdkStatus'),
@@ -56,13 +64,19 @@ contextBridge.exposeInMainWorld('api', {
   sessInterrupt: (sid) => ipcRenderer.invoke('sess:interrupt', sid),
   sessPermission: invoke('sess:permission'),
   sessSetMode: (sid, mode) => ipcRenderer.invoke('sess:setMode', { sid, mode }),
-  sessSetModel: (sid, model) => ipcRenderer.invoke('sess:setModel', { sid, model }),
+  sessSetModel: (sid, model, keyId) => ipcRenderer.invoke('sess:setModel', { sid, model, keyId }),
   sessSetEffort: (sid, effort) => ipcRenderer.invoke('sess:setEffort', { sid, effort }),
   sessHistory: (sid) => ipcRenderer.invoke('sess:history', sid),
   sessRename: (sid, title) => ipcRenderer.invoke('sess:rename', { sid, title }),
   sessArchive: (sid, archived) => ipcRenderer.invoke('sess:archive', { sid, archived }),
   sessRemove: (sid) => ipcRenderer.invoke('sess:remove', sid),
   sessSetActive: (sid) => ipcRenderer.invoke('sess:setActive', sid),
+
+  // AIGC 生成任务(新媒体板块)
+  aigcSend: invoke('aigc:send'),
+  aigcCancel: (sessionId, traceId) => ipcRenderer.invoke('aigc:cancel', { sessionId, traceId }),
+  shellShowItemInFolder: (p) => ipcRenderer.invoke('shell:showItemInFolder', p),
+  openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
 
   // git / diff / PR
   gitIsRepo: (cwd) => ipcRenderer.invoke('git:isRepo', cwd),
@@ -78,6 +92,9 @@ contextBridge.exposeInMainWorld('api', {
   fileWatch: invoke('files:watch'),
   fileUnwatch: (key) => ipcRenderer.invoke('files:unwatch', key),
   fileReadImage: (absPath) => ipcRenderer.invoke('files:readImage', absPath),
+  fileStat: (absPath) => ipcRenderer.invoke('files:stat', absPath),
+  // 拖拽/粘贴的 File 对象取本地路径(Electron 32+ 移除了 File.path,需走 webUtils)
+  pathForFile: (f) => webUtils.getPathForFile(f),
 
   // slash commands / mcp / cron
   cmdsList: (cwd) => ipcRenderer.invoke('cmds:list', cwd),
@@ -99,7 +116,7 @@ contextBridge.exposeInMainWorld('api', {
     const allowed = [
       'sess:event', 'sess:attention', 'cron:fired',
       'term:data', 'term:exit',
-      'file:changed', 'update:status',
+      'file:changed', 'update:status', 'aigc:status',
     ];
     if (!allowed.includes(channel)) return () => {};
     const listener = (_e, payload) => cb(payload);

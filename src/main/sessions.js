@@ -11,6 +11,7 @@ const { Notification } = require('electron');
 const store = require('./store');
 const projects = require('./projects');
 const perms = require('./perms');
+const keys = require('./keys');
 
 // The Agent SDK is ESM-only — load it via dynamic import().
 let sdk = null;
@@ -104,6 +105,16 @@ class Session {
   async start({ resume = false, fork = false } = {}) {
     if (this.running || this.starting) return;
     this.starting = true;
+    // 自愈(v0.9.5):code/chat 会话上残留的新媒体模型(旧版板块切换错绑,发送必 403
+    // 「模型未配置」)在启动时清空,回退默认模型
+    if (this.meta.model && (!this.meta.kind || this.meta.kind === 'code' || this.meta.kind === 'chat')) {
+      try {
+        if (keys.modelType(this.meta.keyId, this.meta.model) !== 'chat') {
+          this.meta.model = null;
+          store.upsertSession({ id: this.id, model: null });
+        }
+      } catch {}
+    }
     // create the queue up-front so send() can push while the SDK loads
     this.queue = new AsyncQueue();
     const ok = await loadSdk();
@@ -116,7 +127,7 @@ class Session {
       cwd: this.meta.cwd,
       permissionMode: this.meta.permissionMode || 'default',
       includePartialMessages: true,
-      env: this.m.buildEnv({ ELECTRON_RUN_AS_NODE: '1' }),
+      env: this.m.buildEnv({ ELECTRON_RUN_AS_NODE: '1' }, this.meta.keyId), // 按会话绑定的 Key 注入凭据(v0.8.2)
       settingSources: ['user', 'project', 'local'],
       stderr: (data) => this._emit({ type: 'ui_stderr', text: String(data) }),
       canUseTool: (toolName, input, opts) => this._onPermission(toolName, input, opts),
@@ -136,9 +147,12 @@ class Session {
     } catch (e) { console.error('[sessions] project ctx failed:', e.message); }
     if (projCtx) {
       options.systemPrompt = { type: 'preset', preset: 'claude_code', append: projCtx.append };
-      if (projCtx.additionalDirectories && projCtx.additionalDirectories.length) {
-        options.additionalDirectories = projCtx.additionalDirectories;
-      }
+      // 附加目录 = 项目组共享目录 + 会话级 /add-dir 登记的目录(v0.9.2)
+      // 防御性过滤掉与 cwd 相同的目录(v0.9.7)
+      const normCwd = (p) => path.resolve(p).toLowerCase();
+      const allDirs = [...new Set([...(projCtx.additionalDirectories || []), ...(this.meta.extraDirs || [])])]
+        .filter((d) => normCwd(d) !== normCwd(this.meta.cwd || ''));
+      if (allDirs.length) options.additionalDirectories = allDirs;
       const pid = this.meta.projectId;
       options.hooks = {
         PreToolUse: [{
@@ -163,6 +177,9 @@ class Session {
           }],
         }],
       };
+    } else if (this.meta.extraDirs && this.meta.extraDirs.length) {
+      // 无项目组(v0.9.2 起独立会话也可 /add-dir):只挂附加目录
+      options.additionalDirectories = this.meta.extraDirs;
     }
     try {
       this.q = sdk.query({ prompt: this.queue, options });
@@ -255,6 +272,15 @@ class Session {
       this._emit(ev, true);
       this._emit({ type: 'ui_status', running: this.running, busy: false });
       this.m.onTurnDone(this);
+      // /add-dir 在回合中登记:回合结束后重启 query 使目录生效(v0.9.2)
+      if (this.needRestart) {
+        this.needRestart = false;
+        setImmediate(() => {
+          if (this.busy) { this.needRestart = true; return; }
+          this.stop();
+          this.start({ resume: !!this.meta.sdkSessionId });
+        });
+      }
       return;
     }
     if (msg.type === 'compact_boundary' || (msg.type === 'system' && msg.subtype === 'compact_boundary')) {
@@ -340,8 +366,9 @@ class Session {
     return true;
   }
 
-  // content: string | array of content blocks ({type:'text'|'image',...})
-  send(content) {
+  // content: string | array of content blocks ({type:'text'|'image'|'media_ref',...})
+  // echoContent: 持久化回显用的原始内容(v0.9.1 辅助分析注入后,历史仍回放附件卡片)
+  send(content, echoContent) {
     if (!this.running && !this.starting) this.start({ resume: !!this.meta.sdkSessionId });
     if (!this.queue) return false;
     this.queue.push({
@@ -351,7 +378,7 @@ class Session {
       session_id: this.meta.sdkSessionId || undefined,
     });
     this.busy = true;
-    this._persistUserEcho(content);
+    this._persistUserEcho(echoContent !== undefined ? echoContent : content);
     this._emit({ type: 'ui_status', running: true, busy: true });
     return true;
   }
@@ -385,9 +412,11 @@ class Session {
     return false;
   }
 
-  async setModel(model) {
+  // keyId(v0.8.2):所选模型归属的 Key,用于额度归账;跨 Key 切换时凭据需新会话才生效
+  async setModel(model, keyId) {
     this.meta.model = model;
-    store.upsertSession({ id: this.id, model });
+    if (keyId !== undefined) this.meta.keyId = keyId || null;
+    store.upsertSession({ id: this.id, model, keyId: this.meta.keyId });
     if (this.q && this.running) {
       try { await this.q.setModel(model || undefined); return true; } catch {}
     }
@@ -402,6 +431,24 @@ class Session {
       try { await this.q.applyFlagSettings({ effortLevel: effort || null }); return true; } catch {}
     }
     return false;
+  }
+
+  // /add-dir(v0.9.2):SDK 流式输入不会执行该斜杠命令,改为客户端登记——
+  // 目录持久化到 meta.extraDirs,重启 query(resume 保上下文)后挂进 additionalDirectories。
+  // 回合进行中不打断,标记 needRestart,回合结束后自动重启生效。
+  async addDir(dir) {
+    const norm = (p) => path.resolve(p).toLowerCase();
+    // 与主工作目录相同的目录无需登记(v0.9.7):否则会被挂进 additionalDirectories 造成冗余
+    if (norm(dir) === norm(this.meta.cwd || '')) return this.meta.extraDirs || [];
+    const dirs = this.meta.extraDirs || [];
+    if (!dirs.some((d) => norm(d) === norm(dir))) dirs.push(dir);
+    this.meta.extraDirs = dirs;
+    store.upsertSession({ id: this.id, extraDirs: dirs });
+    if (!this.running) return dirs; // 未运行:下次 send 启动即生效
+    if (this.busy) { this.needRestart = true; return dirs; }
+    this.stop();
+    await this.start({ resume: !!this.meta.sdkSessionId });
+    return dirs;
   }
 
   stop() {
@@ -448,7 +495,7 @@ class SessionManager {
       projectId: projectId || null,
       sdkSessionId: forkFrom || null, archived: false,
       standalone: !!standalone, // 独立会话:不属于任何项目组(v0.5.0 起新会话默认)
-      kind: kind || null, // 'chat' = chat 板块会话(v0.6.0)
+      kind: kind || null, // 板块标记:'chat'(v0.6.0)/'image'/'video'/'audio'/'model'(v0.9.0);null = code
       keyId: keyId || null, // 创建时活跃的 API key(额度归账,v0.8.0)
     };
     store.upsertSession(meta);

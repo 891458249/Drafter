@@ -32,35 +32,9 @@ html, body {
 .hidden { display: none !important; }
 .grow { flex: 1; }
 
-/* ---------------- Landing ---------------- */
-.landing { height: 100vh; display: flex; align-items: center; justify-content: center; }
-.landing-card {
-  width: 440px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 40px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.4);
-}
-.brand { text-align: center; margin-bottom: 28px; }
-.brand-mark { font-size: 34px; color: var(--accent); margin-bottom: 8px; }
-.brand h1 { font-size: 24px; font-weight: 600; }
-.subtitle { color: var(--text-dim); margin-top: 6px; }
-.btn-lg { width: 100%; padding: 14px; font-size: 15px; }
-.recent { margin-top: 28px; }
-.recent-title {
-  color: var(--text-dim); font-size: 12px; text-transform: uppercase;
-  letter-spacing: .5px; margin-bottom: 10px;
-}
-.recent-list { list-style: none; }
-.recent-list li {
-  padding: 9px 12px; border-radius: 8px; cursor: pointer;
-  color: var(--text-dim); font-family: var(--mono); font-size: 12.5px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.recent-list li:hover { background: var(--bg-input); color: var(--text); }
+/* ---------------- SDK 缺失警告(原 Landing 样式已随 v0.9.3 首屏移除) ---------------- */
 .sdk-warning {
-  margin-top: 18px; padding: 10px 12px; border: 1px solid var(--red);
+  margin: 10px 16px 0; padding: 10px 12px; border: 1px solid var(--red);
   border-radius: 8px; color: var(--red); font-size: 12.5px; line-height: 1.5;
 }
 
@@ -543,8 +517,8 @@ kbd {
   text-overflow: ellipsis;
 }
 
-/* --- 用户消息右对齐 ------------------------------------------------------- */
-.msg.user { width: fit-content; max-width: 78%; margin-left: auto; }
+/* --- 用户消息右对齐(贴聊天区右侧,不随 860px 内容列居中) --------------------- */
+.msg.user { width: fit-content; max-width: 78%; margin: 0 0 20px auto; padding: 0 24px; }
 .msg.user .msg-role { text-align: right; }
 .msg.user .bubble { border-radius: 14px 14px 4px 14px; }
 
@@ -696,42 +670,6 @@ kbd {
 .usage-bar { height: 5px; border-radius: 3px; background: var(--bg-input); margin-top: 5px; overflow: hidden; }
 .usage-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
 
-/* ---------------- First-run onboarding card ---------------- */
-.landing { flex-direction: column; gap: 18px; }
-.onboarding {
-  width: 440px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 16px 18px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.4);
-}
-.ob-head { display: flex; align-items: center; margin-bottom: 10px; }
-.ob-title { font-size: 14px; font-weight: 600; }
-.ob-close {
-  margin-left: auto; background: none; border: none; color: var(--text-dim);
-  font-size: 14px; cursor: pointer; padding: 2px 6px; border-radius: 6px;
-}
-.ob-close:hover { background: var(--bg-input); color: var(--text); }
-.ob-steps { display: flex; flex-direction: column; gap: 8px; }
-.ob-step {
-  display: flex; align-items: center; gap: 12px; text-align: left;
-  background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; cursor: pointer; color: var(--text);
-}
-.ob-step:hover { border-color: var(--accent); }
-.ob-step.done { opacity: .55; pointer-events: none; }
-.ob-num {
-  flex: none; width: 22px; height: 22px; border-radius: 50%;
-  background: var(--accent); color: #1a1815; font-size: 12px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-}
-.ob-text { display: flex; flex-direction: column; gap: 2px; }
-.ob-text b { font-size: 13px; }
-.ob-text small { font-size: 11.5px; color: var(--text-dim); }
-.ob-state { margin-left: auto; color: var(--text-dim); font-size: 14px; }
-.ob-step.done .ob-state { color: var(--green); }
-
 /* ---------------- 附件与文件夹 chips(v0.5.1) ---------------- */
 .folder-chips {
   display: flex; flex-wrap: wrap; gap: 6px;
@@ -750,6 +688,7 @@ kbd {
   font-size: 12px; position: relative;
 }
 .attach-file .af-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-file .af-size { color: var(--text-dim); font-size: 11px; }
 .attach-file .rm { margin-left: 2px; }
 
 /* ---------------- 板块切换(v0.6.0) ---------------- */
@@ -759,10 +698,11 @@ kbd {
 }
 .section-switch button {
   background: none; border: none; color: var(--text-dim);
-  font-size: 12px; padding: 4px 14px; cursor: pointer;
+  font-size: 12px; padding: 4px 10px; cursor: pointer;
 }
 .section-switch button.active { background: var(--accent); color: #1a1815; font-weight: 600; }
-body.sec-chat .code-only { display: none !important; }
+/* code-only 元素仅 code 板块显示;body 启动即挂 sec-code,其余板块(sec-chat/image/...)统一隐藏 */
+body:not(.sec-code) .code-only { display: none !important; }
 
 /* ---------------- Key 额度与模型勾选(v0.8.0) ---------------- */
 .key-quota {
@@ -778,3 +718,90 @@ body.sec-chat .code-only { display: none !important; }
 .km-ops { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
 .km-list { max-height: 180px; overflow-y: auto; columns: 2; }
 .km-item { display: flex; gap: 5px; align-items: center; font-size: 11.5px; padding: 2px 0; break-inside: avoid; }
+
+/* ---------------- Key 预设与会话 Key chip ---------------- */
+.key-presets { align-items: center; }
+.key-presets .preset-label { color: var(--text-dim); font-size: 11.5px; }
+/* 辅助模型下拉的行内标签(与预设行同款) */
+#apikey-modal .form-row .preset-label { color: var(--text-dim); font-size: 11.5px; min-width: 52px; align-self: center; }
+.key-chip {
+  font-family: var(--mono); font-size: 10.5px; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 10px; padding: 1px 7px;
+  white-space: nowrap; user-select: none;
+}
+
+/* ---------------- AIGC 任务卡片(新媒体板块,v0.9.0) ---------------- */
+/* audio/model 板块首版无参考图入口 */
+body.sec-audio #btn-add-attach, body.sec-model #btn-add-attach { display: none; }
+
+.aigc-card {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; max-width: 640px;
+}
+.aigc-card-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  font-size: 11.5px; color: var(--text-dim);
+}
+.aigc-status { font-weight: 600; }
+.aigc-status.st-done { color: var(--green); }
+.aigc-status.st-fail, .aigc-status.st-timeout, .aigc-status.st-interrupted { color: var(--red); }
+.aigc-cancel {
+  margin-left: auto; background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 12px; padding: 0 4px;
+}
+.aigc-cancel:hover { color: var(--text); }
+.aigc-progress { font-size: 12.5px; color: var(--text-dim); }
+.aigc-progress .spin { color: var(--accent); margin-right: 4px; }
+.aigc-error { font-size: 12.5px; color: var(--red); white-space: pre-wrap; }
+.aigc-note { font-size: 12px; color: var(--text-dim); }
+.aigc-media { max-width: 100%; border-radius: 6px; display: block; }
+video.aigc-media { max-height: 360px; }
+.aigc-audio { width: 100%; }
+.aigc-file {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12.5px; padding: 4px 0;
+}
+.send-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---------------- 代码高亮预览(v0.9.1) ---------------- */
+.code-view {
+  margin: 6px 0 0; padding: 10px 12px; border-radius: 8px;
+  background: #14120f; border: 1px solid var(--border);
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
+  white-space: pre; overflow: auto; max-height: 480px;
+}
+.code-view-path {
+  font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+  margin-top: 4px; word-break: break-all;
+}
+.code-view-more { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.editor-preview {
+  flex: 1; margin: 0; padding: 12px 14px; background: #14120f; color: var(--text);
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  white-space: pre; overflow: auto;
+}
+
+/* ---------------- 侧栏项目右键菜单(v0.9.1) ---------------- */
+.ctx-menu {
+  position: fixed; z-index: 120; min-width: 140px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.5); overflow: hidden; padding: 4px;
+}
+.ctx-menu button {
+  display: block; width: 100%; text-align: left; padding: 7px 12px;
+  background: none; border: none; color: var(--text); font-size: 12.5px;
+  border-radius: 6px; cursor: pointer;
+}
+.ctx-menu button:hover { background: var(--bg-hover, rgba(255,255,255,.08)); }
+
+/* sdk-only 元素仅 code/chat(SDK 会话)板块显示;新媒体板块隐藏(v0.9.6) */
+body.sec-image .sdk-only, body.sec-video .sdk-only,
+body.sec-audio .sdk-only, body.sec-model .sdk-only { display: none !important; }
+
+/* 生成产物文件条(v0.9.6):文件名可点击打开/预览 */
+.aigc-file-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.aigc-file-open {
+  font-family: var(--mono); font-size: 11.5px; color: var(--accent);
+  cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.aigc-file-open:hover { text-decoration: underline; }

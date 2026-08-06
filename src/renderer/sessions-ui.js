@@ -1,12 +1,29 @@
 // Sidebar: project groups with sessions nested under each group.
 // Group header: editable name, per-group "+" (new session), file manager
 // (load files/folders with live read-only/editable tags).
-import { api, state, $, escapeHtml, emit, on } from './state.js';
+import { api, state, $, escapeHtml, emit, on, parseModelValue } from './state.js';
 import { ensureSession, setActiveSession } from './chat.js';
 
 const attention = new Set();
 const collapsedProjects = new Set();
 const openFilePanels = new Set();
+
+// --- 项目右键菜单(v0.9.1):打开对应文件夹 -------------------------------------
+let ctxMenuEl = null;
+function closeCtxMenu() { if (ctxMenuEl) { ctxMenuEl.remove(); ctxMenuEl = null; } }
+function showProjMenu(x, y, p) {
+  closeCtxMenu();
+  const el = document.createElement('div');
+  el.className = 'ctx-menu';
+  el.innerHTML = `<button data-act="open">打开文件夹</button>`;
+  el.querySelector('[data-act="open"]').onclick = () => { closeCtxMenu(); api.projOpenFolder(p.id); };
+  document.body.appendChild(el);
+  // 贴边时向内收,避免菜单超出窗口
+  const r = el.getBoundingClientRect();
+  el.style.left = Math.min(x, window.innerWidth - r.width - 8) + 'px';
+  el.style.top = Math.min(y, window.innerHeight - r.height - 8) + 'px';
+  ctxMenuEl = el;
+}
 
 export async function refreshList() {
   const [projList, sessList] = await Promise.all([api.projList(), api.sessList()]);
@@ -22,10 +39,10 @@ export async function refreshList() {
     byProject.get(pid).push(m);
   }
 
-  // --- chat 板块:纯对话会话平铺列表(无项目组、无独立会话) ---
-  if (state.section === 'chat') {
+  // --- 非 code 板块(chat/新媒体):对应 kind 的会话平铺列表(无项目组、无独立会话) ---
+  if (state.section !== 'code') {
     const chats = (byProject.get('_none') || [])
-      .filter((m) => m.kind === 'chat')
+      .filter((m) => m.kind === state.section)
       .filter((m) => showArchived ? true : !m.archived)
       .filter((m) => !filter || (m.title || '').toLowerCase().includes(filter))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
@@ -95,6 +112,10 @@ export async function refreshList() {
       filesOpen ? openFilePanels.delete(p.id) : openFilePanels.add(p.id);
       refreshList();
     };
+    head.oncontextmenu = (e) => {
+      e.preventDefault();
+      showProjMenu(e.clientX, e.clientY, p);
+    };
 
     renderProjectFiles(li.querySelector('.proj-files'), p);
 
@@ -103,9 +124,9 @@ export async function refreshList() {
     ul.appendChild(li);
   }
 
-  // --- 独立会话区(不属于任何项目组;chat 板块会话只在 chat 模式显示) ---
+  // --- 独立会话区(不属于任何项目组;仅 code 会话,非 code 板块会话只在各自板块显示) ---
   const standalone = (byProject.get('_none') || [])
-    .filter((m) => m.standalone && m.kind !== 'chat')
+    .filter((m) => m.standalone && (!m.kind || m.kind === 'code'))
     .filter((m) => showArchived ? true : !m.archived)
     .filter((m) => !filter || (m.title || '').toLowerCase().includes(filter))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
@@ -205,11 +226,11 @@ function renderSessionItem(p, m) {
   };
   li.querySelector('[data-op="side"]').onclick = async () => {
     const meta = await api.sessCreate({
-      cwd: m.cwd, model: m.model, permissionMode: m.permissionMode,
+      cwd: m.cwd, model: m.model, keyId: m.keyId || null, permissionMode: m.permissionMode,
       effort: m.effort || null, // side chat 继承父会话的推理深度设置
       title: (m.title || '会话') + ' · side', parentId: m.id,
       projectId: m.projectId, forkFrom: m.sdkSessionId || null,
-      standalone: m.standalone || undefined, kind: m.kind || undefined, // 独立/chat 会话的 side 不进项目组
+      standalone: m.standalone || undefined, kind: m.kind || undefined, // 独立/非 code 板块会话的 side 不进项目组
     });
     ensureSession(meta.id, meta);
     setActiveSession(meta.id);
@@ -238,10 +259,12 @@ function shortModel(model) {
 }
 
 async function createSessionInProject(p) {
+  const sel = parseModelValue($('model-sel').value);
   const meta = await api.sessCreate({
     cwd: (p.dirs && p.dirs[0]) || state.cwd,
     projectId: p.id,
-    model: $('model-sel').value || null,
+    model: sel.model,
+    keyId: sel.keyId,
     permissionMode: $('perm-mode').value,
     effort: null, // 推理深度跟随默认,由会话内下拉按需约束
     useWorktree: $('new-worktree').checked,
@@ -254,13 +277,21 @@ async function createSessionInProject(p) {
 
 // New session: standalone by default (v0.5.0) — lives outside project groups
 // with the home directory as cwd unless a specific folder is given.
-// Project sessions are created via the group's own ＋ button or the landing
-// "选择项目目录" flow.
+// Project sessions are created via the group's own ＋ button or the ⋯ menu's
+// "打开目录" flow.
 export async function createSession(extra = {}) {
+  const sel = parseModelValue($('model-sel').value);
+  const board = state.section;
+  // 新媒体板块(image/video/audio/model)必须选中模型;无可用模型时拦截并提示
+  if (board !== 'code' && board !== 'chat' && !sel.model) {
+    alert('该板块暂无可用模型,请先在「配置 API Key」中刷新 Kuro 网关的模型列表。');
+    return null;
+  }
   const meta = await api.sessCreate({
     standalone: true,
-    kind: state.section === 'chat' ? 'chat' : undefined, // chat 板块的新会话打 chat 标记
-    model: $('model-sel').value || null,
+    kind: board !== 'code' ? board : undefined, // 非 code 板块的新会话打对应 kind 标记
+    model: sel.model,
+    keyId: sel.keyId,
     permissionMode: $('perm-mode').value,
     effort: null, // 推理深度跟随默认,由会话内下拉按需约束
     ...extra,
@@ -290,6 +321,7 @@ export function init() {
   api.on('sess:attention', ({ sid }) => {
     if (sid !== state.activeSid) { attention.add(sid); refreshList(); }
   });
+  document.addEventListener('click', closeCtxMenu); // 点别处关闭项目右键菜单
   on('session-status', () => refreshList());
   on('project-files-changed', () => refreshList());
   api.on('cron:fired', () => refreshList());

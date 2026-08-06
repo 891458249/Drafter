@@ -1,6 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
+const crypto = require('crypto');
+const { pathToFileURL } = require('url');
 
 // 允许通过环境变量覆盖 userData(便携模式/并行实例/隔离测试)
 if (process.env.CLAUDE_UI_USERDATA) {
@@ -18,8 +21,21 @@ const logger = require('./src/main/logger');
 const perms = require('./src/main/perms');
 const updater = require('./src/main/updater');
 const keys = require('./src/main/keys');
+const aigc = require('./src/main/aigc');
+const aux = require('./src/main/aux-models');
+const title = require('./src/main/title');
 const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
+
+// 新媒体板块(kind):image/video/audio/model 会话不走 Agent SDK,走 AIGC 任务闭环
+const MEDIA_KINDS = ['image', 'video', 'audio', 'model'];
+const isMediaKind = (kind) => MEDIA_KINDS.includes(kind);
+const AIGC_DIR = () => path.join(app.getPath('userData'), 'aigc');
+
+// aigc:// 自定义协议:把 <userData>/aigc/ 下的产物文件映射给渲染端 <img>/<video>/<audio>
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'aigc', privileges: { secure: true, supportFetchAPI: true, stream: true } },
+]);
 
 let mainWindow = null;
 const getWindow = () => mainWindow;
@@ -58,12 +74,13 @@ if (store.getSetting('disableGpu')) {
   app.disableHardwareAcceleration();
 }
 
-// Env for child processes: inject the ACTIVE API key if present.
-// Explicitly neutralize the other credential/env vars so per-key switching
-// wins over ~/.claude/settings.json env and inherited process env.
-function buildEnv(extra = {}) {
+// Env for child processes: inject the API key for the given session keyId
+// (falling back to the ACTIVE/default key). Explicitly neutralize the other
+// credential/env vars so per-key switching wins over ~/.claude/settings.json
+// env and inherited process env.
+function buildEnv(extra = {}, keyId = null) {
   const env = { ...process.env, FORCE_COLOR: '0', ...extra };
-  const k = keys.activeKey();
+  const k = (keyId && keys.byId(keyId)) || keys.activeKey();
   if (k) {
     if (k.kind === 'authToken') {
       env.ANTHROPIC_AUTH_TOKEN = k.key;
@@ -87,7 +104,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 560,
     backgroundColor: '#1a1815',
-    title: 'Claude UI',
+    title: 'DeskTopUI',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -106,13 +123,27 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // aigc://<trace_id>/<filename> → <userData>/aigc/<trace_id>/<filename>(防路径穿越)
+  protocol.handle('aigc', (req) => {
+    try {
+      const u = new URL(req.url);
+      const traceId = u.hostname;
+      const name = decodeURIComponent(u.pathname).replace(/^\/+/, '');
+      if (!/^[\w-]+$/.test(traceId) || !name || name.includes('..') || /[\\/]/.test(name)) {
+        return new Response('bad request', { status: 400 });
+      }
+      return net.fetch(pathToFileURL(path.join(AIGC_DIR(), traceId, name)).toString());
+    } catch {
+      return new Response('bad request', { status: 400 });
+    }
+  });
   // auto-update: check GitHub Releases in the background (silent on failure)
   updater.start(getWindow, store);
   // migration: attach legacy sessions (created before project groups) to projects
-  // (standalone/chat sessions are intentionally project-less — never migrate them)
+  // (standalone/non-code-kind sessions are intentionally project-less — never migrate them)
   try {
     for (const meta of store.listSessions()) {
-      if (meta.projectId || !meta.cwd || meta.standalone || meta.kind === 'chat') continue;
+      if (meta.projectId || !meta.cwd || meta.standalone || (meta.kind && meta.kind !== 'code')) continue;
       const baseDir = meta.worktreePath
         ? path.dirname(path.dirname(meta.worktreePath))
         : meta.cwd;
@@ -192,6 +223,38 @@ ipcMain.handle('proj:addFiles', (_e, { id, paths, tag }) => projects.addFiles(id
 ipcMain.handle('proj:setTag', (_e, { id, path: fp, tag }) => projects.setTag(id, fp, tag));
 ipcMain.handle('proj:removeFile', (_e, { id, path: fp }) => projects.removeFile(id, fp));
 ipcMain.handle('proj:prune', () => projects.pruneMissing());
+// 独立会话「设为项目文件夹」(v0.9.1):目录建/复用项目组(名=文件夹名),会话脱离独立区归入该项目
+// 同时把会话 cwd 切换为项目目录(v0.9.7 修复):此前只改 projectId,主工作目录滞留主目录,
+// 无关路径(含主目录 local settings 的 additionalDirectories)会泄漏进所有被认领的会话
+ipcMain.handle('proj:adoptDir', async (_e, { sid, dir }) => {
+  const p = projects.ensureForDir(dir);
+  const norm = (x) => path.resolve(x).toLowerCase();
+  const patch = { id: sid, projectId: p.id, standalone: false, cwd: dir };
+  const s = sessions.get(sid);
+  // extraDirs 里与新 cwd 相同的登记是冗余(重启后 cwd 即目录本身),一并清掉
+  if (s && Array.isArray(s.meta.extraDirs)) {
+    const extra = s.meta.extraDirs.filter((d) => norm(d) !== norm(dir));
+    if (extra.length !== s.meta.extraDirs.length) patch.extraDirs = extra;
+  }
+  store.upsertSession(patch);
+  if (s) {
+    const cwdChanged = norm(s.meta.cwd || '') !== norm(dir);
+    Object.assign(s.meta, patch);
+    if (cwdChanged && s.running) {
+      if (s.busy) s.needRestart = true;   // 回合进行中不打断,回合结束后自动重启
+      else { s.stop(); await s.start({ resume: !!s.meta.sdkSessionId }); }
+    }
+  }
+  return p;
+});
+// 侧栏项目右键「打开文件夹」(v0.9.1):打开项目主目录
+ipcMain.handle('proj:openFolder', (_e, id) => {
+  const p = projects.get(id);
+  const dir = p && p.dirs && p.dirs[0];
+  if (!dir || !fs.existsSync(dir)) return false;
+  shell.openPath(dir);
+  return true;
+});
 ipcMain.handle('proj:memory', (_e, id) => {
   const p = projects.get(id);
   return p ? { path: projects.memoryPath(p), content: projects.readMemory(p) } : null;
@@ -202,7 +265,7 @@ ipcMain.handle('apikey:get', () => {
   const k = keys.activeKey();
   return k ? { configured: true, hint: '…' + k.key.slice(-4), name: k.name } : { configured: false };
 });
-ipcMain.handle('apikey:set', (_e, key) => keys.save({ name: '默认 Key', key: (key || '').trim() }));
+ipcMain.handle('apikey:set', (_e, key) => keys.save({ name: 'Kuro', key: (key || '').trim() }));
 ipcMain.handle('keys:list', () => ({ list: keys.list(), activeId: store.getSetting('activeKeyId') }));
 ipcMain.handle('keys:save', (_e, entry) => keys.save(entry));
 ipcMain.handle('keys:delete', (_e, id) => keys.remove(id));
@@ -211,6 +274,19 @@ ipcMain.handle('keys:refreshModels', (_e, id) => keys.refreshModels(id));
 ipcMain.handle('keys:activeModels', () => keys.activeModels());
 ipcMain.handle('keys:setModelsEnabled', (_e, { id, enabled }) => keys.setModelsEnabled(id, enabled));
 ipcMain.handle('keys:queryBalance', (_e, id) => keys.queryBalance(id)); // v0.8.1 自动余额查询
+ipcMain.handle('keys:setEnabled', (_e, { id, enabled }) => keys.setEnabled(id, enabled)); // v0.8.2 多选激活
+ipcMain.handle('keys:enabledModels', () => keys.enabledModels()); // v0.8.2 启用 Key 的模型聚合
+
+// 辅助模型配置(v0.9.1):settings.auxModels = { image, audio, video, model },值 'keyId|modelId' 或空
+ipcMain.handle('settings:getAuxModels', () => store.getSetting('auxModels', {}) || {});
+ipcMain.handle('settings:setAuxModels', (_e, m) => {
+  const clean = {};
+  for (const k of ['image', 'audio', 'video', 'model']) {
+    if (m && typeof m[k] === 'string' && m[k]) clean[k] = m[k];
+  }
+  store.setSetting('auxModels', clean);
+  return { ok: true };
+});
 
 ipcMain.handle('shell:openExternal', (_e, url) => {
   if (/^https?:\/\//.test(url)) shell.openExternal(url);
@@ -245,8 +321,26 @@ ipcMain.handle('update:install', () => { updater.installAndRestart(); return tru
 ipcMain.handle('sess:sdkStatus', () => sessions.sdkAvailable());
 ipcMain.handle('sess:list', () => sessions.list());
 ipcMain.handle('sess:create', async (_e, opts) => {
-  if (opts.standalone || opts.kind === 'chat') {
-    // 独立会话 / chat 板块会话:不指定目录时用主目录,绝不自动建项目组
+  if (isMediaKind(opts.kind)) {
+    // 新媒体板块会话(image/video/audio/model):不进 Agent SDK,只落 store 元数据;
+    // 消息走 AIGC 任务闭环(aigc:send),历史沿用每会话 JSONL(sess:history 可读)
+    const id = 's_' + crypto.randomUUID().slice(0, 12);
+    return store.upsertSession({
+      id,
+      kind: opts.kind,
+      model: opts.model || null,
+      keyId: opts.keyId || (keys.activeKey() || {}).id || null,
+      cwd: os.homedir(),
+      projectId: null,
+      standalone: true,
+      archived: false,
+      title: opts.title || null,
+      parentId: opts.parentId || null,
+      sdkSessionId: null,
+    });
+  }
+  if (opts.standalone || (opts.kind && opts.kind !== 'code')) {
+    // 独立会话 / 非 code 板块会话(chat/新媒体):不指定目录时用主目录,绝不自动建项目组
     opts = { ...opts, cwd: opts.cwd || os.homedir(), projectId: null };
   } else if (!opts.projectId && opts.cwd) {
     // resolve the project group: explicit id, or auto-create for a new path
@@ -262,9 +356,66 @@ ipcMain.handle('sess:create', async (_e, opts) => {
   if (!opts.keyId) opts = { ...opts, keyId: (keys.activeKey() || {}).id || null };
   return sessions.create(opts);
 });
-ipcMain.handle('sess:send', (_e, { sid, content }) => {
+// 会话自动命名(v0.9.1):首条消息发送后异步概括标题;autoTitle 占位防重入,
+// 写回前若用户已手动命名则不覆盖(title.js 内再查一次)
+function maybeAutoTitle(sid, text) {
+  const meta = store.listSessions().find((x) => x.id === sid);
+  if (!meta || (meta.title && meta.title.trim()) || meta.autoTitle) return;
+  store.upsertSession({ id: sid, autoTitle: true });
+  const keyEntry = keys.byId(meta.keyId) || keys.activeKey();
+  const model = meta.model
+    || (((keys.enabledModels() || []).find((e) => keyEntry && e.keyId === keyEntry.id) || {}).model);
+  title.autoTitle(text, {
+    keyEntry, model,
+    getCurrentTitle: () => (store.listSessions().find((x) => x.id === sid) || {}).title,
+    applyTitle: (t) => {
+      sessions.rename(sid, t);
+      sessions.send('sess:event', { sid, ev: { type: 'ui_title', title: t } });
+    },
+  }).catch(() => {});
+}
+
+// 从消息内容里提取首段文本(字符串或 content blocks)
+function firstText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('\n');
+  }
+  return '';
+}
+
+ipcMain.handle('sess:send', async (_e, { sid, content }) => {
   const s = sessions.get(sid);
-  return s ? s.send(content) : false;
+  if (!s) return false;
+  // /add-dir(v0.9.2):SDK 流式输入不会执行该命令,客户端拦截——登记 extraDirs 并重启 query 生效
+  const addDirMatch = typeof content === 'string' && content.match(/^\/add-dir\s+(\S(?:.*\S)?)\s*$/);
+  if (addDirMatch) {
+    const dir = addDirMatch[1].replace(/^["']|["']$/g, '');
+    if (!fs.existsSync(dir)) {
+      sessions.send('sess:event', { sid, ev: { type: 'ui_aux', message: '目录不存在,未添加:' + dir } });
+      return false;
+    }
+    s._persistUserEcho(content); // 历史回放保留命令回显
+    await s.addDir(dir);
+    if (s.meta.projectId) projects.addDir(s.meta.projectId, dir); // 项目会话同步登记(幂等)
+    const note = s.needRestart ? '已登记目录(当前回合结束后生效):' : '已添加目录:';
+    sessions.send('sess:event', { sid, ev: { type: 'ui_aux', message: note + dir } });
+    return true;
+  }
+  let sent;
+  // Code/Chat 辅助模型(v0.9.1):媒体附件块先经辅助模型分析/元信息兜底,再发给主模型
+  if (Array.isArray(content)) {
+    const injected = await aux.injectMedia(content, {
+      auxModels: store.getSetting('auxModels', {}) || {},
+      keysById: (id) => keys.byId(id),
+      onStatus: (msg) => sessions.send('sess:event', { sid, ev: { type: 'ui_aux', message: msg } }),
+    });
+    sent = await s.send(injected, content); // 历史回显保留原始附件卡片,SDK 收注入后的内容
+  } else {
+    sent = await s.send(content);
+  }
+  if (sent) maybeAutoTitle(sid, firstText(content));
+  return sent;
 });
 ipcMain.handle('sess:interrupt', async (_e, sid) => {
   const s = sessions.get(sid);
@@ -279,9 +430,13 @@ ipcMain.handle('sess:setMode', (_e, { sid, mode }) => {
   const s = sessions.get(sid);
   return s ? s.setPermissionMode(mode) : false;
 });
-ipcMain.handle('sess:setModel', (_e, { sid, model }) => {
+ipcMain.handle('sess:setModel', (_e, { sid, model, keyId }) => {
   const s = sessions.get(sid);
-  return s ? s.setModel(model) : false;
+  if (!s) return false;
+  // 防御(v0.9.5):新媒体类模型不能绑到 code/chat(SDK)会话——否则走 /v1/messages 必 403「模型未配置」
+  const isMedia = !!(s.meta.kind && s.meta.kind !== 'code' && s.meta.kind !== 'chat');
+  if (!isMedia && model && keyId && keys.modelType(keyId, model) !== 'chat') return false;
+  return s.setModel(model, keyId);
 });
 ipcMain.handle('sess:setEffort', (_e, { sid, effort }) => {
   const s = sessions.get(sid);
@@ -301,6 +456,99 @@ ipcMain.handle('sess:archive', async (_e, { sid, archived }) => {
 });
 ipcMain.handle('sess:remove', (_e, sid) => { sessions.remove(sid); return true; });
 ipcMain.handle('sess:setActive', (_e, sid) => { sessions.setActive(sid); return true; });
+
+// ---------------------------------------------------------------------------
+// IPC: AIGC 生成任务闭环(新媒体板块,v0.9.0)
+// ---------------------------------------------------------------------------
+const aigcTasks = new Map(); // traceId -> { cancel }
+
+// 推送任务状态:持久化进会话 JSONL(历史回显用) + 实时事件给渲染端
+function aigcPush(sessionId, traceId, model, prompt, payload) {
+  const ev = { type: 'aigc_task', traceId, model, prompt, ts: Date.now(), ...payload };
+  store.appendSessionEvent(sessionId, ev);
+  const win = getWindow();
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('aigc:status', { sessionId, traceId, model, prompt, ...payload });
+  }
+}
+
+// 后台跑完整个任务:轮询 → done 后下载产物 → 推送终态
+function aigcRun(sessionId, keyEntry, traceId, model, prompt) {
+  const handle = aigc.pollTask(keyEntry, traceId, (st) => {
+    if (st.status === 'done') return; // done 等下载完成后连同 files 一起推
+    aigcPush(sessionId, traceId, model, prompt, {
+      status: st.status,
+      failReason: st.fail_reason || st.last_retry_reason || null,
+    });
+  });
+  aigcTasks.set(traceId, handle);
+  handle.promise.then(async (final) => {
+    aigcTasks.delete(traceId);
+    if (!final || final.status !== 'done') return; // 取消 / fail / timeout 已在回调里推过
+    try {
+      aigcPush(sessionId, traceId, model, prompt, { status: 'downloading' });
+      const files = await aigc.downloadResults(keyEntry, traceId, path.join(AIGC_DIR(), traceId));
+      aigcPush(sessionId, traceId, model, prompt, { status: 'done', files });
+    } catch (e) {
+      aigcPush(sessionId, traceId, model, prompt, { status: 'fail', failReason: '产物下载失败:' + e.message });
+    }
+  }).catch((e) => {
+    aigcTasks.delete(traceId);
+    aigcPush(sessionId, traceId, model, prompt, { status: 'fail', failReason: e.message });
+  });
+}
+
+ipcMain.handle('aigc:send', async (_e, { sessionId, keyId, model, prompt, refImages }) => {
+  const meta = store.listSessions().find((x) => x.id === sessionId);
+  if (!meta || !isMediaKind(meta.kind)) return { ok: false, error: '会话不存在或非新媒体会话' };
+  const keyEntry = keys.byId(keyId || meta.keyId);
+  if (!keyEntry) return { ok: false, error: '未找到可用的 API Key' };
+  const useModel = model || meta.model;
+  if (!useModel) return { ok: false, error: '未选择模型' };
+  try {
+    const { traceId } = await aigc.createTask(keyEntry, meta.kind, {
+      modelKey: useModel, prompt, refImages: refImages || [],
+    });
+    // 用户消息与任务占位消息持久化(参考图保留 base64,历史回放可显示缩略图)
+    store.appendSessionEvent(sessionId, { type: 'aigc_user', prompt, refImages: refImages || [], ts: Date.now() });
+    store.appendSessionEvent(sessionId, { type: 'aigc_task', traceId, model: useModel, status: 'pending', ts: Date.now() });
+    // 新媒体会话自动命名(v0.9.1):媒体模型不是 chat 模型,直接截取 prompt 前 20 字
+    const m2 = store.listSessions().find((x) => x.id === sessionId);
+    if (m2 && !(m2.title && m2.title.trim()) && !m2.autoTitle) {
+      const t = title.fallbackTitle(prompt);
+      store.upsertSession({ id: sessionId, autoTitle: true, title: t });
+      sessions.send('sess:event', { sid: sessionId, ev: { type: 'ui_title', title: t } });
+    }
+    aigcRun(sessionId, keyEntry, traceId, useModel, prompt);
+    return { ok: true, traceId };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('aigc:cancel', (_e, { traceId }) => {
+  const h = aigcTasks.get(traceId);
+  if (h) h.cancel();
+  return true;
+});
+
+// 3D 产物卡片「打开所在文件夹」(限制在 aigc 产物目录内)
+ipcMain.handle('shell:showItemInFolder', (_e, p) => {
+  if (typeof p !== 'string') return false;
+  const abs = path.resolve(p);
+  if (!abs.startsWith(path.resolve(AIGC_DIR()) + path.sep)) return false;
+  shell.showItemInFolder(abs);
+  return true;
+});
+
+// 生成文件「点击打开」(v0.9.6):系统默认程序打开,同样限制在 aigc 产物目录内
+ipcMain.handle('shell:openPath', (_e, p) => {
+  if (typeof p !== 'string') return false;
+  const abs = path.resolve(p);
+  if (!abs.startsWith(path.resolve(AIGC_DIR()) + path.sep)) return false;
+  shell.openPath(abs);
+  return true;
+});
 
 // ---------------------------------------------------------------------------
 // IPC: git / diff / PR
@@ -324,6 +572,7 @@ ipcMain.handle('files:watch', (_e, { key, path: abs }) => {
 });
 ipcMain.handle('files:unwatch', (_e, key) => { files.unwatchFile(key); return true; });
 ipcMain.handle('files:readImage', (_e, absPath) => files.readImageBase64(absPath));
+ipcMain.handle('files:stat', (_e, absPath) => files.statFile(absPath)); // 媒体附件卡片显示大小用
 
 // ---------------------------------------------------------------------------
 // IPC: slash commands / mcp / cron

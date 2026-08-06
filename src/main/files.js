@@ -103,4 +103,14 @@ function readImageBase64(absPath) {
   }
 }
 
-module.exports = { listFiles, readFile, saveFile, watchFile, unwatchFile, readImageBase64 };
+// 取文件大小/名称(媒体附件卡片用;媒体本体在辅助分析时才读取)
+function statFile(absPath) {
+  try {
+    const st = fs.statSync(absPath);
+    return { ok: true, size: st.size, name: path.basename(absPath) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+module.exports = { listFiles, readFile, saveFile, watchFile, unwatchFile, readImageBase64, statFile };

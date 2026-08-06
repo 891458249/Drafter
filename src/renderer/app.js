@@ -1,5 +1,5 @@
-// App entry: landing, project open, topbar, panels, modals, shortcuts, wiring.
-import { api, state, $, escapeHtml, on, emit, fmtTokens } from './state.js';
+// App entry: boot, project open, topbar, panels, modals, shortcuts, wiring.
+import { api, state, $, escapeHtml, on, emit, fmtTokens, parseModelValue, updateKeyChips } from './state.js';
 import * as chat from './chat.js';
 import * as sessionsUi from './sessions-ui.js';
 import * as input from './input.js';
@@ -66,100 +66,35 @@ $('update-chip').onclick = () => {
 };
 
 // ---------------------------------------------------------------------------
-// Landing
+// Boot(v0.9.3 起无首屏落地页):直接进对话页 —— 恢复最近会话,没有则自动建独立会话;
+// 项目目录不再进门,等用户在会话里按需添加(＋文件夹 / ⋯菜单)。
 // ---------------------------------------------------------------------------
-async function initLanding() {
-  const store = await api.getStore();
-  const recent = store.recentProjects || [];
-  renderRecent(recent);
-  initOnboarding(store.settings || {});
+async function boot() {
   populateModelSelects(); // 按活跃 Key 填充模型下拉(v0.7.0)
   const sdk = await api.sdkStatus();
   if (!sdk.ok) {
     const w = $('sdk-warning');
     w.classList.remove('hidden');
     w.textContent = 'Agent SDK 未安装,会话功能不可用。请在项目目录执行:npm install @anthropic-ai/claude-agent-sdk。错误:' + (sdk.error || '');
-    return; // SDK 不可用时停在首屏显示提示
   }
-  // 无全局目录:直接恢复最近活跃的会话(跨所有项目组);没有会话则停留首屏
   const list = await api.sessList();
   const latest = list
     .filter((m) => !m.archived)
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
   if (latest) {
-    enterWorkspace();
     chat.ensureSession(latest.id, latest);
     chat.setActiveSession(latest.id);
-    sessionsUi.refreshList();
+  } else {
+    await sessionsUi.createSession(); // 首次打开:自动创建独立会话,目录留空
   }
-}
-
-function renderRecent(list) {
-  const ul = $('recent-list');
-  ul.innerHTML = '';
-  if (!list.length) {
-    const li = document.createElement('li');
-    li.textContent = '(暂无)';
-    li.style.cursor = 'default';
-    ul.appendChild(li);
-    return;
-  }
-  for (const dir of list) {
-    const li = document.createElement('li');
-    li.textContent = dir;
-    li.title = dir;
-    li.onclick = () => openDirAsProject(dir);
-    ul.appendChild(li);
-  }
-}
-
-$('btn-pick').onclick = async () => {
-  const res = await api.pickDir();
-  if (res && res.dir) openDirAsProject(res.dir);
-};
-
-// ---------------------------------------------------------------------------
-// First-run onboarding card (landing; shows once until completed or dismissed)
-// ---------------------------------------------------------------------------
-const obState = { apikey: false, dir: false, mode: false };
-
-async function initOnboarding(settings) {
-  if (settings && settings.firstRunCompleted) return;
+  sessionsUi.refreshList();
+  // 未配置 API Key:直接弹出配置窗(取代原首屏三步引导)
   const keyInfo = await api.apiKeyGet();
-  if (keyInfo.configured) return; // 已有 key,无需引导
-  $('onboarding').classList.remove('hidden');
-}
-
-function obMark(step) {
-  const el = document.querySelector(`.ob-step[data-step="${step}"]`);
-  if (!el || el.classList.contains('done')) return;
-  el.classList.add('done');
-  el.querySelector('.ob-state').textContent = '✓';
-  obState[step] = true;
-  if (obState.apikey && obState.dir && obState.mode) obFinish();
-}
-
-async function obFinish() {
-  await api.setSetting('firstRunCompleted', true);
-  $('onboarding').classList.add('hidden');
-}
-
-$('ob-close').onclick = obFinish;
-document.querySelector('.ob-step[data-step="apikey"]').onclick = () => openApiKeyModal();
-document.querySelector('.ob-step[data-step="dir"]').onclick = async () => {
-  const res = await api.pickDir();
-  if (res && res.dir) { obMark('dir'); openDirAsProject(res.dir); }
-};
-document.querySelector('.ob-step[data-step="mode"]').onclick = () => obMark('mode');
-
-function enterWorkspace() {
-  $('landing').classList.add('hidden');
-  $('workspace').classList.remove('hidden');
+  if (!keyInfo.configured) openApiKeyModal();
 }
 
 // 打开一个目录:目录归属各自的项目组(不存在则自动创建),没有全局目录概念。
 async function openDirAsProject(dir) {
-  enterWorkspace();
   await api.addRecent(dir);
   const list = await api.sessList();
   const existing = list
@@ -169,9 +104,11 @@ async function openDirAsProject(dir) {
     chat.ensureSession(existing.id, existing);
     chat.setActiveSession(existing.id);
   } else {
+    const sel = parseModelValue($('model-sel').value);
     const meta = await api.sessCreate({
       cwd: dir,
-      model: $('model-sel').value || null,
+      model: sel.model,
+      keyId: sel.keyId,
       permissionMode: $('perm-mode').value,
       effort: null, // 推理深度:默认跟随 SDK/模型,由会话内下拉按需约束
     });
@@ -193,14 +130,7 @@ $('perm-mode').onchange = async () => {
   }
 };
 
-$('model-sel').onchange = async () => {
-  if (state.activeSid) {
-    await api.sessSetModel(state.activeSid, $('model-sel').value || null);
-    const s = state.sessions.get(state.activeSid);
-    if (s) s.meta.model = $('model-sel').value || null;
-    $('model-sel-composer').value = $('model-sel').value;
-  }
-};
+// 模型下拉(会话级,输入区工具栏)的 change 处理器在 input.js,此处不再绑定
 
 $('view-mode').onchange = () => chat.setViewMode($('view-mode').value);
 
@@ -409,7 +339,49 @@ $('perms-close').onclick = () => $('perms-modal').classList.add('hidden');
 // ---------------------------------------------------------------------------
 // API keys modal(多 Key 管理 + 按 Key 识别模型)
 // ---------------------------------------------------------------------------
+// Key 预设:一键预填名称/Base URL/类型(secret 不预填,字段保持可编辑)
+const KEY_PRESETS = {
+  kuro: { name: 'Kuro', baseUrl: 'https://ai-gateway.kurogames.com', kind: 'authToken' },
+  kimi: { name: 'Kimi', baseUrl: 'https://api.kimi.com/coding/v1', kind: 'authToken' },
+  deepseek: { name: 'Deepseek', baseUrl: 'https://api.deepseek.com/anthropic', kind: 'authToken' },
+  gemini: { name: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com', kind: 'apiKey' },
+  chatgpt: { name: 'ChatGPT', baseUrl: 'https://api.openai.com', kind: 'apiKey' },
+};
+for (const btn of document.querySelectorAll('#apikey-modal [data-preset]')) {
+  btn.onclick = () => {
+    const p = KEY_PRESETS[btn.dataset.preset];
+    if (!p) return;
+    $('key-name').value = p.name;
+    $('key-baseurl').value = p.baseUrl;
+    $('key-kind').value = p.kind;
+  };
+}
+
+let editingKeyId = null; // 非 null = 模态框处于编辑态(保存时带 id)
+
+// 重置为新建态:清空表单、恢复标题与 secret 占位
+function resetKeyForm() {
+  editingKeyId = null;
+  $('apikey-form-title').textContent = '添加 API Key';
+  $('key-secret').placeholder = 'Key 内容';
+  for (const id of ['key-name', 'key-secret', 'key-baseurl', 'key-usageurl']) $(id).value = '';
+  $('key-kind').value = '';
+}
+
+// 进入编辑态:预填该 Key 的字段;secret 留空(保存时不修改),额度在行内编辑、保存时自动保留
+function startEditKey(k) {
+  editingKeyId = k.id;
+  $('apikey-form-title').textContent = '编辑 API Key';
+  $('key-secret').placeholder = '留空则不修改';
+  $('key-name').value = k.name || '';
+  $('key-kind').value = k.kind || '';
+  $('key-secret').value = '';
+  $('key-baseurl').value = k.baseUrl || '';
+  $('key-usageurl').value = k.usageUrl || '';
+}
+
 async function openApiKeyModal() {
+  resetKeyForm(); // 菜单/引导卡入口一律回到新建态
   $('apikey-status').textContent = '';
   $('apikey-modal').classList.remove('hidden');
   await renderKeysList();
@@ -430,6 +402,7 @@ async function openApiKeyModal() {
 async function renderKeysList() {
   const box = $('keys-list');
   const { list, activeId } = await api.keysList();
+  renderAuxModels(); // 辅助模型候选随 Key/模型缓存刷新(后台渲染,不阻塞)
   if (!list.length) {
     box.innerHTML = '<div class="mcp-row"><span style="color:var(--text-dim)">(暂无 Key,请在下方添加;未配置时回退 claude CLI 登录态)</span></div>';
     return;
@@ -443,7 +416,8 @@ async function renderKeysList() {
   };
   box.innerHTML = list.map((k) => `
     <div class="mcp-row">
-      <input type="radio" name="active-key" data-id="${k.id}" ${k.id === activeId ? 'checked' : ''} title="设为默认" />
+      <input type="checkbox" class="key-enabled" data-id="${k.id}" ${k.enabled ? 'checked' : ''} title="启用:该 Key 的模型加入会话下拉,可多选" />
+      <input type="radio" name="active-key" data-id="${k.id}" ${k.id === activeId ? 'checked' : ''} title="设为默认(「默认」模型与回退额度归账用)" />
       <span class="name">${escapeHtml(k.name)}</span>
       <span class="scope">${escapeHtml(k.keyHint)}${k.baseUrl ? ' · ' + escapeHtml(k.baseUrl) : ''} · ${k.kind === 'authToken' ? 'Token' : 'Key'}${k.models && k.models.length ? ' · ' + k.models.length + ' 模型' : ''}${k.modelsEnabled ? '(已勾选 ' + k.modelsEnabled.length + ')' : ''}</span>
       <span class="ops">
@@ -451,6 +425,7 @@ async function renderKeysList() {
         ${k.canBalance ? `<button class="btn btn-sm" data-op="balance" data-id="${k.id}" title="按 Base URL 自动查询余额">查余额</button>` : ''}
         ${k.usageUrl ? `<button class="btn btn-sm" data-op="usage" data-id="${k.id}" data-url="${escapeHtml(k.usageUrl)}" title="在浏览器打开用量页">打开用量页</button>` : ''}
         <button class="btn btn-sm" data-op="refresh" data-id="${k.id}" title="按此 Key 拉取模型列表">刷新模型</button>
+        <button class="btn btn-sm" data-op="edit" data-id="${k.id}" title="在下方表单中编辑此 Key">编辑</button>
         <button class="btn btn-sm" data-op="del" data-id="${k.id}">删除</button>
       </span>
     </div>
@@ -466,6 +441,13 @@ async function renderKeysList() {
   for (const r of box.querySelectorAll('input[name="active-key"]')) {
     r.onchange = async () => {
       await api.keysSetActive(r.dataset.id);
+      await populateModelSelects();
+      await renderKeysList();
+    };
+  }
+  for (const c of box.querySelectorAll('.key-enabled')) {
+    c.onchange = async () => {
+      await api.keysSetEnabled(c.dataset.id, c.checked);
       await populateModelSelects();
       await renderKeysList();
     };
@@ -503,6 +485,9 @@ async function renderKeysList() {
         }
       } else if (b.dataset.op === 'usage') {
         api.openExternal(b.dataset.url);
+      } else if (b.dataset.op === 'edit') {
+        const k = list.find((x) => x.id === b.dataset.id);
+        if (k) startEditKey(k);
       } else {
         await api.keysDelete(b.dataset.id);
         await populateModelSelects();
@@ -558,7 +543,53 @@ async function renderModelsPanel(panel, keyId) {
   };
 }
 
-$('btn-apikey-landing').onclick = openApiKeyModal;
+// --- 辅助模型配置(v0.9.1)------------------------------------------------------
+// 候选 = 所有启用 Key 勾选的完整模型列表(v0.9.2 起不再只限 chat 类,用户可自行挑选
+// 多模态模型;选中非 chat 模型导致分析失败时,aux-models 会注入元信息兜底)。
+// 选项标注模型类别(chat/image/…);值编码 keyId|modelId,空 = 不配置;change 即保存。
+const AUX_KINDS = ['image', 'audio', 'video', 'model'];
+async function renderAuxModels() {
+  let entries = [], saved = {};
+  const groupMap = new Map();
+  try {
+    entries = (await api.keysEnabledModels()) || [];
+    const { list } = await api.keysList();
+    for (const k of list) if (Array.isArray(k.modelGroups)) groupMap.set(k.id, k.modelGroups);
+    saved = (await api.auxModelsGet()) || {};
+  } catch {}
+  const typeOf = (keyId, model) => {
+    const groups = groupMap.get(keyId);
+    if (!groups) return 'chat';
+    const g = groups.find((x) => Array.isArray(x.models) && x.models.includes(model));
+    return g ? g.model_type : 'chat';
+  };
+  const byKey = new Map();
+  for (const e of entries) {
+    if (!byKey.has(e.keyId)) byKey.set(e.keyId, { name: e.keyName, models: [] });
+    byKey.get(e.keyId).models.push({ model: e.model, type: typeOf(e.keyId, e.model) });
+  }
+  let html = '<option value="">(不配置)</option>';
+  for (const [keyId, g] of byKey) {
+    html += `<optgroup label="${escapeHtml(g.name)}">` +
+      g.models.map((x) => `<option value="${keyId}|${escapeHtml(x.model)}">${escapeHtml(modelLabel(x.model))}${x.type !== 'chat' ? ' · ' + escapeHtml(x.type) : ''}</option>`).join('') +
+      '</optgroup>';
+  }
+  for (const kind of AUX_KINDS) {
+    const sel = $('aux-' + kind);
+    sel.innerHTML = html;
+    const cur = saved[kind] || '';
+    // 已保存的值不在候选里(key 被删/模型下市)时回退空
+    sel.value = cur && sel.querySelector(`option[value="${cur}"]`) ? cur : '';
+  }
+}
+for (const kind of AUX_KINDS) {
+  $('aux-' + kind).onchange = async () => {
+    const m = {};
+    for (const k of AUX_KINDS) { const v = $('aux-' + k).value; if (v) m[k] = v; }
+    await api.auxModelsSet(m);
+  };
+}
+
 $('apikey-cancel').onclick = () => $('apikey-modal').classList.add('hidden');
 $('apikey-save').onclick = async () => {
   const entry = {
@@ -568,13 +599,13 @@ $('apikey-save').onclick = async () => {
     kind: $('key-kind').value || undefined,
     usageUrl: $('key-usageurl').value.trim(),
   };
+  if (editingKeyId) entry.id = editingKeyId; // 编辑态带 id 走更新;secret 留空由主进程保留原值
   const st = $('apikey-status');
   const r = await api.keysSave(entry);
   st.className = 'modal-status ' + (r.ok ? 'ok' : 'err');
   if (!r.ok) { st.textContent = r.error || '保存失败'; return; }
-  obMark('apikey'); // 引导卡第一步(若在展示中)
-  st.textContent = '已保存。建议点「刷新模型」按此 Key 识别可用模型。';
-  $('key-secret').value = '';
+  st.textContent = editingKeyId ? '已保存修改。' : '已保存。建议点「刷新模型」按此 Key 识别可用模型。';
+  resetKeyForm(); // 保存后退出编辑态
   await populateModelSelects();
   await renderKeysList();
 };
@@ -589,16 +620,51 @@ function modelLabel(id) {
   if (!m) return s + bracket;
   return m[1][0].toUpperCase() + m[1].slice(1) + (m[2] ? ' ' + m[2] : '') + bracket;
 }
+// v0.8.2:按「启用」Key 分组聚合模型;选中项编码为 keyId|modelId,凭据与额度随 Key 走
+// 板块 → 模型类别(v0.9.0):code/chat 用文本对话模型;新媒体板块用同名 model_type
+const SECTION_MODEL_TYPE = { code: 'chat', chat: 'chat', image: 'image', video: 'video', audio: 'audio', model: 'model' };
 async function populateModelSelects() {
-  let models = null;
-  try { models = await api.keysActiveModels(); } catch {}
-  const ids = (models && models.length) ? models : FALLBACK_MODELS;
-  const html = '<option value="">默认</option>' + ids.map((id) => `<option value="${id}">${escapeHtml(modelLabel(id))}</option>`).join('');
-  for (const sel of [$('model-sel'), $('model-sel-composer')]) {
+  let entries = null;
+  const groupMap = new Map(); // keyId → modelGroups(Kuro 分组接口缓存)
+  try {
+    entries = await api.keysEnabledModels();
+    const { list } = await api.keysList();
+    for (const k of list) if (Array.isArray(k.modelGroups)) groupMap.set(k.id, k.modelGroups);
+  } catch {}
+  // 某模型在某 key 下的类别:查分组缓存;无分组(非 Kuro key)或查不到时视为 chat
+  const want = SECTION_MODEL_TYPE[state.section] || 'chat';
+  const typeOf = (keyId, model) => {
+    const groups = groupMap.get(keyId);
+    if (!groups) return 'chat';
+    const g = groups.find((x) => Array.isArray(x.models) && x.models.includes(model));
+    return g ? g.model_type : 'chat';
+  };
+  const filtered = (entries || []).filter((e) => typeOf(e.keyId, e.model) === want);
+  const isChatBoard = want === 'chat';
+  let html = isChatBoard ? '<option value="">默认</option>' : '';
+  if (filtered.length) {
+    const groups = new Map();
+    for (const e of filtered) {
+      if (!groups.has(e.keyId)) groups.set(e.keyId, { name: e.keyName, models: [] });
+      groups.get(e.keyId).models.push(e.model);
+    }
+    for (const [keyId, g] of groups) {
+      html += `<optgroup label="${escapeHtml(g.name)}">` +
+        g.models.map((m) => `<option value="${keyId}|${escapeHtml(m)}">${escapeHtml(modelLabel(m))}</option>`).join('') +
+        '</optgroup>';
+    }
+  } else if (isChatBoard && !(entries && entries.length)) {
+    html += FALLBACK_MODELS.map((id) => `<option value="${id}">${escapeHtml(modelLabel(id))}</option>`).join(''); // 无缓存时的内置回退(仅 code/chat)
+  } else {
+    html += '<option value="" disabled>该板块暂无可用模型</option>';
+  }
+  for (const sel of [$('model-sel')]) {
     const cur = sel.value;
     sel.innerHTML = html;
-    sel.value = sel.querySelector(`option[value="${cur}"]`) ? cur : '';
+    // 当前值不在新列表时:code/chat 回到「默认」,新媒体板块落到第一个可用模型
+    sel.value = sel.querySelector(`option[value="${cur}"]`) ? cur : ((sel.querySelector('option:not([disabled])') || {}).value || '');
   }
+  updateKeyChips(); // 下拉重建后同步 Key chip
 }
 
 // ---------------------------------------------------------------------------
@@ -761,14 +827,15 @@ for (const m of document.querySelectorAll('.modal-mask')) {
 // Session event routing
 // ---------------------------------------------------------------------------
 api.on('sess:event', (payload) => chat.handleSessEvent(payload));
+api.on('aigc:status', (payload) => chat.handleAigcStatus(payload)); // 新媒体生成任务进度
 
 // Cross-project switching: the topbar always reflects the ACTIVE SESSION's
 // project group and its own directory — there is no global directory.
 on('session-activated', async (sid) => {
   const s = state.sessions.get(sid);
   if (!s) return;
-  // 板块跟随会话类型:chat 会话激活时自动切到 chat 板块(反之亦然)
-  const kind = (s.meta.kind === 'chat') ? 'chat' : 'code';
+  // 板块跟随会话类型:会话激活时自动切到其 kind 对应的板块(缺省 code)
+  const kind = s.meta.kind || 'code';
   if (state.section !== kind) setSection(kind, { skipSessionPick: true });
   state.projectId = s.meta.projectId || null; // 独立会话不继承上个会话的项目
   const cwd = s.meta.cwd;
@@ -784,34 +851,40 @@ on('session-activated', async (sid) => {
 });
 
 // ---------------------------------------------------------------------------
-// 板块切换:Code(面向项目的完整工作区)vs Chat(纯对话 AI,不服务项目)
+// 板块切换:Code(面向项目的完整工作区)/ Chat(纯对话)/ Image·Video·Audio·Model(新媒体,v0.9.0 骨架)
 // ---------------------------------------------------------------------------
+const SECTIONS = ['code', 'chat', 'image', 'video', 'audio', 'model'];
 function setSection(sec, { skipSessionPick } = {}) {
   if (state.section === sec) return;
   state.section = sec;
-  document.body.classList.toggle('sec-chat', sec === 'chat');
+  for (const s of SECTIONS) document.body.classList.toggle('sec-' + s, s === sec);
   for (const b of document.querySelectorAll('#section-switch button')) {
     b.classList.toggle('active', b.dataset.sec === sec);
   }
-  $('sidebar-head-label').textContent = sec === 'chat' ? '会话' : '项目 / 会话';
-  if (sec === 'chat') $('right-panel').classList.add('hidden'); // chat 板块无项目面板
+  $('sidebar-head-label').textContent = sec === 'code' ? '项目 / 会话' : '会话';
+  if (sec !== 'code') $('right-panel').classList.add('hidden'); // 非 code 板块无项目面板
   sessionsUi.refreshList();
-  if (!skipSessionPick) {
-    // 当前会话不属于该板块时,切到该板块最近的会话
+  if (skipSessionPick) { populateModelSelects(); return; }
+  // 异步:先按板块重建模型下拉,再保证激活会话属于该板块。
+  // 板块没有会话时自动新建(v0.9.5)——否则旧板块会话滞留,模型下拉会把新媒体模型
+  // 错绑到 code/chat 会话,发送走 /v1/messages 必 403「模型未配置」。
+  (async () => {
+    await populateModelSelects(); // 模型下拉按板块类别重新过滤
     const cur = state.sessions.get(state.activeSid);
-    const curKind = (cur && cur.meta.kind === 'chat') ? 'chat' : 'code';
-    if (curKind !== sec) {
-      api.sessList().then((list) => {
-        const latest = list
-          .filter((m) => !m.archived && ((m.kind === 'chat') === (sec === 'chat')))
-          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-        if (latest) {
-          chat.ensureSession(latest.id, latest);
-          chat.setActiveSession(latest.id);
-        }
-      });
+    const curKind = (cur && cur.meta.kind) || 'code';
+    // 下拉重建后必须按会话真实模型回显,否则显示成回退项(看起来像模型被改了,v0.9.6)
+    if (curKind === sec) { chat.updateTopbarForSession(state.activeSid); return; }
+    const list = await api.sessList();
+    const latest = list
+      .filter((m) => !m.archived && (m.kind || 'code') === sec)
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+    if (latest) {
+      chat.ensureSession(latest.id, latest);
+      chat.setActiveSession(latest.id);
+    } else {
+      await sessionsUi.createSession(); // 空板块:自动建会话(媒体板块用下拉首个模型)
     }
-  }
+  })();
 }
 for (const b of document.querySelectorAll('#section-switch button')) {
   b.onclick = () => setSection(b.dataset.sec);
@@ -833,6 +906,7 @@ editor.init();
 preview.init();
 tasks.init();
 term.init();
+document.body.classList.add('sec-' + state.section); // 启动即挂板块 class(code-only 元素据此显隐)
 chat.setViewMode('normal');
-initLanding();
+boot();
 console.log('[boot] renderer modules loaded OK');

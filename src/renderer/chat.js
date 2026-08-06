@@ -1,6 +1,7 @@
 // Chat rendering: per-session logs, streaming, tool cards, permission cards,
 // plan approval, subagent grouping, view modes, history replay.
-import { api, state, $, escapeHtml, truncate, renderMarkdown, fmtCost, fmtTokens, emit } from './state.js';
+import { api, state, $, escapeHtml, truncate, renderMarkdown, fmtCost, fmtTokens, emit, modelSelValue, updateKeyChips, MEDIA_KINDS, modelLabel, sessionModelName } from './state.js';
+import { highlightCode } from './hljs.js';
 
 const messagesEl = () => $('messages');
 
@@ -49,14 +50,17 @@ export function updateTopbarForSession(sid) {
   if (!s) return;
   const m = s.meta;
   if (m.permissionMode) $('perm-mode').value = m.permissionMode;
-  $('model-sel').value = m.model || '';
-  const composerModel = $('model-sel-composer');
-  if (composerModel) composerModel.value = m.model || '';
+  $('model-sel').value = modelSelValue(m); // keyId|modelId 编码,回显所属 Key 分组
+  updateKeyChips(); // 回显模型时同步 Key chip
   const composerEffort = $('effort-sel-composer');
   if (composerEffort) composerEffort.value = m.effort || '';
   $('usage-chip').textContent = fmtCost(s.ui.cumCost) +
     (s.ui.lastUsage ? ` · ↑${fmtTokens(ctxTokens(s.ui.lastUsage))}` : '');
+  // 输入框 placeholder 跟随当前模型身份(v0.9.2)
+  $('input').placeholder =
+    `给 ${sessionModelName(s)} 发送消息…  (Enter 发送 · Shift+Enter 换行 · @文件 · /命令 · 可粘贴图片)`;
   setBusyUI(s.ui.busy);
+  updateAigcSendUI(); // 媒体会话:发送锁按任务终态恢复
 }
 
 function ctxTokens(u) {
@@ -65,6 +69,7 @@ function ctxTokens(u) {
 
 export function setBusyUI(busy) {
   $('btn-send').classList.toggle('hidden', !!busy);
+  $('btn-send').disabled = false; // 媒体会话的发送锁由 updateAigcSendUI 单独管理
   $('btn-stop').classList.toggle('hidden', !busy);
   $('busy-hint').classList.toggle('hidden', !busy);
   updateTurnStatus();
@@ -100,6 +105,7 @@ async function replayHistory(sid) {
   s.ui.historyKeys = new Set(events.map(eventKey)); // F-004 去重:供 live 事件比对
   for (const ev of events) renderEvent(sid, ev, { replay: true });
   finalizeAssistant(s);
+  finalizeAigcReplay(s); // 新媒体会话:未完成的历史任务标记中断
   scrollBottom(sid);
 }
 
@@ -150,7 +156,7 @@ function ensureAssistant(s, parentId) {
   finalizeAssistant(s);
   const msg = document.createElement('div');
   msg.className = 'msg assistant';
-  msg.innerHTML = `<div class="msg-role">Claude</div><div class="bubble"></div>`;
+  msg.innerHTML = `<div class="msg-role">${escapeHtml(sessionModelName(s))}</div><div class="bubble"></div>`;
   containerFor(s, parentId).appendChild(msg);
   s.ui.currentAssistant = {
     el: msg, bubble: msg.querySelector('.bubble'),
@@ -218,6 +224,13 @@ export function addUserMessage(sid, content) {
         const d = document.createElement('div');
         d.innerHTML = renderMarkdown(b.text);
         bubble.appendChild(d);
+      } else if (b.type === 'media_ref') {
+        // 音频/视频/3D 附件卡片(媒体本体不进会话,发送时已注入分析/元信息文本)
+        const n = document.createElement('div');
+        n.className = 'user-img-note';
+        const icon = { audio: '🎵', video: '🎬', model: '🧊' }[b.mediaKind] || '📎';
+        n.textContent = `${icon} [附件] ${b.name || ''}`;
+        bubble.appendChild(n);
       } else if (b.type === 'image' || b.type === 'image_ref') {
         // live 消息带 source,历史回放带 mediaType/data
         const mt = (b.source && b.source.media_type) || b.mediaType;
@@ -252,6 +265,148 @@ export function addUserMessage(sid, content) {
   finalizeAssistant(s);
   s.ui.logEl.appendChild(msg);
   scrollBottom(sid);
+}
+
+// --- AIGC 任务卡片(新媒体板块,v0.9.0) -----------------------------------------
+// 用户消息 = prompt + 参考图缩略图;助手消息 = 任务卡片,随 aigc:status 事件原地更新。
+const AIGC_TERMINAL = new Set(['done', 'fail', 'timeout', 'interrupted']);
+const AIGC_STATUS_TEXT = {
+  pending: '排队中', processing: '生成中', transferring: '转存产物中', downloading: '下载产物中',
+  done: '完成', fail: '失败', timeout: '超时', interrupted: '已中断',
+};
+
+export function addAigcUserMessage(sid, ev) {
+  const blocks = [];
+  for (const r of ev.refImages || []) {
+    if (r.data) blocks.push({ type: 'image_ref', mediaType: r.mediaType, data: r.data });
+  }
+  if (ev.prompt) blocks.push({ type: 'text', text: ev.prompt });
+  addUserMessage(sid, blocks.length ? blocks : '(空消息)');
+}
+
+// 发送后立即本地回显:用户消息 + pending 任务卡片,并加并发发送锁
+export function aigcLocalEcho(sid, { traceId, prompt, refImages, model }) {
+  addAigcUserMessage(sid, { prompt, refImages });
+  upsertTaskCard(sid, { traceId, model, status: 'pending' }, false);
+}
+
+export function aigcBusy(sid) {
+  const s = state.sessions.get(sid);
+  return !!(s && s.ui.aigcPending && s.ui.aigcPending.size);
+}
+
+// 媒体会话的发送按钮/提示由任务终态控制(不走 SDK 的 ui_status)
+export function updateAigcSendUI() {
+  const s = state.sessions.get(state.activeSid);
+  if (!s || !MEDIA_KINDS.includes(s.meta.kind)) return;
+  const busy = aigcBusy(state.activeSid);
+  $('btn-send').disabled = busy;
+  const hint = $('busy-hint');
+  hint.textContent = '生成中,任务完成后才能继续发送';
+  hint.classList.toggle('hidden', !busy);
+}
+
+export function handleAigcStatus(p) {
+  upsertTaskCard(p.sessionId, {
+    traceId: p.traceId, model: p.model, status: p.status,
+    failReason: p.failReason, files: p.files,
+  }, false);
+}
+
+function upsertTaskCard(sid, ev, replay) {
+  const s = ensureSession(sid);
+  if (!s.ui.aigcCards) s.ui.aigcCards = new Map();
+  let card = s.ui.aigcCards.get(ev.traceId);
+  if (!card) {
+    finalizeAssistant(s);
+    const msg = document.createElement('div');
+    msg.className = 'msg assistant';
+    msg.innerHTML = `<div class="msg-role">${escapeHtml(modelLabel(ev.model) || '任务')}</div><div class="bubble"></div>`;
+    const el = document.createElement('div');
+    el.className = 'aigc-card';
+    el.dataset.traceId = ev.traceId;
+    msg.querySelector('.bubble').appendChild(el);
+    s.ui.logEl.appendChild(msg);
+    card = { el };
+    s.ui.aigcCards.set(ev.traceId, card);
+  }
+  card.status = ev.status;
+  if (ev.files) card.files = ev.files;
+  if (ev.failReason) card.failReason = ev.failReason;
+  renderAigcCard(s, card, ev.traceId);
+  // 并发发送锁:非终态持有,终态解除
+  if (!s.ui.aigcPending) s.ui.aigcPending = new Set();
+  if (AIGC_TERMINAL.has(ev.status)) s.ui.aigcPending.delete(ev.traceId);
+  else s.ui.aigcPending.add(ev.traceId);
+  if (!replay) updateAigcSendUI();
+  scrollBottom(sid);
+}
+
+function renderAigcCard(s, card, traceId) {
+  const st = card.status || 'pending';
+  const head = `<div class="aigc-card-head"><span class="aigc-status st-${st}">${AIGC_STATUS_TEXT[st] || st}</span>${
+    AIGC_TERMINAL.has(st) ? '' : '<button class="aigc-cancel" title="取消任务(停止轮询)">✕</button>'}</div>`;
+  let body = '';
+  if (st === 'done') {
+    body = (card.files || []).map((f) => mediaHtml(s.meta.kind, traceId, f)).join('') || '<div class="aigc-note">(无产物文件)</div>';
+  } else if (st === 'fail' || st === 'timeout') {
+    body = `<div class="aigc-error">${escapeHtml(card.failReason || (st === 'timeout' ? '任务超时' : '生成失败'))}</div>`;
+  } else if (st === 'interrupted') {
+    body = '<div class="aigc-note">任务已中断(应用重启或已取消)</div>';
+  } else {
+    body = `<div class="aigc-progress"><span class="spin">◐</span> ${AIGC_STATUS_TEXT[st] || st}…</div>`;
+  }
+  card.el.innerHTML = head + `<div class="aigc-card-body">${body}</div>`;
+  const cancel = card.el.querySelector('.aigc-cancel');
+  if (cancel) {
+    cancel.onclick = () => {
+      api.aigcCancel(s.meta.id, traceId);
+      card.status = 'interrupted'; // 本地立即落终态;主进程取消后不再推事件
+      if (s.ui.aigcPending) s.ui.aigcPending.delete(traceId);
+      renderAigcCard(s, card, traceId);
+      updateAigcSendUI();
+    };
+  }
+  for (const btn of card.el.querySelectorAll('.aigc-open-dir')) {
+    btn.onclick = () => api.shellShowItemInFolder(btn.dataset.path);
+  }
+  for (const el of card.el.querySelectorAll('.aigc-file-open')) {
+    el.onclick = () => openGeneratedFile(el.dataset.path);
+  }
+}
+
+// 生成文件点击打开(v0.9.6):文本类进编辑器面板高亮预览,其余(图片/视频/3D 等)系统默认程序打开
+const TEXT_PREVIEW_EXTS = new Set(('md,txt,js,mjs,cjs,ts,jsx,tsx,json,py,css,html,htm,sh,bash,ps1,bat,cmd,'
+  + 'yml,yaml,toml,ini,cfg,conf,log,csv,xml,svg,vue,sql').split(','));
+function openGeneratedFile(p) {
+  if (!p) return;
+  const ext = (p.split('.').pop() || '').toLowerCase();
+  if (TEXT_PREVIEW_EXTS.has(ext)) emit('open-file', p);
+  else api.openPath(p);
+}
+
+// 产物内联渲染:图片 <img> / 视频 <video> / 音频 <audio> / 3D 文件卡片;
+// 每个产物带文件条——文件名可点击(文本进编辑器预览,其余系统程序打开),另有「打开所在文件夹」
+function mediaHtml(kind, traceId, f) {
+  const src = `aigc://${traceId}/${encodeURIComponent(f.name)}`;
+  const bar = `<div class="aigc-file-bar"><span class="aigc-file-open" data-path="${escapeHtml(f.path || '')}" title="点击打开/预览">📦 ${escapeHtml(f.name)}</span>` +
+    `<button class="btn btn-sm aigc-open-dir" data-path="${escapeHtml(f.path || '')}">打开所在文件夹</button></div>`;
+  if (kind === 'image') return `<img class="aigc-media" src="${src}" alt="${escapeHtml(f.name)}" />` + bar;
+  if (kind === 'video') return `<video class="aigc-media" src="${src}" controls></video>` + bar;
+  if (kind === 'audio') return `<audio class="aigc-audio" src="${src}" controls></audio>` + bar;
+  return `<div class="aigc-file">${bar}</div>`;
+}
+
+// 历史回放后:未到终态的卡片说明任务随应用退出中断,标记为已中断并释放发送锁
+function finalizeAigcReplay(s) {
+  if (!s.ui.aigcCards) return;
+  for (const [traceId, card] of s.ui.aigcCards) {
+    if (!AIGC_TERMINAL.has(card.status)) {
+      card.status = 'interrupted';
+      renderAigcCard(s, card, traceId);
+    }
+  }
+  if (s.ui.aigcPending) s.ui.aigcPending.clear();
 }
 
 // --- tool activity groups (折叠的进程摘要行,如 "编辑了 1 个文件,运行了 2 条命令 ›") ---
@@ -328,6 +483,28 @@ function updateActivitySummary(act) {
   act.el.classList.toggle('working', act.pending > 0);
 }
 
+// 写/编辑类工具的产出行径:body 渲染为高亮代码(而不是 JSON 原文),超长截断
+const FILE_TOOL_PATH = (name, i) => (i && (i.file_path || i.notebook_path)) || null;
+const CODE_VIEW_CAP = 20000;
+
+function renderToolBody(bodyEl, name, input) {
+  if (!input) { bodyEl.textContent = ''; return; }
+  const fp = FILE_TOOL_PATH(name, input);
+  const code = name === 'Write' ? input.content
+    : (name === 'Edit' || name === 'MultiEdit') ? input.new_string
+    : null;
+  if (fp && code != null) {
+    const capped = String(code).length > CODE_VIEW_CAP;
+    const shown = capped ? String(code).slice(0, CODE_VIEW_CAP) : String(code);
+    bodyEl.innerHTML =
+      `<div class="code-view-path">${escapeHtml(fp)}</div>` +
+      `<pre class="code-view"><code>${highlightCode(shown, fp)}</code></pre>` +
+      (capped ? `<div class="code-view-more">… 内容过长仅预览前 ${CODE_VIEW_CAP} 字符,点击文件名可在编辑器面板打开完整文件</div>` : '');
+    return;
+  }
+  bodyEl.textContent = JSON.stringify(input, null, 2);
+}
+
 function addToolCard(s, parentId, id, name, input) {
   if (name === 'Task') {
     // 子任务保持原有的分组框
@@ -367,8 +544,16 @@ function addToolCard(s, parentId, id, name, input) {
     </div>
     <div class="act-body collapsed"></div>`;
   const body = row.querySelector('.act-body');
-  if (input) body.textContent = JSON.stringify(input, null, 2);
+  renderToolBody(body, name, input);
   row.querySelector('.act-row-head').onclick = () => body.classList.toggle('collapsed');
+  // 文件类工具:label 可点击,在编辑器面板预览该文件(v0.9.1)
+  const fp = input && FILE_TOOL_PATH(name, input);
+  if (fp) {
+    const label = row.querySelector('.act-label');
+    label.classList.add('file-link');
+    label.title = fp + '(点击在编辑器面板预览)';
+    label.onclick = (e) => { e.stopPropagation(); emit('open-file', fp); };
+  }
   act.list.appendChild(row);
   s.ui.toolCards.set(id, { el: row, body, name, input, activity: act });
   updateActivitySummary(act);
@@ -384,8 +569,21 @@ function completeToolCard(s, id, content, isError) {
     status.className = (card.name === 'Task' ? 'tool-status act-status ' : 'act-status ') + (isError ? 'err' : 'ok');
   }
   const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
-  const inputText = card.input ? JSON.stringify(card.input, null, 2) : '';
-  card.body.textContent = (inputText ? inputText + '\n── 结果 ──\n' : '') + truncate(text || '', 4000);
+  // 代码卡片(Write/Edit)的 body 已是高亮预览,不被结果文本覆盖;出错时追加错误行
+  const isCodeCard = (card.name === 'Write' || card.name === 'Edit' || card.name === 'MultiEdit')
+    && card.input && FILE_TOOL_PATH(card.name, card.input)
+    && (card.input.content != null || card.input.new_string != null);
+  if (isCodeCard) {
+    if (isError && text) {
+      const err = document.createElement('div');
+      err.className = 'code-view-more';
+      err.textContent = '错误:' + truncate(text, 500);
+      card.body.appendChild(err);
+    }
+  } else {
+    const inputText = card.input ? JSON.stringify(card.input, null, 2) : '';
+    card.body.textContent = (inputText ? inputText + '\n── 结果 ──\n' : '') + truncate(text || '', 4000);
+  }
   if (card.activity) {
     card.activity.pending = Math.max(0, card.activity.pending - 1);
     updateActivitySummary(card.activity);
@@ -541,12 +739,26 @@ export function renderEvent(sid, ev, { replay }) {
     return;
   }
   if (t === 'ui_init') {
-    if (ev.model) s.ui.initModel = ev.model;
+    if (ev.model) {
+      s.ui.initModel = ev.model;
+      if (sid === state.activeSid) { // init 回传真实模型后刷新 placeholder 身份
+        $('input').placeholder =
+          `给 ${sessionModelName(s)} 发送消息…  (Enter 发送 · Shift+Enter 换行 · @文件 · /命令 · 可粘贴图片)`;
+      }
+    }
     if (ev.slashCommands) state.commandsCache = null; // refresh next time
     return;
   }
   if (t === 'ui_user_input') { addUserMessage(sid, ev.content); return; }
+  if (t === 'aigc_user') { addAigcUserMessage(sid, ev); return; } // 新媒体会话:用户 prompt(+参考图)
+  if (t === 'aigc_task') { upsertTaskCard(sid, ev, replay); return; } // 新媒体会话:任务卡片
   if (t === 'ui_error') { metaLine(s, '错误:' + ev.message, 'error-line'); return; }
+  if (t === 'ui_aux') { metaLine(s, ev.message); return; } // 辅助模型分析附件的进度提示(v0.9.1)
+  if (t === 'ui_title') { // 自动命名(v0.9.1):更新本地 meta 并刷新侧栏
+    s.meta.title = ev.title;
+    emit('session-status', { sid });
+    return;
+  }
   if (t === 'ui_stderr') { console.debug('[stderr]', ev.text); return; }
   if (t === 'ui_compact') { metaLine(s, '── 上下文已压缩 ──'); return; }
   if (t === 'ui_permission') { addPermissionCard(s, ev, replay); return; }
@@ -651,7 +863,7 @@ function handleAssistantMessage(s, parentId, message, replay) {
       if (!existing) addToolCard(s, parentId, block.id, block.name, block.input || null);
       else if (block.input) {
         existing.input = block.input;
-        existing.body.textContent = JSON.stringify(block.input, null, 2);
+        renderToolBody(existing.body, existing.name, block.input);
         const label = existing.el.querySelector('.act-label');
         if (label) label.textContent = toolRowLabel(existing.name, block.input);
         const diff = existing.el.querySelector('.act-diff');

@@ -148,3 +148,49 @@ Git 工作流:
 - **用量查询网址**(usageUrl):每个 Key 可填用量页地址(添加/编辑区与每行各一个输入位),填了网址的行显示「打开用量页」(shell.openExternal,仅 http/https);已配置时行内提示「可不设额度,直接网页查用量」
 - **自动余额查询**(keys.js BALANCE_PROVIDERS,按 host 可扩展):api.moonshot.cn / api.moonshot.ai / api.kimi.ai → GET /v1/users/me/balance,展示「可用余额 ¥x.xx(代金券 ¥y / 现金 ¥z)」;api.deepseek.com → GET /user/balance,合计 balance_infos;未命中映射不自动查,仅网址跳转或本地额度
 - **交互**:命中映射的行显示「查余额」按钮,弹窗打开时对命中映射的活跃 Key 自动查一次;成功结果缓存 balanceCache 持久化,失败仅行内一行错误不打断;显示优先级:自动余额 > 网址跳转 > 本地周/月额度(三者共存)
+
+### v0.9.0(2026-08-05):Key 编辑/预设 + Image/Video/Audio/Model 板块 + 辅助模型
+- **Key 可编辑**:Key 列表每行新增「编辑」,弹窗预填 name/kind/baseUrl/usageUrl,secret 留空即保留原值(keys.js save 按 id upsert 时空 key 不覆盖);「默认 Key」统一改名「Kuro」(含存量数据一次性迁移)
+- **Key 预设**:弹窗顶部 Kuro/Kimi/Deepseek/Gemini/ChatGPT 一键预填 name+baseUrl+kind;模型下拉旁新增 key-chip 显示当前会话所用 Key
+- **模型分类**:refreshModels 优先走 Kuro 网关 `GET /my-models/api`(Bearer/x-api-key),把 `groups[{category,model_type,models}]` 存入 key 的 modelGroups 并合成平铺 models;非 Kuro 网关 404 自动回退 /v1/models
+- **六板块**:顶栏 Code/Chat/Image/Video/Audio/Model 分段开关;会话 kind 扩展,非 code 会话统一走 chat 式处理(主目录 cwd、不进项目组);模型下拉按板块过滤(modelGroups 的 model_type,无分组 key 的模型全算 chat)
+- **AIGC 生成闭环**(src/main/aigc.js):媒体板块会话不进 Agent SDK——`POST /aigc/api/create-{image|video|audio|3D}` 建任务(Header X-Trace-ID 取 trace_id)→ 3s 轮询 task-detail → `download_wm_sts` 下载产物到 userData/aigc/(水印分支直接 GET download_url,已审批分支手写 COS XML API q-sign-algorithm=sha1 签名直连 COS,无新依赖);参考图走 apply-upload→COS 直传→commit-upload 链;渲染端任务卡片原地更新状态,产物内联渲染(img/video/audio,aigc:// 自定义协议)或 3D 文件卡片
+- **辅助模型**(src/main/aux-models.js):Code/Chat 会话附音频(mp3/wav/m4a/ogg)/视频/3D 附件时,发送前用设置的辅助模型经 /v1/chat/completions 分析(image_url/input_audio 多模态块),分析文本以 `<附件分析>` 注入主模型 prompt;未配置/失败时注入文件元信息兜底;设置区(Key 弹窗底部)4 个辅助下拉,候选为各启用 Key 的 chat 类模型
+- **实测**:以真实 Kuro Key 端到端跑通文生图(Banana-1,创建→轮询→带水印下载 1.27MB PNG);期间修复 download_wm_sts 返回相对路径 download_url 未解析的 bug(新增同源判定,回网关请求才带鉴权头);npm test 68/68
+
+### v0.9.1(2026-08-05):独立会话项目化确认 + 自动命名 + 代码预览 + 项目右键菜单
+- **修复**:main.js/test 引用 `./src/main/aux` 但文件实为 aux-models.js,打包后启动即报 Cannot find module(v0.9.0 安装包不可用)
+- **独立会话项目化确认**:独立会话(默认)经输入框「＋文件夹」添加目录时弹窗确认——「设为项目文件夹」建新 IPC proj:adoptDir(ensureForDir 复用/创建项目组,名=文件夹名,会话脱离独立区归入该项目,cwd 不变、目录经 /add-dir 附加生效);「仅添加目录」保持原行为
+- **会话自动命名**(src/main/title.js):首条消息发送后用会话自身 Key+模型走 /v1/chat/completions 概括 ≤15 字标题(10s 超时,清洗引号/标点/换行,限长 20);失败退化截取首行前 20 字;autoTitle 标记防重入,写回前再查 store,用户已手动改名不覆盖;新媒体会话直接截取 prompt(媒体模型非 chat 模型);命名完成推 ui_title 事件实时刷新侧栏
+- **代码预览**:highlight.js 无浏览器构建,新增 build/make-hljs.js 简易 CJS bundler 生成 src/vendor/hljs.js(38 模块 362KB,common 语言包);聊天内 Write/Edit 工具卡片 body 由 JSON 原文改为文件名头 + 高亮代码块(超 2 万字符截断提示),文件类工具 label 可点击在编辑器面板打开;编辑器面板新增预览/编辑双模式,聊天打开默认只读高亮预览,点「编辑」回到 textarea 流程
+- **项目右键菜单**:侧栏项目组头部右键弹出自建菜单「打开文件夹」(proj:openFolder → shell.openPath 主目录),贴边自动内收
+- npm test 75/75(新增 test/title.test.js 7 例)
+
+### v0.9.2(2026-08-06):/add-dir 修复 + 更名 DeskTopUI + 模型身份 + 用户消息贴右
+- **/add-dir 修复**:SDK 流式输入(stream-json)不会执行 /add-dir 这类本地命令,发出去只是给模型看的文本。改为客户端拦截(main.js sess:send 开头匹配):目录持久化到会话 meta.extraDirs,projects.addDir 幂等同步项目组;运行中的会话重启 query(resume 保上下文)使 additionalDirectories 立即生效,回合进行中则标记 needRestart 回合结束后自动重启;目录不存在直接提示不发送。其余斜杠命令(/compact、自定义命令)由 CLI 本地命令通道处理(system/local_command_output),不受影响
+- **更名 DeskTopUI**:productName/窗口标题/落地页/引导卡/快捷方式全部改为 DeskTopUI;appId 保持 com.claudeui.app 不变(userData 与自动更新身份不受影响)
+- **用户消息贴右**:.msg.user 跳出 860px 居中内容列(margin-right:0),气泡贴聊天区右缘
+- **模型身份**:输入框 placeholder 变为「给 <当前模型> 发送消息…」,助手气泡角色名由固定「Claude」改为当前会话模型(state.js modelLabel/sessionModelName);顶栏/输入框两处模型下拉切换、SDK init 回传模型时同步刷新;新媒体任务卡片角色名同步走 modelLabel
+
+### v0.9.3(2026-08-06):辅助模型候选修复
+- **辅助模型下拉不全**:Key 弹窗里图像/音频/视频/3D 辅助模型的候选原先只列 chat 类模型(Kuro 分组 model_type 过滤),勾选的 150 个模型里非 chat 的全部被隐藏。改为列出所有启用 Key 勾选的完整模型,非 chat 模型在选项里标注类别;选错类型导致分析失败时 aux-models 本就注入元信息兜底,不会断流
+
+### v0.9.4(2026-08-06):移除首屏落地页
+- 首次打开直接进入对话页:恢复最近活跃会话,一个都没有就自动创建独立会话(cwd=主目录,目录留空,用的时候再经「＋文件夹」或 ⋯菜单添加);未配置 API Key 时自动弹出 Key 配置窗(取代原三步引导卡)
+- 移除 landing/onboarding/最近项目列表的 HTML、JS(initLanding/renderRecent/obMark 等)与对应 CSS;SDK 缺失警告条移到工作区顶栏下方
+
+### v0.9.5(2026-08-06):新媒体模型 403「模型未配置」修复
+- **根因**(网关实测定位):切到 Image/Video/Audio/Model 板块时,若该板块还没有会话,旧的 code 会话保持激活,而模型下拉已切换为媒体模型列表——此时在下拉里选模型会把媒体模型(如 gpt-image-2)绑到 code 会话上,发送走 SDK /v1/messages,网关对非 chat 模型一律 403「模型未配置:<model>」(媒体 create-* 端点本身全部正常)
+- **修复**:setSection 切板块时先 await 重建模型下拉,板块无会话则自动新建对应 kind 的会话(不再滞留旧会话);两处模型下拉 onchange 加板块/会话一致性检查;sess:setModel 主进程防御(keys.modelType 查 modelGroups,非 chat 模型拒绝绑到 code/chat 会话);Session.start 自愈——code/chat 会话上残留的媒体模型自动清空回退默认
+- 排查中实测确认:create-image/video/audio/create-3D 的字段名与鉴权全部正确;3D 板块 Hunyuan3D 基础款不支持 text_to_model(400),Hunyuan3D-3.0 正常
+
+### v0.9.6(2026-08-06):控件会话级化 + 板块隔离 + 全产物可预览
+- **顶栏瘦身**:模式/压缩/模型从顶栏移入输入区工具栏(会话级);模型下拉双份(顶栏+输入区)合并为输入区一份(model-sel),key-chip 同步合并;压缩/模式/推理深度标 sdk-only,新媒体板块自动隐藏;顶栏只留 视图/面板/⋯ 等全局控件
+- **板块会话隔离加固**:setSection 重建下拉后按激活会话真实模型回显 updateTopbarForSession——修掉「image 会话的模型在切到 code 再切回来后显示/变成别的模型」(下拉重建落到回退项所致)
+- **全产物可点开**:生成文件(图片/视频/音频/3D 等)统一带文件条,文件名可点击——文本类(md/js/json/…)进编辑器面板高亮预览,其余走系统默认程序打开(新 IPC shell:openPath,限制 aigc 产物目录);「打开所在文件夹」保留
+
+### v0.9.7(2026-08-06):「设为项目文件夹」cwd 修复
+- **根因**:proj:adoptDir 只改 projectId 不切 cwd,会话主工作目录停在用户主目录;叠加 ~/.claude/settings.local.json 残留的 permissions.additionalDirectories,无关路径出现在所有会话
+- **修复**:adoptDir 同步切换 cwd(清冗余 extraDirs+重启 query);sessions.js addDir/start() 过滤与 cwd 相同的目录;input.js adopt 分支同步 meta.cwd/state.cwd;存量 store 3 个会话 cwd 已修正(留 .bak-cwdfix 备份);settings.local.json 残留项已删
+- **已知代价**:改存量会话 cwd 会使 resume 报 No conversation found with session ID(记录按 cwd 分目录),App 自动开新会话接续;新会话不受影响
+- npm test 75/75;安装包 dist/DeskTopUI Setup 0.9.7.exe 已构建

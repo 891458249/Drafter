@@ -1,9 +1,11 @@
 // Editor panel: open (from chat file links or diff), edit, save, external-change warning.
+// v0.9.1: 预览/编辑双模式 —— 从聊天打开默认只读高亮预览(highlight.js),「编辑」切回 textarea。
 import { api, state, $, on } from './state.js';
+import { highlightCode } from './hljs.js';
 
-let current = null; // { rel, abs, mtimeMs, dirty }
+let current = null; // { rel, abs, mtimeMs, dirty, mode: 'preview'|'edit' }
 
-export async function openFile(rel) {
+export async function openFile(rel, { mode = 'preview' } = {}) {
   const res = await api.fileRead({ cwd: state.cwd, path: rel });
   const area = $('editor-area');
   const warn = $('editor-warning');
@@ -12,16 +14,37 @@ export async function openFile(rel) {
     $('editor-path').textContent = rel + ' — ' + res.error;
     area.value = ''; area.disabled = true;
     $('btn-editor-save').disabled = true;
+    $('btn-editor-mode').classList.add('hidden');
+    $('editor-preview').classList.add('hidden');
+    area.classList.remove('hidden');
     return;
   }
   if (current) api.fileUnwatch('editor');
-  current = { rel, abs: res.path, mtimeMs: res.mtimeMs, dirty: false };
+  current = { rel, abs: res.path, mtimeMs: res.mtimeMs, dirty: false, mode };
   $('editor-path').textContent = rel;
+  $('editor-path').title = res.path;
   area.value = res.content;
   area.disabled = false;
   $('btn-editor-save').disabled = true;
+  $('btn-editor-mode').classList.remove('hidden');
   api.fileWatch({ key: 'editor', path: res.path });
+  applyMode();
   showPanel('editor');
+}
+
+// 按 current.mode 切换 预览(高亮只读) / 编辑(textarea) 视图
+function applyMode() {
+  if (!current) return;
+  const area = $('editor-area');
+  const preview = $('editor-preview');
+  const previewing = current.mode === 'preview';
+  if (previewing) {
+    preview.querySelector('code').innerHTML = highlightCode(area.value, current.rel);
+  }
+  preview.classList.toggle('hidden', !previewing);
+  area.classList.toggle('hidden', previewing);
+  $('btn-editor-mode').textContent = previewing ? '编辑' : '预览';
+  $('btn-editor-save').classList.toggle('hidden', previewing);
 }
 
 function showPanel(name) {
@@ -48,7 +71,7 @@ async function save(force = false) {
     warn.innerHTML = '⚠ 文件已被外部修改。';
     const reload = document.createElement('button');
     reload.className = 'btn btn-sm'; reload.textContent = '放弃我的修改并重新加载';
-    reload.onclick = () => openFile(current.rel);
+    reload.onclick = () => openFile(current.rel, { mode: current.mode });
     const overwrite = document.createElement('button');
     overwrite.className = 'btn btn-sm'; overwrite.textContent = '仍然覆盖保存';
     overwrite.onclick = () => save(true);
@@ -69,6 +92,11 @@ export function init() {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
   });
   $('btn-editor-save').onclick = () => save();
+  $('btn-editor-mode').onclick = () => {
+    if (!current) return;
+    current.mode = current.mode === 'preview' ? 'edit' : 'preview';
+    applyMode();
+  };
 
   api.on('file:changed', ({ key }) => {
     if (key !== 'editor' || !current) return;
@@ -78,7 +106,7 @@ export function init() {
       warn.textContent = '⚠ 文件已被外部修改(可能是 Claude 编辑了它)。保存时将提示如何处理。';
     } else {
       // auto-reload clean buffer
-      openFile(current.rel);
+      openFile(current.rel, { mode: current.mode });
     }
   });
 

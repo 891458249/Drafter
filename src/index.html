@@ -4,57 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
-  <title>Claude UI</title>
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: aigc:; media-src aigc:;" />
+  <title>DeskTopUI</title>
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
   <link rel="stylesheet" href="../node_modules/highlight.js/styles/github-dark.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Landing: pick a project directory -->
-  <div id="landing" class="landing">
-    <!-- First-run onboarding card (hidden after completion/dismiss) -->
-    <div id="onboarding" class="onboarding hidden">
-      <div class="ob-head">
-        <span class="ob-title">👋 欢迎使用 Claude UI,三步开始</span>
-        <button id="ob-close" class="ob-close" title="关闭,不再显示">✕</button>
-      </div>
-      <div class="ob-steps">
-        <button class="ob-step" data-step="apikey">
-          <span class="ob-num">1</span>
-          <span class="ob-text"><b>配置 API Key</b><small>填入 Anthropic Key;留空则沿用 claude CLI 登录态</small></span>
-          <span class="ob-state">→</span>
-        </button>
-        <button class="ob-step" data-step="dir">
-          <span class="ob-num">2</span>
-          <span class="ob-text"><b>选择项目目录</b><small>每个目录自动成为一个项目组,会话按组管理</small></span>
-          <span class="ob-state">→</span>
-        </button>
-        <button class="ob-step" data-step="mode">
-          <span class="ob-num">3</span>
-          <span class="ob-text"><b>了解权限模式</b><small>顶栏下拉切换:default 逐项询问;acceptEdits 自动接受编辑;plan 先出计划再执行</small></span>
-          <span class="ob-state">→</span>
-        </button>
-      </div>
-    </div>
-    <div class="landing-card">
-      <div class="brand">
-        <div class="brand-mark">✳</div>
-        <h1>Claude UI</h1>
-        <p class="subtitle">为 Claude Code 打造的桌面界面</p>
-      </div>
-      <button id="btn-pick" class="btn btn-primary btn-lg">选择项目目录…</button>
-      <button id="btn-apikey-landing" class="btn btn-lg" style="margin-top:10px">配置 API Key…</button>
-      <div class="recent">
-        <div class="recent-title">最近打开</div>
-        <ul id="recent-list" class="recent-list"></ul>
-      </div>
-      <div id="sdk-warning" class="sdk-warning hidden"></div>
-    </div>
-  </div>
-
-  <!-- Main workspace -->
-  <div id="workspace" class="workspace hidden">
+  <!-- Main workspace(v0.9.3 起无首屏落地页:直接进对话,目录等用的时候再选) -->
+  <div id="workspace" class="workspace">
     <header class="topbar">
       <div class="topbar-left">
         <button id="btn-sidebar" class="icon-btn" title="会话列表 (Ctrl+B)">☰</button>
@@ -62,31 +20,16 @@
         <div id="section-switch" class="section-switch">
           <button data-sec="code" class="active" title="Code 板块:面向项目的完整工作区">Code</button>
           <button data-sec="chat" title="Chat 板块:纯对话 AI,不服务项目">Chat</button>
+          <button data-sec="image" title="Image 板块:图像生成">Image</button>
+          <button data-sec="video" title="Video 板块:视频生成">Video</button>
+          <button data-sec="audio" title="Audio 板块:音频生成">Audio</button>
+          <button data-sec="model" title="Model 板块:3D 模型生成">Model</button>
         </div>
         <span id="branch-label" class="branch-label code-only"></span>
       </div>
       <div class="topbar-right">
         <span id="update-chip" class="usage-chip update-chip hidden" title="应用更新状态"></span>
         <span id="usage-chip" class="usage-chip" title="本会话累计用量">$0.0000</span>
-        <button id="btn-compact" class="btn btn-sm" title="压缩上下文 (/compact)">压缩</button>
-        <label class="ctrl">模式
-          <select id="perm-mode">
-            <option value="default">默认(询问)</option>
-            <option value="acceptEdits">接受编辑</option>
-            <option value="plan">计划</option>
-            <option value="dontAsk">不询问</option>
-            <option value="bypassPermissions">跳过权限</option>
-          </select>
-        </label>
-        <label class="ctrl">模型
-          <select id="model-sel">
-            <option value="">默认</option>
-            <option value="claude-fable-5">Fable 5</option>
-            <option value="claude-opus-4-8">Opus 4.8</option>
-            <option value="claude-sonnet-5">Sonnet 5</option>
-            <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-          </select>
-        </label>
         <label class="ctrl">视图
           <select id="view-mode">
             <option value="normal">普通</option>
@@ -98,6 +41,8 @@
         <button id="btn-more" class="btn btn-sm">⋯</button>
       </div>
     </header>
+
+    <div id="sdk-warning" class="sdk-warning hidden"></div>
 
     <div class="main-grid" id="main-grid">
       <!-- Sidebar: sessions -->
@@ -129,8 +74,18 @@
           <div class="composer-toolbar">
             <button id="btn-add-attach" class="btn btn-sm" title="添加附件(图片或文本文件,随下一条消息发送)">＋附件</button>
             <button id="btn-add-folder" class="btn btn-sm code-only" title="为当前项目添加文件夹(常驻共享)">＋文件夹</button>
-            <label class="ctrl composer-model">本会话模型
-              <select id="model-sel-composer">
+            <button id="btn-compact" class="btn btn-sm sdk-only" title="压缩上下文 (/compact)">压缩</button>
+            <label class="ctrl sdk-only">模式
+              <select id="perm-mode">
+                <option value="default">默认(询问)</option>
+                <option value="acceptEdits">接受编辑</option>
+                <option value="plan">计划</option>
+                <option value="dontAsk">不询问</option>
+                <option value="bypassPermissions">跳过权限</option>
+              </select>
+            </label>
+            <label class="ctrl composer-model">模型
+              <select id="model-sel">
                 <option value="">默认</option>
                 <option value="claude-fable-5">Fable 5</option>
                 <option value="claude-opus-4-8">Opus 4.8</option>
@@ -138,7 +93,8 @@
                 <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
               </select>
             </label>
-            <label class="ctrl composer-effort" title="约束本会话的推理深度(档位越低思考越少、token 越省);默认=跟随模型/SDK(高)">推理深度
+            <span id="model-key-chip" class="key-chip hidden" title="当前模型所属的 API Key"></span>
+            <label class="ctrl composer-effort sdk-only" title="约束本会话的推理深度(档位越低思考越少、token 越省);默认=跟随模型/SDK(高)">推理深度
               <select id="effort-sel-composer">
                 <option value="">默认</option>
                 <option value="low">低</option>
@@ -154,7 +110,7 @@
           </div>
           <div class="input-wrap">
             <textarea id="input" class="input" rows="1"
-              placeholder="给 Claude Code 发送消息…  (Enter 发送 · Shift+Enter 换行 · @文件 · /命令 · 可粘贴图片)"></textarea>
+              placeholder="发送消息…  (Enter 发送 · Shift+Enter 换行 · @文件 · /命令 · 可粘贴图片)"></textarea>
             <button id="btn-send" class="send-icon" title="发送 (Enter)">
               <svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M8 1l6 6h-4v8H6V7H2z"/></svg>
             </button>
@@ -202,9 +158,11 @@
         <div id="panel-editor" class="panel">
           <div class="panel-toolbar">
             <span id="editor-path" class="editor-path">(未打开文件)</span>
+            <button id="btn-editor-mode" class="btn btn-sm hidden" title="切换预览/编辑">编辑</button>
             <button id="btn-editor-save" class="btn btn-sm btn-primary" disabled>保存</button>
           </div>
           <div id="editor-warning" class="editor-warning hidden"></div>
+          <pre id="editor-preview" class="editor-preview hidden"><code></code></pre>
           <textarea id="editor-area" class="editor-area" spellcheck="false" disabled></textarea>
         </div>
 
@@ -238,9 +196,17 @@
   <div id="apikey-modal" class="modal-mask hidden">
     <div class="modal modal-wide">
       <h2>API Keys</h2>
-      <p class="modal-hint">支持多个 Key 灵活切换,「默认」Key 用于新会话;模型列表按 Key 自动识别(/v1/models)。</p>
+      <p class="modal-hint">支持多个 Key 灵活切换,默认选中的 Key 用于新会话;模型列表按 Key 自动识别(/v1/models)。</p>
       <div id="keys-list" class="mcp-list"></div>
-      <h3>添加 / 编辑</h3>
+      <h3 id="apikey-form-title">添加 API Key</h3>
+      <div class="form-row key-presets">
+        <span class="preset-label">预设</span>
+        <button type="button" class="btn btn-sm" data-preset="kuro">Kuro</button>
+        <button type="button" class="btn btn-sm" data-preset="kimi">Kimi</button>
+        <button type="button" class="btn btn-sm" data-preset="deepseek">Deepseek</button>
+        <button type="button" class="btn btn-sm" data-preset="gemini">Gemini</button>
+        <button type="button" class="btn btn-sm" data-preset="chatgpt">ChatGPT</button>
+      </div>
       <div class="form-row">
         <input id="key-name" class="input-sm" placeholder="名称(如 库洛网关 / 官方)" />
         <select id="key-kind" class="input-sm">
@@ -257,6 +223,23 @@
       </div>
       <div class="form-row">
         <input id="key-usageurl" class="input-sm grow" placeholder="用量查询网址(可选,https://…,保存后行内出现「打开用量页」)" />
+      </div>
+      <h3>辅助模型(Code/Chat 分析媒体附件时调用)</h3>
+      <div class="form-row">
+        <span class="preset-label">图像辅助</span>
+        <select id="aux-image" class="input-sm grow"></select>
+      </div>
+      <div class="form-row">
+        <span class="preset-label">音频辅助</span>
+        <select id="aux-audio" class="input-sm grow"></select>
+      </div>
+      <div class="form-row">
+        <span class="preset-label">视频辅助</span>
+        <select id="aux-video" class="input-sm grow"></select>
+      </div>
+      <div class="form-row">
+        <span class="preset-label">3D 辅助</span>
+        <select id="aux-model" class="input-sm grow"></select>
       </div>
       <div class="modal-status" id="apikey-status"></div>
       <div class="modal-actions">
@@ -344,6 +327,19 @@
     </div>
   </div>
 
+  <!-- 独立会话添加文件夹:确认是否设为项目文件夹 (v0.9.1) -->
+  <div id="adopt-dir-modal" class="modal-mask hidden">
+    <div class="modal">
+      <h2>设为项目文件夹?</h2>
+      <p id="adopt-dir-text" class="modal-hint"></p>
+      <div class="modal-actions">
+        <button id="adopt-dir-cancel" class="btn">取消</button>
+        <button id="adopt-dir-only" class="btn">仅添加目录</button>
+        <button id="adopt-dir-project" class="btn btn-primary">设为项目文件夹</button>
+      </div>
+    </div>
+  </div>
+
   <!-- "More" dropdown -->
   <div id="more-menu" class="more-menu hidden">
     <button data-act="apikey">API Key…</button>
@@ -356,6 +352,7 @@
   </div>
 
   <script src="../node_modules/marked/marked.min.js"></script>
+  <script src="vendor/hljs.js"></script>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script type="module" src="renderer/app.js"></script>
