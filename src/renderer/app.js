@@ -3,6 +3,8 @@ import { api, state, $, escapeHtml, on, emit, fmtTokens, parseModelValue, update
 import * as chat from './chat.js';
 import * as sessionsUi from './sessions-ui.js';
 import * as input from './input.js';
+import * as msgmenu from './msgmenu.js';
+import * as msgnav from './msgnav.js';
 import * as diff from './diff.js';
 import * as editor from './editor.js';
 import * as preview from './preview.js';
@@ -901,6 +903,8 @@ on('open-project-memory', async (pid) => {
 // ---------------------------------------------------------------------------
 sessionsUi.init();
 input.init();
+msgmenu.init();
+msgnav.init();
 diff.init();
 editor.init();
 preview.init();

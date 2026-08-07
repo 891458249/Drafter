@@ -102,6 +102,51 @@ function readSessionEvents(id, maxEvents = 2000) {
   }
 }
 
+// 整文件重写(编辑重生成截断 / 分支复制前缀用,v0.9.9)
+function writeSessionEvents(id, events) {
+  try {
+    fs.mkdirSync(SESSIONS_DIR(), { recursive: true });
+    fs.writeFileSync(sessionLogPath(id), events.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf8');
+    return true;
+  } catch (e) {
+    console.error('[store] writeSessionEvents failed:', e.message);
+    return false;
+  }
+}
+
+// --- v0.9.9:编辑重生成 / 分支的历史锚点定位 ----------------------------------
+// 在事件日志中定位用户消息 echo(type=ui_user_input,带发送时打戳的 uuid)。
+// 返回 { ok, events, index, prevUuid, isFirst };prevUuid 是 echo 之前最后一条带
+// uuid 的 assistant(优先)/user 事件,用作 resumeSessionAt 的上下文锚点。
+function locateEcho(id, echoUuid) {
+  const events = readSessionEvents(id, Number.MAX_SAFE_INTEGER);
+  const i = events.findIndex((e) => e.type === 'ui_user_input' && e.uuid === echoUuid);
+  if (i < 0) return { ok: false, error: '找不到目标消息(旧版本消息没有锚点)' };
+  return { ok: true, events, index: i, prevUuid: lastAnchor(events, i), isFirst: i === 0 };
+}
+
+function lastAnchor(events, end) {
+  let fallback = null;
+  for (let k = end - 1; k >= 0; k--) {
+    const e = events[k];
+    if (!e || !e.uuid) continue;
+    if (e.type === 'assistant') return e.uuid;
+    if (e.type === 'user' && !fallback) fallback = e.uuid;
+  }
+  return fallback;
+}
+
+// 分支切片:从开头到目标 echo 所在回合结束(下一条 echo 之前或日志末尾)。
+// 锚点 = 切片内最后一条带 uuid 的 assistant/user 事件(含该 echo 的回复)。
+function branchSlice(events, index) {
+  let end = events.length;
+  for (let k = index + 1; k < events.length; k++) {
+    if (events[k].type === 'ui_user_input') { end = k; break; }
+  }
+  const prefix = events.slice(0, end);
+  return { prefix, anchorUuid: lastAnchor(prefix, prefix.length) };
+}
+
 // --- cumulative token usage per model (for the usage popover) ---
 function addModelUsage(model, usage = {}, costUsd = 0) {
   update((s) => {
@@ -197,7 +242,8 @@ module.exports = {
   addRecentProject,
   getSetting, setSetting,
   listSessions, upsertSession, deleteSession,
-  appendSessionEvent, readSessionEvents, sessionLogPath,
+  appendSessionEvent, readSessionEvents, writeSessionEvents, sessionLogPath,
+  locateEcho, branchSlice,
   addModelUsage,
   listCronJobs, saveCronJobs,
   listProjects, upsertProject, deleteProject,

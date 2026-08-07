@@ -1,7 +1,7 @@
 // Sidebar: project groups with sessions nested under each group.
 // Group header: editable name, per-group "+" (new session), file manager
 // (load files/folders with live read-only/editable tags).
-import { api, state, $, escapeHtml, emit, on, parseModelValue } from './state.js';
+import { api, state, $, escapeHtml, emit, on, parseModelValue, showCtxMenu } from './state.js';
 import { ensureSession, setActiveSession } from './chat.js';
 
 const attention = new Set();
@@ -9,20 +9,8 @@ const collapsedProjects = new Set();
 const openFilePanels = new Set();
 
 // --- 项目右键菜单(v0.9.1):打开对应文件夹 -------------------------------------
-let ctxMenuEl = null;
-function closeCtxMenu() { if (ctxMenuEl) { ctxMenuEl.remove(); ctxMenuEl = null; } }
 function showProjMenu(x, y, p) {
-  closeCtxMenu();
-  const el = document.createElement('div');
-  el.className = 'ctx-menu';
-  el.innerHTML = `<button data-act="open">打开文件夹</button>`;
-  el.querySelector('[data-act="open"]').onclick = () => { closeCtxMenu(); api.projOpenFolder(p.id); };
-  document.body.appendChild(el);
-  // 贴边时向内收,避免菜单超出窗口
-  const r = el.getBoundingClientRect();
-  el.style.left = Math.min(x, window.innerWidth - r.width - 8) + 'px';
-  el.style.top = Math.min(y, window.innerHeight - r.height - 8) + 'px';
-  ctxMenuEl = el;
+  showCtxMenu(x, y, [{ label: '打开文件夹', onClick: () => api.projOpenFolder(p.id) }]);
 }
 
 export async function refreshList() {
@@ -207,47 +195,50 @@ function renderSessionItem(p, m) {
       ${m.worktreePath ? '<span class="badge-wt">wt</span>' : ''}
       ${m.model ? `<span class="badge-model">${escapeHtml(shortModel(m.model))}</span>` : ''}
     </div>
-    <div class="session-sub">${escapeHtml(new Date(m.updatedAt || m.createdAt || Date.now()).toLocaleString())}${m.archived ? ' · 已归档' : ''}</div>
-    <div class="session-ops">
-      <button data-op="rename">重命名</button>
-      <button data-op="side">Side chat</button>
-      <button data-op="archive">${m.archived ? '恢复' : '归档'}</button>
-      <button data-op="remove">删除</button>
-    </div>`;
-  li.onclick = (e) => {
-    if (e.target.dataset && e.target.dataset.op) return;
+    <div class="session-sub">${escapeHtml(new Date(m.updatedAt || m.createdAt || Date.now()).toLocaleString())}${m.archived ? ' · 已归档' : ''}</div>`;
+  li.title = '右键:重命名 / Side chat / 归档 / 删除'; // 操作项收进右键菜单(v0.9.8)
+  li.onclick = () => {
     attention.delete(m.id);
     setActiveSession(m.id);
     refreshList();
   };
-  li.querySelector('[data-op="rename"]').onclick = async () => {
-    const title = prompt('会话名称:', m.title || '');
-    if (title != null) { await api.sessRename(m.id, title.trim()); refreshList(); }
-  };
-  li.querySelector('[data-op="side"]').onclick = async () => {
-    const meta = await api.sessCreate({
-      cwd: m.cwd, model: m.model, keyId: m.keyId || null, permissionMode: m.permissionMode,
-      effort: m.effort || null, // side chat 继承父会话的推理深度设置
-      title: (m.title || '会话') + ' · side', parentId: m.id,
-      projectId: m.projectId, forkFrom: m.sdkSessionId || null,
-      standalone: m.standalone || undefined, kind: m.kind || undefined, // 独立/非 code 板块会话的 side 不进项目组
-    });
-    ensureSession(meta.id, meta);
-    setActiveSession(meta.id);
-    refreshList();
-  };
-  li.querySelector('[data-op="archive"]').onclick = async () => {
-    await api.sessArchive(m.id, !m.archived);
-    refreshList();
-  };
-  li.querySelector('[data-op="remove"]').onclick = async () => {
-    if (!confirm('删除会话及其历史记录?')) return;
-    await api.sessRemove(m.id);
-    const s = state.sessions.get(m.id);
-    if (s) { s.ui.logEl.remove(); state.sessions.delete(m.id); }
-    refreshList();
+  li.oncontextmenu = (e) => {
+    e.preventDefault();
+    showCtxMenu(e.clientX, e.clientY, [
+      { label: '重命名', onClick: () => renameSession(m) },
+      { label: 'Side chat', onClick: () => sideChat(m) },
+      { label: m.archived ? '恢复' : '归档', onClick: async () => { await api.sessArchive(m.id, !m.archived); refreshList(); } },
+      '-',
+      { label: '删除', danger: true, onClick: () => removeSession(m) },
+    ]);
   };
   return li;
+}
+
+async function renameSession(m) {
+  const title = prompt('会话名称:', m.title || '');
+  if (title != null) { await api.sessRename(m.id, title.trim()); refreshList(); }
+}
+
+async function sideChat(m) {
+  const meta = await api.sessCreate({
+    cwd: m.cwd, model: m.model, keyId: m.keyId || null, permissionMode: m.permissionMode,
+    effort: m.effort || null, // side chat 继承父会话的推理深度设置
+    title: (m.title || '会话') + ' · side', parentId: m.id,
+    projectId: m.projectId, forkFrom: m.sdkSessionId || null,
+    standalone: m.standalone || undefined, kind: m.kind || undefined, // 独立/非 code 板块会话的 side 不进项目组
+  });
+  ensureSession(meta.id, meta);
+  setActiveSession(meta.id);
+  refreshList();
+}
+
+async function removeSession(m) {
+  if (!confirm('删除会话及其历史记录?')) return;
+  await api.sessRemove(m.id);
+  const s = state.sessions.get(m.id);
+  if (s) { s.ui.logEl.remove(); state.sessions.delete(m.id); }
+  refreshList();
 }
 
 function shortModel(model) {
@@ -321,7 +312,6 @@ export function init() {
   api.on('sess:attention', ({ sid }) => {
     if (sid !== state.activeSid) { attention.add(sid); refreshList(); }
   });
-  document.addEventListener('click', closeCtxMenu); // 点别处关闭项目右键菜单
   on('session-status', () => refreshList());
   on('project-files-changed', () => refreshList());
   api.on('cron:fired', () => refreshList());

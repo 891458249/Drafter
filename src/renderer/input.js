@@ -51,16 +51,21 @@ export async function sendMessage() {
   }
 
   // 附件以缩略图形式回显(content 里含 base64 数据)
-  addUserMessage(state.activeSid, content);
+  const echoEl = addUserMessage(state.activeSid, content);
   el.value = '';
   el.style.height = 'auto';
   clearAttachments();
   hideAc();
 
-  const ok = await api.sessSend(state.activeSid, content);
-  if (!ok) {
+  const res = await api.sessSend(state.activeSid, content);
+  if (!res) {
     addUserMessage(state.activeSid, '(发送失败:会话未就绪)');
     return;
+  }
+  // 回填消息锚点 uuid(v0.9.9):live 回显先于主进程打戳,拿到后补挂(右键编辑/分支依赖)
+  if (typeof res === 'string' && echoEl) {
+    echoEl.dataset.uuid = res;
+    if (echoEl._umsg) echoEl._umsg.uuid = res;
   }
   setBusyUI(true);
 }

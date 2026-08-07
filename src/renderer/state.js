@@ -66,6 +66,45 @@ export function sessionModelName(s) {
   return modelLabel(s.meta.model || s.ui.initModel || '') || '默认模型';
 }
 
+// 通用右键菜单(v0.9.8):.ctx-menu 样式;items = [{ label, danger?, onClick }],('-' 为分隔线)
+let ctxMenuEl = null;
+export function closeCtxMenu() { if (ctxMenuEl) { ctxMenuEl.remove(); ctxMenuEl = null; } }
+export function showCtxMenu(x, y, items) {
+  closeCtxMenu();
+  const el = document.createElement('div');
+  el.className = 'ctx-menu';
+  for (const it of items) {
+    if (it === '-') {
+      const sep = document.createElement('div');
+      sep.className = 'ctx-sep';
+      el.appendChild(sep);
+      continue;
+    }
+    const b = document.createElement('button');
+    b.textContent = it.label;
+    if (it.danger) b.classList.add('danger');
+    if (it.disabled) {
+      b.disabled = true;
+      if (it.hint) b.title = it.hint;
+    } else {
+      b.onclick = () => { closeCtxMenu(); it.onClick(); };
+    }
+    el.appendChild(b);
+  }
+  document.body.appendChild(el);
+  // 贴边时向内收,避免菜单超出窗口
+  const r = el.getBoundingClientRect();
+  el.style.left = Math.min(x, window.innerWidth - r.width - 8) + 'px';
+  el.style.top = Math.min(y, window.innerHeight - r.height - 8) + 'px';
+  ctxMenuEl = el;
+}
+document.addEventListener('click', closeCtxMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCtxMenu(); });
+document.addEventListener('contextmenu', (e) => {
+  if (e.defaultPrevented) return; // 本次右键已被某个菜单接管(菜单在同一事件里刚打开)
+  if (ctxMenuEl && !ctxMenuEl.contains(e.target)) closeCtxMenu();
+});
+
 // simple pub/sub so modules can react without circular imports
 const listeners = {};
 export function on(evt, cb) { (listeners[evt] = listeners[evt] || []).push(cb); }

@@ -182,13 +182,6 @@ html, body {
   font-size: 11px; color: var(--text-dim); font-family: var(--mono);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;
 }
-.session-item .session-ops { display: none; gap: 4px; margin-top: 5px; }
-.session-item:hover .session-ops, .session-item.active .session-ops { display: flex; }
-.session-ops button {
-  background: none; border: none; color: var(--text-dim); cursor: pointer;
-  font-size: 11px; padding: 1px 5px; border-radius: 4px;
-}
-.session-ops button:hover { background: var(--border); color: var(--text); }
 .badge-side { font-size: 10px; color: var(--yellow); border: 1px solid var(--yellow); border-radius: 4px; padding: 0 4px; }
 .badge-wt { font-size: 10px; color: var(--green); border: 1px solid var(--green); border-radius: 4px; padding: 0 4px; }
 
@@ -517,12 +510,12 @@ kbd {
   text-overflow: ellipsis;
 }
 
-/* --- 用户消息右对齐(贴聊天区右侧,不随 860px 内容列居中) --------------------- */
-.msg.user { width: fit-content; max-width: 78%; margin: 0 0 20px auto; padding: 0 24px; }
+/* --- 用户消息右对齐(贴聊天区右侧;右侧 148px 为消息导航条留位,v0.9.9) -------- */
+.msg.user { width: fit-content; max-width: calc(78% - 124px); margin: 0 148px 20px auto; padding: 0; }
 .msg.user .msg-role { text-align: right; }
 .msg.user .bubble { border-radius: 14px 14px 4px 14px; }
 
-/* --- 图片附件缩略图(右键复制) -------------------------------------------- */
+/* --- 图片附件缩略图(双击查看 · 右键菜单) ----------------------------------- */
 .msg-img {
   display: block;
   max-width: 240px;
@@ -530,9 +523,9 @@ kbd {
   margin: 6px 0;
   border-radius: 8px;
   border: 1px solid var(--border);
-  cursor: context-menu;
+  cursor: zoom-in;
 }
-.msg-img.copied { outline: 2px solid var(--green); }
+.msg-img.copied, .aigc-media.copied { outline: 2px solid var(--green); }
 
 /* --- 进程摘要组(折叠的工具调用) ------------------------------------------ */
 .activity {
@@ -793,6 +786,48 @@ video.aigc-media { max-height: 360px; }
   border-radius: 6px; cursor: pointer;
 }
 .ctx-menu button:hover { background: var(--bg-hover, rgba(255,255,255,.08)); }
+.ctx-menu button.danger { color: var(--red); }
+.ctx-menu button:disabled { color: var(--text-dim); opacity: .55; cursor: default; }
+.ctx-menu button:disabled:hover { background: none; }
+.ctx-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+
+/* ---------------- 用户消息缩略导航(v0.9.9,右侧悬浮条) ---------------- */
+.chat-col { position: relative; }
+.msg-nav {
+  position: absolute; top: 12px; right: 6px; bottom: 12px;
+  display: flex; align-items: flex-start; z-index: 40; pointer-events: none;
+}
+.msg-nav-list {
+  display: flex; flex-direction: column; gap: 3px;
+  max-height: 100%; overflow-y: auto; width: 132px; pointer-events: auto;
+  scrollbar-width: thin;
+}
+.msg-nav-list button {
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-dim); font-size: 11px; padding: 4px 8px; cursor: pointer;
+  text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: .8; flex-shrink: 0;
+}
+.msg-nav-list button:hover { opacity: 1; color: var(--text); }
+.msg-nav-list button.active { opacity: 1; color: var(--text); border-color: var(--accent); }
+/* 导航点击定位的闪烁提示 */
+.msg.user.flash .bubble { outline: 2px solid var(--accent); transition: outline .15s ease; }
+/* 消息内联编辑(修改并重新生成) */
+.msg-edit-area {
+  width: 420px; max-width: 60vw; min-height: 72px; margin-top: 4px;
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--accent);
+  border-radius: 8px; padding: 8px 10px; font: inherit; resize: vertical;
+}
+.msg-edit-ops { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+
+/* ---------------- 图片查看模式(v0.9.8):双击消息图片进入 ---------------- */
+.img-viewer { background: rgba(0,0,0,.78); cursor: zoom-out; }
+.img-viewer img {
+  max-width: 92vw; max-height: 92vh; border-radius: 8px;
+  box-shadow: 0 20px 80px rgba(0,0,0,.6); cursor: default;
+  transition: transform .08s linear;
+}
+img.aigc-media { cursor: zoom-in; }
 
 /* sdk-only 元素仅 code/chat(SDK 会话)板块显示;新媒体板块隐藏(v0.9.6) */
 body.sec-image .sdk-only, body.sec-video .sdk-only,

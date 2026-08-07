@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld('api', {
   sessSetModel: (sid, model, keyId) => ipcRenderer.invoke('sess:setModel', { sid, model, keyId }),
   sessSetEffort: (sid, effort) => ipcRenderer.invoke('sess:setEffort', { sid, effort }),
   sessHistory: (sid) => ipcRenderer.invoke('sess:history', sid),
+  sessEditRegenerate: invoke('sess:editRegenerate'),
+  sessBranch: invoke('sess:branch'),
   sessRename: (sid, title) => ipcRenderer.invoke('sess:rename', { sid, title }),
   sessArchive: (sid, archived) => ipcRenderer.invoke('sess:archive', { sid, archived }),
   sessRemove: (sid) => ipcRenderer.invoke('sess:remove', sid),

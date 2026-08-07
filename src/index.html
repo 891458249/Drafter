@@ -67,6 +67,8 @@
       <!-- Chat -->
       <section class="chat-col">
         <div id="messages" class="messages"></div>
+        <!-- 用户消息缩略导航(v0.9.9):点击定位到对应消息,滚动联动高亮 -->
+        <div id="msg-nav" class="msg-nav hidden"><div class="msg-nav-list"></div></div>
         <div class="composer">
           <div id="attachments" class="attachments hidden"></div>
           <div id="autocomplete" class="autocomplete hidden"></div>
@@ -339,6 +341,9 @@
       </div>
     </div>
   </div>
+
+  <!-- 图片查看模式(v0.9.8):双击消息内图片打开,滚轮缩放,Esc/点击空白关闭 -->
+  <div id="img-viewer" class="modal-mask img-viewer hidden"><img alt="" /></div>
 
   <!-- "More" dropdown -->
   <div id="more-menu" class="more-menu hidden">

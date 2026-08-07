@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Skill(claude-api)",
-      "Skill(claude-api:*)"
+      "Skill(claude-api:*)",
+      "Edit",
+      "Bash(npm test *)",
+      "Bash(ls ~/.claude/projects/ | head -30)"
     ]
   }
 }

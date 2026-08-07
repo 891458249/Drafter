@@ -106,6 +106,7 @@ async function replayHistory(sid) {
   for (const ev of events) renderEvent(sid, ev, { replay: true });
   finalizeAssistant(s);
   finalizeAigcReplay(s); // 新媒体会话:未完成的历史任务标记中断
+  emit('history-replayed', { sid }); // 消息导航条据此重建(v0.9.9)
   scrollBottom(sid);
 }
 
@@ -167,10 +168,40 @@ function ensureAssistant(s, parentId) {
 }
 
 function finalizeAssistant(s) {
-  if (!s.ui.currentAssistant) return;
-  const live = s.ui.currentAssistant.bubble.querySelector('.thinking.live');
+  const a = s.ui.currentAssistant;
+  if (!a) return;
+  flushAssistantRender(s, a); // 冲销待渲染帧,保证回合结束内容完整
+  const live = a.bubble.querySelector('.thinking.live');
   if (live) live.classList.remove('live');
   s.ui.currentAssistant = null;
+}
+
+// 流式渲染节流(v0.9.10):此前每个 text delta 都把已累积全文重新 marked.parse 一遍
+// (消息越长越慢,O(n²)),且所有会话(含后台)共用渲染主线程——一个会话流式输出时
+// 其他会话的输入框被卡住无法打字。改为 80ms 合帧渲染,段落切换/回合结束时冲销。
+const ASSISTANT_RENDER_MS = 80;
+
+function scheduleAssistantRender(s, a) {
+  if (a.renderTimer) return;
+  a.renderTimer = setTimeout(() => {
+    a.renderTimer = null;
+    if (a.textEl) {
+      a.textEl.innerHTML = renderMarkdown(a.buf);
+      linkifyPaths(a.textEl);
+    }
+    scrollBottom(s.meta.id);
+  }, ASSISTANT_RENDER_MS);
+}
+
+function flushAssistantRender(s, a) {
+  if (!a || !a.renderTimer) return;
+  clearTimeout(a.renderTimer);
+  a.renderTimer = null;
+  if (a.textEl) {
+    a.textEl.innerHTML = renderMarkdown(a.buf);
+    linkifyPaths(a.textEl);
+  }
+  scrollBottom(s.meta.id);
 }
 
 function appendText(s, parentId, delta) {
@@ -180,9 +211,7 @@ function appendText(s, parentId, delta) {
     a.textEl = document.createElement('div');
     a.bubble.appendChild(a.textEl);
   }
-  a.textEl.innerHTML = renderMarkdown(a.buf);
-  linkifyPaths(a.textEl);
-  scrollBottom(s.meta.id);
+  scheduleAssistantRender(s, a);
 }
 
 function appendThinking(s, parentId, delta) {
@@ -210,60 +239,67 @@ function linkifyPaths(el) {
 }
 
 // --- user echo ---------------------------------------------------------------
-export function addUserMessage(sid, content) {
-  const s = ensureSession(sid);
-  const msg = document.createElement('div');
-  msg.className = 'msg user';
-  msg.innerHTML = `<div class="msg-role">你</div><div class="bubble"></div>`;
-  const bubble = msg.querySelector('.bubble');
+// 渲染用户消息 bubble 内容(addUserMessage 与编辑重生成的重渲染共用)
+export function renderUserBubble(bubble, content) {
+  bubble.innerHTML = '';
   if (typeof content === 'string') {
     bubble.innerHTML = renderMarkdown(content);
-  } else {
-    for (const b of content) {
-      if (b.type === 'text') {
-        const d = document.createElement('div');
-        d.innerHTML = renderMarkdown(b.text);
-        bubble.appendChild(d);
-      } else if (b.type === 'media_ref') {
-        // 音频/视频/3D 附件卡片(媒体本体不进会话,发送时已注入分析/元信息文本)
+    return;
+  }
+  for (const b of content) {
+    if (b.type === 'text') {
+      const d = document.createElement('div');
+      d.innerHTML = renderMarkdown(b.text);
+      bubble.appendChild(d);
+    } else if (b.type === 'media_ref') {
+      // 音频/视频/3D 附件卡片(媒体本体不进会话,发送时已注入分析/元信息文本)
+      const n = document.createElement('div');
+      n.className = 'user-img-note';
+      const icon = { audio: '🎵', video: '🎬', model: '🧊' }[b.mediaKind] || '📎';
+      n.textContent = `${icon} [附件] ${b.name || ''}`;
+      bubble.appendChild(n);
+    } else if (b.type === 'image' || b.type === 'image_ref') {
+      // live 消息带 source,历史回放带 mediaType/data
+      const mt = (b.source && b.source.media_type) || b.mediaType;
+      const data = (b.source && b.source.data) || b.data;
+      if (data) {
+        const img = document.createElement('img');
+        img.className = 'msg-img';
+        img.src = `data:${mt || 'image/png'};base64,${data}`;
+        img.title = '双击查看 · 右键菜单'; // 查看/复制由 msgmenu.js 统一接管(v0.9.8)
+        bubble.appendChild(img);
+      } else {
         const n = document.createElement('div');
         n.className = 'user-img-note';
-        const icon = { audio: '🎵', video: '🎬', model: '🧊' }[b.mediaKind] || '📎';
-        n.textContent = `${icon} [附件] ${b.name || ''}`;
+        n.textContent = '🖼 [图片附件]';
         bubble.appendChild(n);
-      } else if (b.type === 'image' || b.type === 'image_ref') {
-        // live 消息带 source,历史回放带 mediaType/data
-        const mt = (b.source && b.source.media_type) || b.mediaType;
-        const data = (b.source && b.source.data) || b.data;
-        if (data) {
-          const img = document.createElement('img');
-          img.className = 'msg-img';
-          img.src = `data:${mt || 'image/png'};base64,${data}`;
-          img.title = '右键复制图片';
-          img.addEventListener('contextmenu', async (e) => {
-            e.preventDefault();
-            try {
-              const c = document.createElement('canvas');
-              c.width = img.naturalWidth; c.height = img.naturalHeight;
-              c.getContext('2d').drawImage(img, 0, 0);
-              const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
-              await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-              img.classList.add('copied');
-              setTimeout(() => img.classList.remove('copied'), 600);
-            } catch (err) { console.error('复制图片失败:', err); }
-          });
-          bubble.appendChild(img);
-        } else {
-          const n = document.createElement('div');
-          n.className = 'user-img-note';
-          n.textContent = '🖼 [图片附件]';
-          bubble.appendChild(n);
-        }
       }
     }
   }
+}
+
+export function addUserMessage(sid, content, uuid) {
+  const s = ensureSession(sid);
+  const msg = document.createElement('div');
+  msg.className = 'msg user';
+  if (uuid) msg.dataset.uuid = uuid; // v0.9.9:编辑重生成/分支的锚点
+  msg.innerHTML = `<div class="msg-role">你</div><div class="bubble"></div>`;
+  renderUserBubble(msg.querySelector('.bubble'), content);
   finalizeAssistant(s);
   s.ui.logEl.appendChild(msg);
+  msg._umsg = { uuid: uuid || null, content }; // msgmenu.js 右键编辑/分支取用
+  emit('user-msg-added', { sid });
+  scrollBottom(sid);
+  return msg;
+}
+
+// 编辑重生成后:把目标用户消息(含)之后的渲染全部移除,等待重发与新回复
+export function truncateAfter(sid, msgEl) {
+  const s = state.sessions.get(sid);
+  if (!s || !msgEl) return;
+  finalizeAssistant(s);
+  let n = msgEl;
+  while (n) { const next = n.nextSibling; n.remove(); n = next; }
   scrollBottom(sid);
 }
 
@@ -678,8 +714,13 @@ function renderEditDiff(input) {
 
 // Dedupe key: persisted-then-emitted events serialize identically, so an exact
 // JSON match reliably identifies "already rendered from history".
+// uuid 除外(v0.9.9):live 事件由 SDK 返回时才带 uuid,历史事件是持久化时打戳,
+// 同一消息两处 uuid 一致但旧版历史没有,比较时忽略以避免重复渲染。
 function eventKey(ev) {
-  try { return JSON.stringify(ev); } catch { return String(ev); }
+  try {
+    const { uuid, ...rest } = ev;
+    return JSON.stringify(rest);
+  } catch { return String(ev); }
 }
 
 // --- main event entry ---------------------------------------------------------
@@ -749,7 +790,7 @@ export function renderEvent(sid, ev, { replay }) {
     if (ev.slashCommands) state.commandsCache = null; // refresh next time
     return;
   }
-  if (t === 'ui_user_input') { addUserMessage(sid, ev.content); return; }
+  if (t === 'ui_user_input') { addUserMessage(sid, ev.content, ev.uuid || null); return; }
   if (t === 'aigc_user') { addAigcUserMessage(sid, ev); return; } // 新媒体会话:用户 prompt(+参考图)
   if (t === 'aigc_task') { upsertTaskCard(sid, ev, replay); return; } // 新媒体会话:任务卡片
   if (t === 'ui_error') { metaLine(s, '错误:' + ev.message, 'error-line'); return; }
@@ -825,6 +866,7 @@ function handleStreamEvent(s, parentId, ev) {
     if (block && block.type === 'tool_use') addToolCard(s, parentId, block.id, block.name, block.input || null);
     if (block && block.type === 'text') {
       const a = ensureAssistant(s, parentId);
+      flushAssistantRender(s, a); // 新文本块开始前冲销上一段的待渲染帧
       a.textEl = null; a.buf = '';
       a.activity = null; // 文本出现后,后续工具进入新的进程组
     }
@@ -877,6 +919,7 @@ function handleAssistantMessage(s, parentId, message, replay) {
       if (replay || !a || !a.buf) appendText(s, parentId, block.text || '');
       // reset buffer so following blocks don't duplicate
       if (s.ui.currentAssistant) {
+        flushAssistantRender(s, s.ui.currentAssistant); // 冲销后再清缓冲,避免丢最后一段
         s.ui.currentAssistant.buf = '';
         s.ui.currentAssistant.textEl = null;
         s.ui.currentAssistant.activity = null; // 文本后新的进程组

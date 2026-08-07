@@ -194,3 +194,21 @@ Git 工作流:
 - **修复**:adoptDir 同步切换 cwd(清冗余 extraDirs+重启 query);sessions.js addDir/start() 过滤与 cwd 相同的目录;input.js adopt 分支同步 meta.cwd/state.cwd;存量 store 3 个会话 cwd 已修正(留 .bak-cwdfix 备份);settings.local.json 残留项已删
 - **已知代价**:改存量会话 cwd 会使 resume 报 No conversation found with session ID(记录按 cwd 分目录),App 自动开新会话接续;新会话不受影响
 - npm test 75/75;安装包 dist/DeskTopUI Setup 0.9.7.exe 已构建
+
+### v0.9.8(2026-08-06):会话操作右键化 + 消息右键复制/引用 + 图片查看模式
+- **会话操作收进右键菜单**:侧栏会话项常驻的「重命名 / Side chat / 归档 / 删除」按钮行移除,改为右键菜单(state.js 新增通用 showCtxMenu,项目「打开文件夹」菜单同步迁移复用);删除标红、加分隔线
+- **消息右键复制/引用**:新模块 msgmenu.js 在 #messages 上事件委托——文本消息右键「复制」(有选区复制选区,否则剔除工具进程组/任务卡片/思考块后复制整条正文)与「引用」(markdown 引用块填入输入框末尾并聚焦)
+- **图片双击查看 + 右键复制**:用户附件缩略图(.msg-img)与生成产物图(.aigc-media)双击进入查看模式(#img-viewer 复用 modal-mask:Esc/点空白关闭,滚轮缩放,双击图面复位);右键菜单「查看图片 / 复制图片」,复制走 fetch→位图→PNG 写剪贴板(兼容 data: 与 aigc://,取代原仅缩略图的直接右键复制)
+
+### v0.9.9(2026-08-06):用户消息导航条 + 右键编辑重生成/分支
+- **消息锚点 uuid**:Session.send 为每条用户消息生成 uuid 打在 SDK 流式输入消息上并持久化进 echo(ui_user_input);user/assistant SDK 事件同步捕获 uuid;sess:send IPC 返回 uuid,renderer 回填到 live 回显元素;renderer eventKey 去重忽略 uuid 字段(防 live/历史双渲染)
+- **用户消息导航条**:新模块 msgnav.js——聊天区右侧悬浮条列出每条用户消息摘要(_umsg 原始内容取文本,非 markdown 渲染残留),点击平滑滚动定位+闪烁,滚动联动高亮当前位置(参考线:视口顶部+120px);事件驱动重建(user-msg-added/history-replayed/session-activated,rAF 合帧防回放 O(n²));用户气泡右移 148px 为导航条让位
+- **修改并重新生成**:用户消息右键 → 内联编辑(textarea,Enter 保存/Esc 取消)→ sess:editRegenerate:主进程 locateEcho 校验锚点后截断 UI 日志(writeSessionEvents 替换 echo 内容),stop 旧 query(setImmediate 等旧 _pump finally 跑完),fork 重启(resume+forkSession+resumeSessionAt=echo 前最近 assistant 锚点)再发送编辑后内容;非首条消息但无锚点(旧版本历史)直接报错,不静默丢上下文;附件块原样保留只替换文本
+- **从此消息分支**:用户消息右键 → sess:branch:branchSlice 复制「目标 echo 回合结束」之前的事件进新会话(同 cwd/模型/Key/板块归属,标题加 · 分支),SDK fork 到该回合末尾锚点,新会话带完整上文继续;无 SDK 锚点时降级为仅复制可见历史并返回 warning
+- **store**:新增 writeSessionEvents/locateEcho/branchSlice;test/session-edit.test.js 6 例(锚点偏好 assistant、退化 user、首条无锚点、切片到回合结束、整文件重写)
+- npm test 81/81
+
+### v0.9.10(2026-08-07):新项目首会话作废修复 + 流式渲染卡顿修复
+- **「设为项目文件夹」后会话作废修复**:adoptDir 切 cwd 后 resume 在新 cwd 的 projects 目录找不到 <sdkSessionId>.jsonl,报 No conversation found 进程退出,且 sdkSessionId 残留导致之后每次 send 都失败、会话永久卡死。sessions.js 新增 encodeCwdForProjects(与 claude.exe 内 A0 编码一致:[^a-zA-Z0-9]→'-',超 200 字符截断+att 哈希 base36 后缀,从二进制提取验证)+migrateTranscript(resume 前把旧 cwd 目录的记录复制到新目录,留底不移动;登记的 prevCwd 找不到时兜底全盘扫描,覆盖连续两次 adopt);adoptDir 登记 meta.prevCwd(消费后清除);迁移后仍无记录则清 sdkSessionId 降级全新会话并提示,杜绝卡死。CLAUDE_PROJECTS_DIR 遵循 CLAUDE_CONFIG_DIR。test/transcript-migrate.test.js 6 例
+- **流式执行卡死其他会话输入框修复**:chat.js appendText 此前对每个 text delta 把已累积全文 renderMarkdown 重渲一遍(O(n²)),所有会话共用渲染主线程,后台会话流式输出占满主线程导致输入框无法打字。改为 80ms 合帧渲染(scheduleAssistantRender),finalizeAssistant/content_block_start/handleAssistantMessage 文本块切换时 flushAssistantRender 冲销保证完整
+- npm test 87/87

@@ -6,6 +6,7 @@
 //  - resume persisted sessions (B3) and fork side chats (B24)
 const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { Notification } = require('electron');
 const store = require('./store');
@@ -16,6 +17,46 @@ const keys = require('./keys');
 // The Agent SDK is ESM-only — load it via dynamic import().
 let sdk = null;
 let sdkError = null;
+
+// Claude Code 把会话记录存在 ~/.claude/projects/<cwd编码>/<sessionId>.jsonl,
+// 编码规则(claude.exe 内函数 A0):非字母数字一律换成 '-',超 200 字符再截断+哈希。
+// cwd 变更(adoptDir)后 resume 会在新目录找不到旧记录而失败(v0.9.7 的坑),
+// 因此 start() 前要把旧目录的记录复制过来(migrateTranscript)。
+const CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_CONFIG_DIR, 'projects');
+function encodeCwdForProjects(cwd) {
+  const t = String(cwd || '').replace(/[^a-zA-Z0-9]/g, '-');
+  if (t.length <= 200) return t;
+  let h = 0; // 与 claude.exe 的 att() 相同的字符串哈希
+  for (let i = 0; i < t.length; i++) h = ((h << 5) - h + t.charCodeAt(i)) | 0;
+  return `${t.slice(0, 200)}-${Math.abs(h).toString(36)}`;
+}
+// 把旧 cwd 目录下的会话记录复制到新 cwd 目录(已存在则跳过,留底不移动)。
+// 旧目录找不到时兜底扫描所有记录目录(如连续两次 adopt,记录还停在更早的 cwd)。
+// 返回 true 表示记录已就位(或本来就在),resume 可以命中旧上下文。
+function migrateTranscript(sessionId, oldCwd, newCwd) {
+  if (!sessionId || !newCwd) return false;
+  try {
+    const dstDir = path.join(CLAUDE_PROJECTS_DIR, encodeCwdForProjects(newCwd));
+    const dst = path.join(dstDir, sessionId + '.jsonl');
+    if (fs.existsSync(dst)) return true;
+    let src = oldCwd ? path.join(CLAUDE_PROJECTS_DIR, encodeCwdForProjects(oldCwd), sessionId + '.jsonl') : null;
+    if (!src || !fs.existsSync(src)) {
+      src = null;
+      for (const d of fs.readdirSync(CLAUDE_PROJECTS_DIR)) {
+        const p = path.join(CLAUDE_PROJECTS_DIR, d, sessionId + '.jsonl');
+        if (fs.existsSync(p)) { src = p; break; }
+      }
+    }
+    if (!src) return false;
+    fs.mkdirSync(dstDir, { recursive: true });
+    fs.copyFileSync(src, dst);
+    return true;
+  } catch (e) {
+    console.error('[sessions] transcript migrate failed:', e.message);
+    return false;
+  }
+}
 
 // Resolve the SDK's bundled claude.exe explicitly. In a packaged app the SDK
 // computes a path inside app.asar: fs.exists passes (Electron redirects reads
@@ -102,7 +143,7 @@ class Session {
     this.cumCostUsd = 0;
   }
 
-  async start({ resume = false, fork = false } = {}) {
+  async start({ resume = false, fork = false, forkAt = null } = {}) {
     if (this.running || this.starting) return;
     this.starting = true;
     // 自愈(v0.9.5):code/chat 会话上残留的新媒体模型(旧版板块切换错绑,发送必 403
@@ -137,8 +178,29 @@ class Session {
     const exe = resolveClaudeExe();
     if (exe) options.pathToClaudeCodeExecutable = exe; // 打包态指向 app.asar.unpacked(F-001)
     if (resume && this.meta.sdkSessionId) {
-      options.resume = this.meta.sdkSessionId;
-      if (fork) options.forkSession = true;
+      // cwd 变更后(adoptDir / 手动改目录)记录还在旧目录,先迁移再 resume(v0.9.10)
+      const norm = (p) => path.resolve(p).toLowerCase();
+      const prevCwd = this.meta.prevCwd || null; // adoptDir 切换前会登记
+      const cwdChanged = !!prevCwd && norm(prevCwd) !== norm(this.meta.cwd || '');
+      if (cwdChanged) {
+        migrateTranscript(this.meta.sdkSessionId, prevCwd, this.meta.cwd);
+        // 迁移是一次性的:消费后清掉,避免每次启动重复检查
+        this.meta.prevCwd = null;
+        store.upsertSession({ id: this.id, prevCwd: null });
+      }
+      // 迁移后新目录仍无记录 → resume 必失败("No conversation found"),
+      // 清掉 sdkSessionId 走全新会话,避免每次 send 都失败把会话卡死
+      const rec = path.join(CLAUDE_PROJECTS_DIR, encodeCwdForProjects(this.meta.cwd), this.meta.sdkSessionId + '.jsonl');
+      if (!fs.existsSync(rec)) {
+        this.meta.sdkSessionId = null;
+        store.upsertSession({ id: this.id, sdkSessionId: null });
+        this._emit({ type: 'ui_error', message: '旧会话记录缺失,已切换为新会话(上文仅保留界面可见部分)' });
+      } else {
+        options.resume = this.meta.sdkSessionId;
+        if (fork) options.forkSession = true;
+        // forkAt(v0.9.9):只恢复到指定消息 UUID 为止(编辑重生成/分支的锚点)
+        if (forkAt) options.resumeSessionAt = forkAt;
+      }
     }
     // project-group context: shared memory + file tags + extra dirs + readonly hook
     let projCtx = null;
@@ -235,6 +297,8 @@ class Session {
         message: msg.message,
         parent_tool_use_id: msg.parent_tool_use_id || null,
       };
+      // uuid(v0.9.9):编辑重生成/分支的上下文锚点;renderer 的 eventKey 已忽略该字段
+      if (msg.uuid) ev.uuid = msg.uuid;
       this._emit(ev, true);
       return;
     }
@@ -368,29 +432,30 @@ class Session {
 
   // content: string | array of content blocks ({type:'text'|'image'|'media_ref',...})
   // echoContent: 持久化回显用的原始内容(v0.9.1 辅助分析注入后,历史仍回放附件卡片)
+  // 返回发送时生成的消息 uuid(v0.9.9:编辑重生成/分支的定位锚点;isReplay 消息不带 uuid)
   send(content, echoContent) {
     if (!this.running && !this.starting) this.start({ resume: !!this.meta.sdkSessionId });
-    if (!this.queue) return false;
+    if (!this.queue) return null;
+    const uuid = crypto.randomUUID();
     this.queue.push({
       type: 'user',
+      uuid,
       message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: this.meta.sdkSessionId || undefined,
     });
     this.busy = true;
-    this._persistUserEcho(echoContent !== undefined ? echoContent : content);
+    this._persistUserEcho(echoContent !== undefined ? echoContent : content, uuid);
     this._emit({ type: 'ui_status', running: true, busy: true });
-    return true;
+    return uuid;
   }
 
-  _persistUserEcho(content) {
+  _persistUserEcho(content, uuid) {
     // persist a lightweight echo of what the user sent; keep image data so
     // history replay can render thumbnails
-    const slim = typeof content === 'string' ? content
-      : content.map((b) => b.type === 'image'
-        ? { type: 'image_ref', mediaType: b.source && b.source.media_type, data: b.source && b.source.data }
-        : b);
-    store.appendSessionEvent(this.id, { type: 'ui_user_input', content: slim });
+    const ev = { type: 'ui_user_input', content: slimEcho(content) };
+    if (uuid) ev.uuid = uuid;
+    store.appendSessionEvent(this.id, ev);
   }
 
   async interrupt() {
@@ -451,6 +516,33 @@ class Session {
     return dirs;
   }
 
+  // 修改并重新生成(v0.9.9):UI 日志截断到目标 echo 并替换为编辑后的内容;
+  // SDK 侧 fork 到 echo 之前的锚点(resumeSessionAt),再发出编辑后的消息。
+  // 返回 { ok, uuid? , error? }
+  async editRegenerate(echoUuid, content, echoContent) {
+    if (this.busy) await this.interrupt();
+    const loc = store.locateEcho(this.id, echoUuid);
+    if (!loc.ok) return loc;
+    // 非首条消息但找不到前驱锚点(旧版本历史无 uuid):拒绝,避免静默丢失上文
+    if (!loc.prevUuid && !loc.isFirst) {
+      return { ok: false, error: '该消息之前的历史来自旧版本,缺少上下文锚点,无法重生成' };
+    }
+    const slim = slimEcho(echoContent !== undefined ? echoContent : content);
+    const kept = [...loc.events.slice(0, loc.index), { ...loc.events[loc.index], content: slim }];
+    store.writeSessionEvents(this.id, kept); // 校验通过后才落盘
+    this.stop();
+    // 等旧 _pump 的 finally 跑完再重启,避免它把新回合的 busy 状态覆盖掉
+    await new Promise((r) => setImmediate(r));
+    const canResume = !!(loc.prevUuid && this.meta.sdkSessionId);
+    if (!canResume) { // 首条消息或无 SDK 上下文:全新开始
+      this.meta.sdkSessionId = null;
+      store.upsertSession({ id: this.id, sdkSessionId: null });
+    }
+    await this.start({ resume: canResume, fork: canResume, forkAt: loc.prevUuid || null });
+    const uuid = this.send(content, echoContent);
+    return uuid ? { ok: true, uuid } : { ok: false, error: '发送失败:会话未就绪' };
+  }
+
   stop() {
     if (this.queue) this.queue.end();
     if (this.q && typeof this.q.close === 'function') { try { this.q.close(); } catch {} }
@@ -484,7 +576,7 @@ class SessionManager {
     });
   }
 
-  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, projectId, effort, standalone, kind, keyId }) {
+  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId }) {
     const id = 's_' + crypto.randomUUID().slice(0, 12);
     const meta = {
       id, cwd, model: model || null,
@@ -501,8 +593,31 @@ class SessionManager {
     store.upsertSession(meta);
     const s = new Session(this, meta);
     this.sessions.set(id, s);
-    s.start({ resume: !!forkFrom, fork: !!forkFrom });
+    s.start({ resume: !!forkFrom, fork: !!forkFrom, forkAt: forkAt || null });
     return meta;
+  }
+
+  // 从此消息分支(v0.9.9):把源会话日志中「目标 echo 所在回合结束」之前的事件
+  // 复制到新会话(同项目/同设置),SDK 侧 fork 到该回合末尾的锚点,新会话带着完整上文继续。
+  branch(srcId, echoUuid) {
+    const src = this.get(srcId);
+    const m = src && src.meta;
+    if (!m) return { ok: false, error: '会话不存在' };
+    const loc = store.locateEcho(srcId, echoUuid);
+    if (!loc.ok) return loc;
+    const { prefix, anchorUuid } = store.branchSlice(loc.events, loc.index);
+    const canFork = !!(anchorUuid && m.sdkSessionId);
+    const meta = this.create({
+      cwd: m.cwd, model: m.model, keyId: m.keyId || null, permissionMode: m.permissionMode,
+      effort: m.effort || null,
+      title: (m.title || '会话') + ' · 分支',
+      projectId: m.projectId,
+      forkFrom: canFork ? m.sdkSessionId : null,
+      forkAt: canFork ? anchorUuid : null,
+      standalone: m.standalone || undefined, kind: m.kind || undefined, // 独立/板块会话的分支同侧栏归属
+    });
+    store.writeSessionEvents(meta.id, prefix);
+    return { ok: true, meta, warning: canFork ? null : '无 SDK 上下文锚点,分支只复制了可见历史' };
   }
 
   // Reattach a persisted session (after app restart): lazily resumed on first send.
@@ -563,8 +678,15 @@ class SessionManager {
   }
 }
 
+function slimEcho(content) {
+  return typeof content === 'string' ? content
+    : content.map((b) => b.type === 'image'
+      ? { type: 'image_ref', mediaType: b.source && b.source.media_type, data: b.source && b.source.data }
+      : b);
+}
+
 function safeJson(obj) {
   try { return JSON.parse(JSON.stringify(obj)); } catch { return String(obj); }
 }
 
-module.exports = { SessionManager, resolveClaudeExe };
+module.exports = { SessionManager, resolveClaudeExe, encodeCwdForProjects, migrateTranscript };

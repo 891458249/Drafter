@@ -236,14 +236,19 @@ ipcMain.handle('proj:adoptDir', async (_e, { sid, dir }) => {
     const extra = s.meta.extraDirs.filter((d) => norm(d) !== norm(dir));
     if (extra.length !== s.meta.extraDirs.length) patch.extraDirs = extra;
   }
-  store.upsertSession(patch);
   if (s) {
     const cwdChanged = norm(s.meta.cwd || '') !== norm(dir);
+    // cwd 切换前登记旧目录(v0.9.10):sessions.start() 据此把会话记录迁移到新
+    // cwd 的 projects 目录再 resume,否则报 "No conversation found" 会话作废
+    if (cwdChanged) patch.prevCwd = s.meta.cwd;
     Object.assign(s.meta, patch);
+    store.upsertSession(patch);
     if (cwdChanged && s.running) {
       if (s.busy) s.needRestart = true;   // 回合进行中不打断,回合结束后自动重启
       else { s.stop(); await s.start({ resume: !!s.meta.sdkSessionId }); }
     }
+  } else {
+    store.upsertSession(patch);
   }
   return p;
 });
@@ -443,6 +448,13 @@ ipcMain.handle('sess:setEffort', (_e, { sid, effort }) => {
   return s ? s.setEffort(effort) : false;
 });
 ipcMain.handle('sess:history', (_e, sid) => sessions.history(sid));
+// 修改并重新生成(v0.9.9):截断 UI 日志,fork SDK 上下文后发送编辑后的消息
+ipcMain.handle('sess:editRegenerate', async (_e, { sid, echoUuid, content, echoContent }) => {
+  const s = sessions.get(sid);
+  return s ? s.editRegenerate(echoUuid, content, echoContent) : { ok: false, error: '会话不存在' };
+});
+// 从此消息分支(v0.9.9):复制该消息回合结束前的历史为新会话,SDK 上下文 fork 到该回合末尾
+ipcMain.handle('sess:branch', (_e, { sid, echoUuid }) => sessions.branch(sid, echoUuid));
 ipcMain.handle('sess:rename', (_e, { sid, title }) => { sessions.rename(sid, title); return true; });
 ipcMain.handle('sess:archive', async (_e, { sid, archived }) => {
   // clean up the session worktree when archiving
