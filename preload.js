@@ -56,6 +56,12 @@ contextBridge.exposeInMainWorld('api', {
   auxModelsGet: () => ipcRenderer.invoke('settings:getAuxModels'),
   auxModelsSet: (m) => ipcRenderer.invoke('settings:setAuxModels', m),
 
+  // Gem 自定义助手(v0.9.11)
+  gemsList: () => ipcRenderer.invoke('gems:list'),
+  gemsSave: (gem) => ipcRenderer.invoke('gems:save', gem),
+  gemsDelete: (id) => ipcRenderer.invoke('gems:delete', id),
+  gemsRewrite: (payload) => ipcRenderer.invoke('gems:rewrite', payload),
+
   // sessions
   sdkStatus: () => ipcRenderer.invoke('sess:sdkStatus'),
   sessList: () => ipcRenderer.invoke('sess:list'),
@@ -73,6 +79,7 @@ contextBridge.exposeInMainWorld('api', {
   sessArchive: (sid, archived) => ipcRenderer.invoke('sess:archive', { sid, archived }),
   sessRemove: (sid) => ipcRenderer.invoke('sess:remove', sid),
   sessSetActive: (sid) => ipcRenderer.invoke('sess:setActive', sid),
+  sessSetGem: (sid, gemId) => ipcRenderer.invoke('sess:setGem', { sid, gemId }),
 
   // AIGC 生成任务(新媒体板块)
   aigcSend: invoke('aigc:send'),

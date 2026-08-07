@@ -212,3 +212,18 @@ Git 工作流:
 - **「设为项目文件夹」后会话作废修复**:adoptDir 切 cwd 后 resume 在新 cwd 的 projects 目录找不到 <sdkSessionId>.jsonl,报 No conversation found 进程退出,且 sdkSessionId 残留导致之后每次 send 都失败、会话永久卡死。sessions.js 新增 encodeCwdForProjects(与 claude.exe 内 A0 编码一致:[^a-zA-Z0-9]→'-',超 200 字符截断+att 哈希 base36 后缀,从二进制提取验证)+migrateTranscript(resume 前把旧 cwd 目录的记录复制到新目录,留底不移动;登记的 prevCwd 找不到时兜底全盘扫描,覆盖连续两次 adopt);adoptDir 登记 meta.prevCwd(消费后清除);迁移后仍无记录则清 sdkSessionId 降级全新会话并提示,杜绝卡死。CLAUDE_PROJECTS_DIR 遵循 CLAUDE_CONFIG_DIR。test/transcript-migrate.test.js 6 例
 - **流式执行卡死其他会话输入框修复**:chat.js appendText 此前对每个 text delta 把已累积全文 renderMarkdown 重渲一遍(O(n²)),所有会话共用渲染主线程,后台会话流式输出占满主线程导致输入框无法打字。改为 80ms 合帧渲染(scheduleAssistantRender),finalizeAssistant/content_block_start/handleAssistantMessage 文本块切换时 flushAssistantRender 冲销保证完整
 - npm test 87/87
+
+### v0.9.11(2026-08-07):Gem 自定义助手(全板块,编辑界面对齐 Gemini Gem)
+- **数据模型**:store settings.gems 数组{name,desc,instructions(≤30000),tools,model,knowledge(≤10),knowledgeEnabled,preset};内置 4 个预置 Gem(编程伙伴/写作编辑/头脑风暴/学习辅导,preset:true 不可改删,可复制副本),首启播种幂等不覆盖用户数据
+- **主进程 gems.js**:CRUD + composeAppend(SDK 会话 systemPrompt append:身份+说明+指令+工具偏好+知识文件,文本类 <200KB 内联前 2000 字符,总量截断 8000)+ composeMediaPrefix(媒体板块:指令截断 2000 拼用户 prompt 前);main.js 加 gems:list/save/delete/rewrite(✨AI 优化:一句话按官方「角色/任务/情境/形式」四要素扩写,复用 chat 模型单次调用)与 sess:setGem;aigc:send 在 meta.gemId 时注入前缀(回显/标题仍用原始 prompt)
+- **sessions.js**:create 接 gemId(upsert 浅合并自动持久化);start() 把 gem append 与项目组 append 合并注入(有/无项目组均生效;gem 被删静默忽略);setGem 复用 needRestart 重启模式(busy 等回合结束,否则 stop+start resume 保上下文);媒体会话 create 分支也落 gemId
+- **渲染端 gems.js**:三栏管理 modal(对齐 Gemini 编辑器)——左栏 Gem 列表(预置/我的)+新建;中栏表单(名称/说明/指令+✨AI 优化/默认工具多选 chips(制作图片·视频·音乐/Canvas/Deep Research/学习辅导)/知识文件(≤10,添加/移除)+「停用知识引用」);右栏预览(首字母头像+名称+说明实时联动+近期对话(该 gem 的会话,点击跳转)+「开始对话」按当前板块建会话绑定,gem 带默认模型且下拉未选时套用);composer 工具行 💎 选择器(选择/清除/管理);会话项 💎gem 名徽标;placeholder 显示「Gem名·模型名」;side chat 继承 gemId
+- **注意坑**:smoke 测试须先 unset ELECTRON_RUN_AS_NODE(否则 electron 以纯 node 运行,electron-updater 因 app undefined 崩溃,与本功能无关)
+- npm test 93/93(新增 test/gems.test.js 6 例)
+
+### v0.9.12(2026-08-07):聊天代码块 IDE 化(复制按钮 + 按语言着色)
+- **代码卡片**:marked 输出的 <pre><code> 统一由新模块 codeblock.js 的 enhanceCodeHtml 包装为「代码卡片」——头部条(左侧语言标签 + 右侧「复制」按钮)+ 代码区;复制原文转义存 data-code,navigator.clipboard 直写,#messages 事件委托(成功后按钮短暂变「已复制 ✓」)
+- **按语言着色**:hljs.js 新增 highlightAs(code, lang)——按 fence 语言名调 highlight.js(vendor 包 30+ 语言,见 build/make-hljs.js);别名映射(py→python、sh→bash、ts→typescript、html→xml 等);语言未注册(如 ps1)退化 highlightAuto,再退化转义纯文本;主题沿用已加载的 github-dark.css
+- **覆盖所有注入点**:chat.js 流式(scheduleAssistantRender/flushAssistantRender)、用户气泡(renderUserBubble)、计划卡片(plan-md);state.js 新增 PRE_CODE_RE/decodeCodeHtml 共享正则与解码
+- **联动修复**:msgmenu.js 复制整条消息的 msgText 剔除 .code-card-head,避免「python 复制」混进正文
+- npm test 97/97(新增 test/codeblock.test.js 4 例,window.hljs/document stub)

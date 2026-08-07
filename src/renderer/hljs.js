@@ -25,6 +25,20 @@ export function langOf(filePath) {
   return EXT_LANG[ext] || null;
 }
 
+// 按语言名高亮(聊天 markdown 代码块用,v0.9.12);
+// 语言未注册(如 ps1)/失败时退化自动检测,再退化转义纯文本
+export function highlightAs(code, lang) {
+  const text = String(code || '');
+  const hljs = window.hljs;
+  if (!hljs) return escape(text);
+  try {
+    if (lang && hljs.getLanguage(lang)) return hljs.highlight(text, { language: lang }).value;
+    return hljs.highlightAuto(text).value;
+  } catch {
+    return escape(text);
+  }
+}
+
 // 返回高亮后的 HTML;语言未知/高亮失败时退化为转义纯文本
 export function highlightCode(code, filePath) {
   const text = String(code || '');

@@ -12,12 +12,19 @@ export const state = {
   commandsCache: null,   // slash commands
   attachments: [],       // 待发送附件:image {mediaType, data(base64)} / file 文本 / media {mediaKind, path, size}
   diffComments: [],      // [{file, line, side, text}]
+  gems: [],              // Gem 自定义助手缓存(v0.9.11),gems.js 负责刷新
 };
 
 export const $ = (id) => document.getElementById(id);
 
 // 新媒体板块 kind(v0.9.0):这些会话不走 Agent SDK,走 AIGC 生成任务闭环
 export const MEDIA_KINDS = ['image', 'video', 'audio', 'model'];
+
+// Gem 名称查询(v0.9.11):gem 被删返回 null(调用方静默回退)
+export function gemNameOf(id) {
+  const g = (state.gems || []).find((x) => x.id === id);
+  return g ? g.name : null;
+}
 
 export function escapeHtml(s) {
   return (s || '').replace(/[&<>"']/g, (c) => (
@@ -37,6 +44,18 @@ export function renderMarkdown(text) {
     try { return window.marked.parse(text || ''); } catch { /* fall through */ }
   }
   return escapeHtml(text || '');
+}
+
+// marked v4+ 的 tokenizer 把 code block 规范为 <pre><code class="language-xx">…;
+// 该正则同时兼容无 class 的裸 pre。供 chat.js 高亮/复制后处理使用(v0.9.12)。
+export const PRE_CODE_RE = /<pre><code(?:\s+class="language-([\w-]+)")?>([\s\S]*?)<\/code><\/pre>/g;
+
+// 提取 <code> 内 HTML 的纯文本(用于复制):剥标签 + 反转义
+export function decodeCodeHtml(html) {
+  return String(html || '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 }
 
 export function fmtCost(v) {

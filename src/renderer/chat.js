@@ -1,7 +1,8 @@
 // Chat rendering: per-session logs, streaming, tool cards, permission cards,
 // plan approval, subagent grouping, view modes, history replay.
-import { api, state, $, escapeHtml, truncate, renderMarkdown, fmtCost, fmtTokens, emit, modelSelValue, updateKeyChips, MEDIA_KINDS, modelLabel, sessionModelName } from './state.js';
+import { api, state, $, escapeHtml, truncate, renderMarkdown, fmtCost, fmtTokens, emit, modelSelValue, updateKeyChips, MEDIA_KINDS, modelLabel, sessionModelName, gemNameOf } from './state.js';
 import { highlightCode } from './hljs.js';
+import { enhanceCodeHtml } from './codeblock.js';
 
 const messagesEl = () => $('messages');
 
@@ -56,11 +57,17 @@ export function updateTopbarForSession(sid) {
   if (composerEffort) composerEffort.value = m.effort || '';
   $('usage-chip').textContent = fmtCost(s.ui.cumCost) +
     (s.ui.lastUsage ? ` · ↑${fmtTokens(ctxTokens(s.ui.lastUsage))}` : '');
-  // 输入框 placeholder 跟随当前模型身份(v0.9.2)
-  $('input').placeholder =
-    `给 ${sessionModelName(s)} 发送消息…  (Enter 发送 · Shift+Enter 换行 · @文件 · /命令 · 可粘贴图片)`;
+  // 输入框 placeholder 跟随当前模型身份(v0.9.2);绑定 Gem 时冠以 Gem 名(v0.9.11)
+  $('input').placeholder = composerPlaceholder(s);
   setBusyUI(s.ui.busy);
   updateAigcSendUI(); // 媒体会话:发送锁按任务终态恢复
+}
+
+// 输入框 placeholder:Gem 名(若绑定) + 模型身份
+function composerPlaceholder(s) {
+  const gemName = s.meta.gemId ? gemNameOf(s.meta.gemId) : null;
+  const who = gemName ? `${gemName} · ${sessionModelName(s)}` : sessionModelName(s);
+  return `给 ${who} 发送消息…  (Enter 发送 · Shift+Enter 换行 · @文件 · /命令 · 可粘贴图片)`;
 }
 
 function ctxTokens(u) {
@@ -186,7 +193,7 @@ function scheduleAssistantRender(s, a) {
   a.renderTimer = setTimeout(() => {
     a.renderTimer = null;
     if (a.textEl) {
-      a.textEl.innerHTML = renderMarkdown(a.buf);
+      a.textEl.innerHTML = enhanceCodeHtml(renderMarkdown(a.buf));
       linkifyPaths(a.textEl);
     }
     scrollBottom(s.meta.id);
@@ -198,7 +205,7 @@ function flushAssistantRender(s, a) {
   clearTimeout(a.renderTimer);
   a.renderTimer = null;
   if (a.textEl) {
-    a.textEl.innerHTML = renderMarkdown(a.buf);
+    a.textEl.innerHTML = enhanceCodeHtml(renderMarkdown(a.buf));
     linkifyPaths(a.textEl);
   }
   scrollBottom(s.meta.id);
@@ -243,13 +250,13 @@ function linkifyPaths(el) {
 export function renderUserBubble(bubble, content) {
   bubble.innerHTML = '';
   if (typeof content === 'string') {
-    bubble.innerHTML = renderMarkdown(content);
+    bubble.innerHTML = enhanceCodeHtml(renderMarkdown(content));
     return;
   }
   for (const b of content) {
     if (b.type === 'text') {
       const d = document.createElement('div');
-      d.innerHTML = renderMarkdown(b.text);
+      d.innerHTML = enhanceCodeHtml(renderMarkdown(b.text));
       bubble.appendChild(d);
     } else if (b.type === 'media_ref') {
       // 音频/视频/3D 附件卡片(媒体本体不进会话,发送时已注入分析/元信息文本)
@@ -641,7 +648,7 @@ function addPermissionCard(s, ev, replay) {
 
   let bodyHtml;
   if (isPlan) {
-    bodyHtml = `<div class="plan-md">${renderMarkdown(input.plan || '')}</div>`;
+    bodyHtml = `<div class="plan-md">${enhanceCodeHtml(renderMarkdown(input.plan || ''))}</div>`;
   } else if ((ev.toolName === 'Edit' || ev.toolName === 'Write' || ev.toolName === 'MultiEdit') && (input.old_string || input.new_string || input.content)) {
     bodyHtml = `<div class="perm-diff">${renderEditDiff(input)}</div>`;
   } else {
@@ -783,8 +790,7 @@ export function renderEvent(sid, ev, { replay }) {
     if (ev.model) {
       s.ui.initModel = ev.model;
       if (sid === state.activeSid) { // init 回传真实模型后刷新 placeholder 身份
-        $('input').placeholder =
-          `给 ${sessionModelName(s)} 发送消息…  (Enter 发送 · Shift+Enter 换行 · @文件 · /命令 · 可粘贴图片)`;
+        $('input').placeholder = composerPlaceholder(s);
       }
     }
     if (ev.slashCommands) state.commandsCache = null; // refresh next time

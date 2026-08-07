@@ -24,6 +24,7 @@ const keys = require('./src/main/keys');
 const aigc = require('./src/main/aigc');
 const aux = require('./src/main/aux-models');
 const title = require('./src/main/title');
+const gems = require('./src/main/gems');
 const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
 
@@ -293,6 +294,50 @@ ipcMain.handle('settings:setAuxModels', (_e, m) => {
   return { ok: true };
 });
 
+// Gem 自定义助手(v0.9.11):settings.gems 数组;预置项不可改删(gems.js 内校验)
+gems.seedPresets();
+ipcMain.handle('gems:list', () => gems.list());
+ipcMain.handle('gems:save', (_e, gem) => gems.save(gem));
+ipcMain.handle('gems:delete', (_e, id) => gems.remove(id));
+// 「✨ AI 优化指令」(对齐 Gemini「使用 Gemini 重新撰写指令」):一句话描述 →
+// 按官方四要素(角色/任务/情境/形式)扩写;复用会话 Key+模型走 chat completions,失败返回 null
+ipcMain.handle('gems:rewrite', async (_e, { hint, instructions, keyId, model }) => {
+  const keyEntry = keys.byId(keyId) || keys.activeKey();
+  const mdl = model
+    || (((keys.enabledModels() || []).find((e) => keyEntry && e.keyId === keyEntry.id) || {}).model);
+  if (!keyEntry || !keyEntry.key || !mdl) return { ok: false, error: '无可用 chat 模型' };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(`${aux.apiRoot(keyEntry.baseUrl)}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...aux.authHeaders(keyEntry) },
+      body: JSON.stringify({
+        model: mdl,
+        messages: [{
+          role: 'user',
+          content: '为一个自定义 AI 助手撰写指令。按「角色 / 任务 / 情境 / 形式」四个要素组织,'
+            + '每个要素以「角色:」「任务:」「情境:」「形式:」开头各占一段,每段一到两句话。'
+            + '只输出指令本身,不要解释。\n\n助手的目标描述:' + String(hint || '').slice(0, 500)
+            + (instructions ? '\n\n现有指令(在其基础上改写完善):\n' + String(instructions).slice(0, 4000) : ''),
+        }],
+        max_tokens: 800,
+        stream: false,
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return { ok: false, error: '模型请求失败:' + res.status };
+    const json = await res.json();
+    const text = json && json.choices && json.choices[0] && json.choices[0].message
+      && String(json.choices[0].message.content || '').trim();
+    return text ? { ok: true, instructions: text } : { ok: false, error: '模型未返回内容' };
+  } catch (e) {
+    return { ok: false, error: e.name === 'AbortError' ? '请求超时' : e.message };
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 ipcMain.handle('shell:openExternal', (_e, url) => {
   if (/^https?:\/\//.test(url)) shell.openExternal(url);
 });
@@ -342,6 +387,7 @@ ipcMain.handle('sess:create', async (_e, opts) => {
       title: opts.title || null,
       parentId: opts.parentId || null,
       sdkSessionId: null,
+      gemId: opts.gemId || null, // 绑定的 Gem(v0.9.11),aigc:send 时注入 prompt 前缀
     });
   }
   if (opts.standalone || (opts.kind && opts.kind !== 'code')) {
@@ -447,6 +493,13 @@ ipcMain.handle('sess:setEffort', (_e, { sid, effort }) => {
   const s = sessions.get(sid);
   return s ? s.setEffort(effort) : false;
 });
+// 绑定/切换/清除 Gem(v0.9.11):重启 query 注入 gem 指令(回合中则回合结束后生效)
+ipcMain.handle('sess:setGem', async (_e, { sid, gemId }) => {
+  const s = sessions.get(sid);
+  if (!s) return false;
+  await s.setGem(gemId || null);
+  return true;
+});
 ipcMain.handle('sess:history', (_e, sid) => sessions.history(sid));
 // 修改并重新生成(v0.9.9):截断 UI 日志,fork SDK 上下文后发送编辑后的消息
 ipcMain.handle('sess:editRegenerate', async (_e, { sid, echoUuid, content, echoContent }) => {
@@ -517,9 +570,12 @@ ipcMain.handle('aigc:send', async (_e, { sessionId, keyId, model, prompt, refIma
   if (!keyEntry) return { ok: false, error: '未找到可用的 API Key' };
   const useModel = model || meta.model;
   if (!useModel) return { ok: false, error: '未选择模型' };
+  // Gem 前缀(v0.9.11):媒体会话绑定的 Gem 指令拼在用户 prompt 前;回显/标题仍用原始 prompt
+  const gem = meta.gemId ? gems.byId(meta.gemId) : null;
+  const fullPrompt = (gem ? gems.composeMediaPrefix(gem) : '') + prompt;
   try {
     const { traceId } = await aigc.createTask(keyEntry, meta.kind, {
-      modelKey: useModel, prompt, refImages: refImages || [],
+      modelKey: useModel, prompt: fullPrompt, refImages: refImages || [],
     });
     // 用户消息与任务占位消息持久化(参考图保留 base64,历史回放可显示缩略图)
     store.appendSessionEvent(sessionId, { type: 'aigc_user', prompt, refImages: refImages || [], ts: Date.now() });

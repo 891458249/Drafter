@@ -6,12 +6,12 @@ import { $, showCtxMenu } from './state.js';
 import { addUserMessage, renderUserBubble, truncateAfter, ensureSession, setActiveSession } from './chat.js';
 import { refreshList } from './sessions-ui.js';
 
-// 提取一条消息的纯文本:剔除工具进程组/任务卡片/思考块,只保留正文
+// 提取一条消息的纯文本:剔除工具进程组/任务卡片/思考块/代码卡片头部条,只保留正文
 function msgText(msgEl) {
   const bubble = msgEl.querySelector('.bubble');
   if (!bubble) return '';
   const clone = bubble.cloneNode(true);
-  for (const el of clone.querySelectorAll('.activity, .tool, .task-group, .aigc-card, .thinking')) el.remove();
+  for (const el of clone.querySelectorAll('.activity, .tool, .task-group, .aigc-card, .thinking, .code-card-head')) el.remove();
   return (clone.innerText || '').trim();
 }
 

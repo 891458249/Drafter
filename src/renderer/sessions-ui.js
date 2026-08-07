@@ -1,7 +1,7 @@
 // Sidebar: project groups with sessions nested under each group.
 // Group header: editable name, per-group "+" (new session), file manager
 // (load files/folders with live read-only/editable tags).
-import { api, state, $, escapeHtml, emit, on, parseModelValue, showCtxMenu } from './state.js';
+import { api, state, $, escapeHtml, emit, on, parseModelValue, showCtxMenu, gemNameOf } from './state.js';
 import { ensureSession, setActiveSession } from './chat.js';
 
 const attention = new Set();
@@ -193,6 +193,7 @@ function renderSessionItem(p, m) {
       <span>${escapeHtml(m.title || '未命名会话')}</span>
       ${m.parentId ? '<span class="badge-side">side</span>' : ''}
       ${m.worktreePath ? '<span class="badge-wt">wt</span>' : ''}
+      ${m.gemId && gemNameOf(m.gemId) ? `<span class="badge-gem">💎${escapeHtml(gemNameOf(m.gemId))}</span>` : ''}
       ${m.model ? `<span class="badge-model">${escapeHtml(shortModel(m.model))}</span>` : ''}
     </div>
     <div class="session-sub">${escapeHtml(new Date(m.updatedAt || m.createdAt || Date.now()).toLocaleString())}${m.archived ? ' · 已归档' : ''}</div>`;
@@ -226,6 +227,7 @@ async function sideChat(m) {
     effort: m.effort || null, // side chat 继承父会话的推理深度设置
     title: (m.title || '会话') + ' · side', parentId: m.id,
     projectId: m.projectId, forkFrom: m.sdkSessionId || null,
+    gemId: m.gemId || null, // side chat 继承 Gem 绑定(v0.9.11)
     standalone: m.standalone || undefined, kind: m.kind || undefined, // 独立/非 code 板块会话的 side 不进项目组
   });
   ensureSession(meta.id, meta);

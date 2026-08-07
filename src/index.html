@@ -76,6 +76,7 @@
           <div class="composer-toolbar">
             <button id="btn-add-attach" class="btn btn-sm" title="添加附件(图片或文本文件,随下一条消息发送)">＋附件</button>
             <button id="btn-add-folder" class="btn btn-sm code-only" title="为当前项目添加文件夹(常驻共享)">＋文件夹</button>
+            <button id="gem-sel-btn" class="btn btn-sm" title="选择 Gem 自定义助手(指令/知识随会话注入)">💎 <span id="gem-sel-name">Gem</span></button>
             <button id="btn-compact" class="btn btn-sm sdk-only" title="压缩上下文 (/compact)">压缩</button>
             <label class="ctrl sdk-only">模式
               <select id="perm-mode">
@@ -345,8 +346,71 @@
   <!-- 图片查看模式(v0.9.8):双击消息内图片打开,滚轮缩放,Esc/点击空白关闭 -->
   <div id="img-viewer" class="modal-mask img-viewer hidden"><img alt="" /></div>
 
+  <!-- Gem 自定义助手(v0.9.11):三栏——列表 | 编辑表单 | 预览,对齐 Gemini Gem 编辑器 -->
+  <div id="gem-modal" class="modal-mask hidden">
+    <div class="modal gem-modal">
+      <div class="gem-cols">
+        <!-- 左栏:Gem 列表 -->
+        <div class="gem-list-col">
+          <div class="gem-list" id="gem-list"></div>
+          <button id="gem-new" class="btn btn-sm gem-new-btn">＋ 新建 Gem</button>
+        </div>
+        <!-- 中栏:编辑表单 -->
+        <div class="gem-form-col">
+          <div class="form-row"><span class="preset-label">名称</span></div>
+          <div class="form-row"><input id="gem-name" class="input-sm grow" placeholder="助手名称" /></div>
+          <div class="form-row"><span class="preset-label">说明</span></div>
+          <div class="form-row"><input id="gem-desc" class="input-sm grow" placeholder="这个助手的主要目标和功能是什么?" /></div>
+          <div class="form-row">
+            <span class="preset-label">指令</span>
+            <span class="grow"></span>
+            <button id="gem-ai-rewrite" class="btn btn-sm" title="用一两句话描述目标,AI 按「角色/任务/情境/形式」扩写指令">✨ AI 优化</button>
+          </div>
+          <div class="form-row">
+            <textarea id="gem-instructions" class="editor-area gem-instructions" spellcheck="false"
+              placeholder="角色:这个助手扮演什么角色、如何回答问题&#10;任务:希望它做什么或创建什么&#10;情境:尽可能充足的背景信息&#10;形式:回答的结构与格式要求"></textarea>
+          </div>
+          <div class="form-row"><span class="preset-label">默认工具</span></div>
+          <div class="form-row">
+            <button id="gem-tools-btn" class="btn btn-sm">没有默认工具 ▾</button>
+          </div>
+          <div class="form-row"><span class="preset-label">知识</span></div>
+          <div class="form-row"><button id="gem-add-knowledge" class="btn btn-sm">添加文件</button></div>
+          <div id="gem-knowledge-list" class="gem-knowledge-list"></div>
+          <label class="gem-knowledge-toggle">
+            <input type="checkbox" id="gem-knowledge-off" /> 停用知识引用
+          </label>
+          <div class="modal-status" id="gem-status"></div>
+          <div class="modal-actions">
+            <button id="gem-delete" class="btn btn-danger-text">删除</button>
+            <button id="gem-duplicate" class="btn hidden">复制为副本</button>
+            <span class="grow"></span>
+            <button id="gem-close" class="btn">关闭</button>
+            <button id="gem-save" class="btn btn-primary">保存</button>
+          </div>
+        </div>
+        <!-- 右栏:预览 -->
+        <div class="gem-preview-col">
+          <div class="gem-preview-head">
+            <span class="gem-avatar gem-avatar-lg" id="gem-preview-avatar">G</span>
+            <div class="gem-preview-name" id="gem-preview-name">Gem</div>
+            <div class="gem-preview-desc" id="gem-preview-desc"></div>
+          </div>
+          <div class="gem-preview-recent">
+            <div class="gem-preview-recent-title">近期对话</div>
+            <div id="gem-recent-list"></div>
+          </div>
+          <button id="gem-start-chat" class="btn btn-primary gem-start-btn">开始对话</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Gem 选择器/默认工具 共用小下拉(动态填充) -->
+  <div id="gem-menu" class="more-menu gem-menu hidden"></div>
+
   <!-- "More" dropdown -->
   <div id="more-menu" class="more-menu hidden">
+    <button data-act="gems">💎 Gem 助手…</button>
     <button data-act="apikey">API Key…</button>
     <button data-act="mcp">MCP 服务器…</button>
     <button data-act="cron">定时任务…</button>

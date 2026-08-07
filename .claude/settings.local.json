@@ -5,7 +5,9 @@
       "Skill(claude-api:*)",
       "Edit",
       "Bash(npm test *)",
-      "Bash(ls ~/.claude/projects/ | head -30)"
+      "Bash(ls ~/.claude/projects/ | head -30)",
+      "AskUserQuestion",
+      "Bash(node --test test/gems.test.js)"
     ]
   }
 }

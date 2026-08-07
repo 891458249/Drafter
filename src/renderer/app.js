@@ -10,6 +10,8 @@ import * as editor from './editor.js';
 import * as preview from './preview.js';
 import * as tasks from './tasks.js';
 import * as term from './term.js';
+import * as gems from './gems.js';
+import * as codeblock from './codeblock.js';
 
 // ---------------------------------------------------------------------------
 // Global error reporting → main-process persistent log (metadata only)
@@ -282,6 +284,7 @@ $('more-menu').onclick = async (e) => {
   if (!act) return;
   $('more-menu').classList.add('hidden');
   if (act === 'apikey') openApiKeyModal();
+  if (act === 'gems') gems.openGemModal();
   if (act === 'mcp') openMcpModal();
   if (act === 'cron') openCronModal();
   if (act === 'shortcuts') $('shortcuts-modal').classList.remove('hidden');
@@ -836,6 +839,7 @@ api.on('aigc:status', (payload) => chat.handleAigcStatus(payload)); // 新媒体
 on('session-activated', async (sid) => {
   const s = state.sessions.get(sid);
   if (!s) return;
+  gems.updateGemSelector(); // 顶栏 Gem 选择器跟随会话回显(v0.9.11)
   // 板块跟随会话类型:会话激活时自动切到其 kind 对应的板块(缺省 code)
   const kind = s.meta.kind || 'code';
   if (state.section !== kind) setSection(kind, { skipSessionPick: true });
@@ -897,6 +901,28 @@ on('open-project-memory', async (pid) => {
   const m = await api.projMemory(pid);
   if (m) emit('open-file', m.path);
 });
+
+// --- Gem 自定义助手(v0.9.11) ---
+gems.init();
+gems.refreshGems();
+codeblock.initCodeCopy(); // 代码卡片复制按钮(#messages 事件委托,v0.9.12)
+// 管理页「开始对话」:按当前板块建会话并绑定 Gem;Gem 带默认模型且下拉未选模型时套用
+on('gem:start-chat', async ({ gemId }) => {
+  const g = (state.gems || []).find((x) => x.id === gemId);
+  const extra = { gemId };
+  if (g && g.model) {
+    const sel = parseModelValue($('model-sel').value);
+    if (!sel.model) {
+      const [keyId, mdl] = String(g.model).split('|');
+      if (mdl) { extra.model = mdl; extra.keyId = keyId || null; }
+    }
+  }
+  await sessionsUi.createSession(extra); // createSession 内部 setActiveSession + refreshList
+});
+// 管理页「近期对话」跳转
+on('gem:activate-session', (sid) => chat.setActiveSession(sid));
+// Gem 增删改后:刷新选择器与侧栏徽标
+on('gems-changed', () => { gems.updateGemSelector(); sessionsUi.refreshList(); });
 
 // ---------------------------------------------------------------------------
 // Boot

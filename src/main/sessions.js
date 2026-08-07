@@ -13,6 +13,7 @@ const store = require('./store');
 const projects = require('./projects');
 const perms = require('./perms');
 const keys = require('./keys');
+const gems = require('./gems');
 
 // The Agent SDK is ESM-only — load it via dynamic import().
 let sdk = null;
@@ -207,8 +208,18 @@ class Session {
     try {
       projCtx = this.meta.projectId ? projects.contextFor(this.meta.projectId, this.meta.cwd) : null;
     } catch (e) { console.error('[sessions] project ctx failed:', e.message); }
+    // Gem 自定义助手(v0.9.11):指令注入 systemPrompt append;gem 被删则静默忽略
+    let gemAppend = '';
+    if (this.meta.gemId) {
+      try { gemAppend = gems.composeAppend(gems.byId(this.meta.gemId)); } catch {}
+    }
+    if (projCtx || gemAppend) {
+      const combined = ((projCtx && projCtx.append) || '') + gemAppend;
+      options.systemPrompt = { type: 'preset', preset: 'claude_code', append: combined };
+      // 无项目组时的附加目录由下方 else-if 分支统一处理(行为与旧版一致)
+    }
     if (projCtx) {
-      options.systemPrompt = { type: 'preset', preset: 'claude_code', append: projCtx.append };
+      // systemPrompt 已在上方统一赋值(含 Gem append 合并)
       // 附加目录 = 项目组共享目录 + 会话级 /add-dir 登记的目录(v0.9.2)
       // 防御性过滤掉与 cwd 相同的目录(v0.9.7)
       const normCwd = (p) => path.resolve(p).toLowerCase();
@@ -498,6 +509,18 @@ class Session {
     return false;
   }
 
+  // 绑定/切换/清除 Gem(v0.9.11):systemPrompt 只在 query 启动时读取,
+  // 因此运行中的会话需重启 query 生效——复用 addDir 的 needRestart 模式:
+  // 回合进行中不打断(回合结束后自动重启),空闲则立即 stop+start(resume 保上下文)。
+  async setGem(gemId) {
+    this.meta.gemId = gemId || null;
+    store.upsertSession({ id: this.id, gemId: this.meta.gemId });
+    if (!this.running) return; // 未运行:下次 send 启动即生效
+    if (this.busy) { this.needRestart = true; return; }
+    this.stop();
+    await this.start({ resume: !!this.meta.sdkSessionId });
+  }
+
   // /add-dir(v0.9.2):SDK 流式输入不会执行该斜杠命令,改为客户端登记——
   // 目录持久化到 meta.extraDirs,重启 query(resume 保上下文)后挂进 additionalDirectories。
   // 回合进行中不打断,标记 needRestart,回合结束后自动重启生效。
@@ -576,7 +599,7 @@ class SessionManager {
     });
   }
 
-  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId }) {
+  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId, gemId }) {
     const id = 's_' + crypto.randomUUID().slice(0, 12);
     const meta = {
       id, cwd, model: model || null,
@@ -589,6 +612,7 @@ class SessionManager {
       standalone: !!standalone, // 独立会话:不属于任何项目组(v0.5.0 起新会话默认)
       kind: kind || null, // 板块标记:'chat'(v0.6.0)/'image'/'video'/'audio'/'model'(v0.9.0);null = code
       keyId: keyId || null, // 创建时活跃的 API key(额度归账,v0.8.0)
+      gemId: gemId || null, // 绑定的 Gem 自定义助手(v0.9.11)
     };
     store.upsertSession(meta);
     const s = new Session(this, meta);
