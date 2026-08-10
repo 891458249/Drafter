@@ -318,3 +318,12 @@ Git 工作流:
 - **悬停位置 = 总列表相应位置**:非 mag(装不下)时 mousemove 按光标在小窗内的纵向比例直接代理 scrollTop(scrollTop = ratio·(scrollHeight-clientHeight),数学上光标所指恰为整体同一比例处),滚动条隐藏(scrollbar-width:none),上下淡出保留表示省略;滚轮滚动仍可用
 - mag(装得下)时维持 Dock 放大不变
 - npm test 104/104
+
+### v0.9.22(2026-08-10):导航悬停区扩到整条右缘 + 小窗跟随光标 + 整项吸附
+- **痛点**:v0.9.21 小窗只有 1/3 高,悬停区太小难选择;窗口上下边缘项只显示半条
+- **悬停区 = 整条右缘**:mousemove/mouseleave 监听从 list 提升到 .msg-nav(rail,pointer-events 改 auto)
+- **小窗跟随光标**:windowTop=ratio·(H−W) 与 scrollTop=ratio·(total−W) 由同一 ratio(rail 内光标纵向比例)驱动——光标在小窗内的相对位置恰为 ratio,即光标始终正指总列表同比例的项;小窗移到哪光标都在窗内,任何位置的项都可直接点击;mouseleave 后小窗停在原位不回弹
+- **整项吸附**:scrollTop 按 pitch 16px(槽位 6+间距 10)取整,窗口边缘不再只显示半条
+- rebuild 时清 list transform,避免换会话/模式后残留偏移
+- 代价:rail 132px 宽整条现在捕获鼠标事件,消息区右缘该条带下的文字选择/点击被挡住(换取大悬停区)
+- npm test 104/104
