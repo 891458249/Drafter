@@ -162,8 +162,18 @@ function showMenu(anchorEl, items) {
   }
   const r = anchorEl.getBoundingClientRect();
   menu.style.left = Math.min(r.left, window.innerWidth - 240) + 'px';
-  menu.style.top = (r.bottom + 6) + 'px';
   menu.classList.remove('hidden');
+  // 下方空间不足时向上展开,避免菜单被窗口底边裁切(v0.9.26);
+  // 向上展开时按锚点上方可用空间收 max-height,顶部也不越界
+  const mh = menu.offsetHeight;
+  const below = window.innerHeight - r.bottom - 6;
+  if (below >= mh) {
+    menu.style.top = (r.bottom + 6) + 'px';
+    menu.style.maxHeight = '';
+  } else {
+    menu.style.top = Math.max(8, r.top - 6 - mh) + 'px';
+    menu.style.maxHeight = Math.max(120, r.top - 14) + 'px';
+  }
   menuAnchor = anchorEl;
 }
 export function hideMenu() { $('gem-menu').classList.add('hidden'); menuAnchor = null; }

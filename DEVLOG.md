@@ -334,3 +334,8 @@ Git 工作流:
 - **回到底部按钮移位**:从 chat-col(bottom:150px)移进 messages-wrap,钉在消息区右下角(right:12 bottom:10,导航栏尾端之下);z-index 50 压过 rail(40)保证可点
 - **macOS Dock 式边缘感应**:mousemove/mouseleave 提升到整条 rail(pointer-events:auto);mag 态光标 Y 先钳到首/末槽位中心之间——光标在导航上缘之上时最上面一条按「光标在其中心」拿满放大(1.15x+.hot),越过下缘同理(复刻 Dock 光标越过端点图标端点保持满倍);非 mag 态光标超出小窗上/下缘时 ratio 钳 0/1 直接探到顶/底
 - npm test 104/104
+
+### v0.9.26(2026-08-10):Gem 菜单下方空间不足时向上展开(修被窗口底边裁切)
+- **问题**:Gem 选择器在输入区工具条(窗口底部),showMenu 固定 top=锚点.bottom+6 向下展开,窗口较矮时菜单被窗口底边裁掉
+- **修复**:先渲染量高,下方空间 ≥ 菜单高才向下;否则向上展开(top=锚点.top−6−高,钳 ≥8),并按锚点上方可用空间收 max-height(≥120),顶部也不越界;共享 showMenu 的「默认工具」菜单同享此逻辑
+- npm test 104/104
