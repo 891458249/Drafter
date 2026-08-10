@@ -95,7 +95,15 @@ export function init() {
   const SMAX = 1.15;              // 中心项最大放大倍数
   const resetItem = (b) => { b.style.transform = ''; b.style.zIndex = ''; b.style.opacity = ''; b.classList.remove('hot'); };
   list.addEventListener('mousemove', (e) => {
-    if (!list.classList.contains('mag')) return;
+    // 装不下(非 mag)时(v0.9.21):列表是居中的小窗,悬停位置即总列表的
+    // 相应位置——按光标在小窗内的纵向比例直接代理 scrollTop(数学上光标所指
+    // 恰好对应整体内容的同一比例处),配合上下淡出实现「省略但有定位感」
+    if (!list.classList.contains('mag')) {
+      const lr = list.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (e.clientY - lr.top) / lr.height));
+      list.scrollTop = ratio * (list.scrollHeight - list.clientHeight);
+      return;
+    }
     let hot = null, hotK = 0;
     for (const slot of list.children) {
       const b = slot.firstChild;

@@ -312,3 +312,9 @@ Git 工作流:
 - 槽位间距 gap 6→10px、横杠厚度 4→6px,pitch 从 10px 提到 16px,悬停/点击不再挤在一起误触
 - 缩放系数同步:CSS 默认 scale(0.137, 0.273) / JS SY0=6/22
 - npm test 104/104
+
+### v0.9.21(2026-08-10):导航溢出态改居中小窗 + 悬停位置代理滚动
+- **不再占满整条**:列表 max-height 100%→34%(约会话区 1/3),配合 v0.9.19 的 align-items:center 居中于右侧
+- **悬停位置 = 总列表相应位置**:非 mag(装不下)时 mousemove 按光标在小窗内的纵向比例直接代理 scrollTop(scrollTop = ratio·(scrollHeight-clientHeight),数学上光标所指恰为整体同一比例处),滚动条隐藏(scrollbar-width:none),上下淡出保留表示省略;滚轮滚动仍可用
+- mag(装得下)时维持 Dock 放大不变
+- npm test 104/104
