@@ -27,6 +27,10 @@ function rebuild() {
   const msgs = logEl ? [...logEl.querySelectorAll(':scope > .msg.user')] : [];
   rail.classList.toggle('hidden', !msgs.length);
   for (const m of msgs) {
+    // 槽位 + 按钮(v0.9.18):槽位布局尺寸恒定,按钮绝对定位于槽内用 transform
+    // 缩放——悬停放大不推挤邻近项,上下衰减对称(修「上下缩放不平均」)
+    const slot = document.createElement('div');
+    slot.className = 'msg-nav-slot';
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = itemText(m);
@@ -38,7 +42,8 @@ function rebuild() {
       setTimeout(() => m.classList.remove('flash'), 1200);
     };
     m._navItem = b; // 反向引用:滚动联动时按 DOM 序一次遍历
-    list.appendChild(b);
+    slot.appendChild(b);
+    list.appendChild(slot);
   }
   // 悬停放大(v0.9.14)仅在内容无需滚动时启用:列表 overflow-y:auto 时
   // transform 放大必被裁切/出横向滚动条(CSS 溢出规则限制),可滚动时退回普通 hover
@@ -79,30 +84,29 @@ export function init() {
     ticking = true;
     requestAnimationFrame(() => { ticking = false; markActive(); });
   });
-  // Dock 式悬停展开(v0.9.16):默认形态是一条条小横杠(26×4,字号 0,类 GPT);
-  // 光标所在项展开最完整(宽度/高度/字号),邻近项按垂直距离二次衰减,
-  // 越远离光标越小,直到退回横杠;离开列表全部复位。
-  // 行内尺寸 + CSS transition 驱动平滑渐变;监听挂在容器上,rebuild 重建子项不影响。
+  // Dock 式悬停展开(v0.9.18):槽位布局尺寸恒定(26×4),距离一律按槽位中心
+  // 测量——槽位在悬停期间不移动,因此无布局反馈抖动、上下衰减严格对称。
+  // 光标所在项放到最大(完整摘要),邻近项按垂直距离二次衰减,越远越小直到
+  // 退回横杠;只改 transform/opacity,不触发列表重排。离开列表全部复位。
   const list = $('msg-nav').querySelector('.msg-nav-list');
-  const MAG_RADIUS = 90;   // 影响半径(px)
-  const BAR_W = 26, BAR_H = 4;              // 横杠尺寸(px,与 CSS 一致)
-  const FULL_W = 190, FULL_H = 22, FULL_FS = 11; // 完全展开尺寸(px)
+  const MAG_RADIUS = 90;          // 影响半径(px)
+  const SX0 = 26 / 190, SY0 = 4 / 22; // 横杠缩放系数(与 CSS 默认值一致)
+  const resetItem = (b) => { b.style.transform = ''; b.style.zIndex = ''; b.style.opacity = ''; };
   list.addEventListener('mousemove', (e) => {
     if (!list.classList.contains('mag')) return;
-    for (const b of list.children) {
-      const r = b.getBoundingClientRect();
+    for (const slot of list.children) {
+      const b = slot.firstChild;
+      const r = slot.getBoundingClientRect();
       const d = Math.abs(e.clientY - (r.top + r.height / 2));
       const t = Math.max(0, 1 - d / MAG_RADIUS);
       const k = t * t; // 二次衰减
-      if (k < 0.04) { b.style.cssText = ''; continue; }
-      b.style.width = `${(BAR_W + (FULL_W - BAR_W) * k).toFixed(1)}px`;
-      b.style.height = `${(BAR_H + (FULL_H - BAR_H) * k).toFixed(1)}px`;
-      b.style.fontSize = `${(FULL_FS * k).toFixed(2)}px`;
-      b.style.padding = k > 0.35 ? `0 ${(8 * k).toFixed(1)}px` : '';
+      if (k < 0.02) { resetItem(b); continue; }
+      b.style.transform = `scale(${(SX0 + (1 - SX0) * k).toFixed(3)}, ${(SY0 + (1 - SY0) * k).toFixed(3)})`;
+      b.style.zIndex = String(Math.round(k * 100)); // 展开大的压在上面
       b.style.opacity = (0.6 + 0.4 * k).toFixed(2);
     }
   });
   list.addEventListener('mouseleave', () => {
-    for (const b of list.children) b.style.cssText = '';
+    for (const slot of list.children) resetItem(slot.firstChild);
   });
 }

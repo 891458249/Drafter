@@ -914,23 +914,26 @@ video.aigc-media { max-height: 360px; }
   max-height: 100%; overflow-y: auto; width: 132px; pointer-events: auto;
   scrollbar-width: thin; padding: 2px;
 }
-/* 默认形态:一条条小横杠(类 GPT);鼠标悬停时由 JS 按光标距离
-   由小到大渐变为完整摘要(越远离光标越小,直到退回横杠)(v0.9.16) */
-.msg-nav-list button {
-  width: 26px; height: 4px; padding: 0; flex-shrink: 0;
-  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 2px;
-  color: var(--text-dim); font-size: 0; cursor: pointer; opacity: .6;
+/* 默认形态:一条条小横杠(类 GPT)。v0.9.18 起改为「槽位 + transform」结构:
+   槽位(.msg-nav-slot)布局尺寸恒定 26×4,按钮全尺寸(190×22)绝对定位于槽内、
+   默认 transform 缩成横杠;悬停放大只改 transform,不推挤邻近项——
+   上下衰减严格对称,修 v0.9.16 行内改 width/height 导致的「上下缩放不平均」 */
+.msg-nav-slot { position: relative; width: 26px; height: 4px; flex-shrink: 0; }
+.msg-nav-slot button {
+  position: absolute; right: 0; top: 50%; margin-top: -11px; /* 22/2,垂直居中于槽位 */
+  width: 190px; height: 22px; padding: 0 8px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-dim); font-size: 11px; line-height: 20px; cursor: pointer; opacity: .6;
   text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  transition: width .12s ease, height .12s ease, padding .12s ease,
-              font-size .12s ease, opacity .12s ease;
+  transform-origin: right center;
+  transform: scale(0.137, 0.182); /* 190×22 → 26×4 横杠 */
+  transition: transform .12s ease, opacity .12s ease;
 }
-.msg-nav-list button.active { opacity: 1; border-color: var(--accent); background: var(--accent-bg); }
-/* .mag(内容不溢出、无滚动)时启用悬停渐变;overflow 可见避免展开被裁切 */
+.msg-nav-slot button.active { opacity: 1; border-color: var(--accent); background: var(--accent-bg); }
+/* .mag(内容不溢出、无滚动)时启用 JS 悬停渐变;overflow 可见避免展开被裁切 */
 .msg-nav-list.mag { overflow: visible; }
-/* 内容溢出可滚动时 mag 关闭(展开会被裁切),退回整项悬停展开回退 */
-.msg-nav-list:not(.mag) button:hover {
-  width: 128px; height: 22px; padding: 0 6px; font-size: 11px; opacity: 1;
-}
+/* 内容溢出可滚动时 mag 关闭(展开会被裁切),退回整项悬停展开回退(宽度收到列表内) */
+.msg-nav-list:not(.mag) .msg-nav-slot:hover button { transform: scale(0.674, 1); opacity: 1; z-index: 100; }
 /* 导航点击定位的闪烁提示 */
 .msg.user.flash .bubble { outline: 2px solid var(--accent); transition: outline .15s ease; }
 /* 消息内联编辑(修改并重新生成) */
