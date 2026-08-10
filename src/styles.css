@@ -907,9 +907,7 @@ video.aigc-media { max-height: 360px; }
 .messages-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .msg-nav {
   position: absolute; top: 12px; right: 6px; bottom: 12px;
-  display: flex; align-items: center; z-index: 40; /* v0.9.19:列表垂直居中 */
-  /* v0.9.22:整条右缘都是悬停区(小窗跟随光标滑动),不再只有小窗可悬停 */
-  pointer-events: auto;
+  display: flex; align-items: center; z-index: 40; pointer-events: none; /* v0.9.19:列表垂直居中 */
 }
 .msg-nav-list {
   display: flex; flex-direction: column; gap: 10px; align-items: flex-end; /* v0.9.20:间距 6→10 防误触 */

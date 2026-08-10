@@ -48,7 +48,6 @@ function rebuild() {
   // 悬停放大(v0.9.14)仅在内容无需滚动时启用:列表 overflow-y:auto 时
   // transform 放大必被裁切/出横向滚动条(CSS 溢出规则限制),可滚动时退回普通 hover
   list.classList.toggle('mag', list.scrollHeight <= list.clientHeight + 1);
-  list.style.transform = ''; // v0.9.22:清掉小窗跟随位移,避免换会话/模式后残留偏移
   requestAnimationFrame(markActive);
 }
 
@@ -90,28 +89,19 @@ export function init() {
   // 对比强化:衰减指数 1.5(两侧项更快退回小横杠)+ 中心项最大放到 1.15x 并打
   // .hot 高亮(主题色描边/底色),同时远处项压暗到 0.35——中心项明显更醒目。
   // 只改 transform/opacity,不触发列表重排。离开列表全部复位。
-  // v0.9.22:监听从 list 提升到整条 rail(.msg-nav)——整条右缘都是悬停区:
-  // · 装不下(非 mag)时,小窗跟随光标滑动:windowTop=ratio·(H-W)、
-  //   scrollTop=ratio·(total-W) 由同一 ratio 驱动,光标始终正指总列表的同比例
-  //   位置,且小窗移到哪光标都在窗内,任何位置的项都可点;scrollTop 按项距
-  //   16px 吸附取整,边缘不再只显示半条;
-  // · 装得下(mag)时维持 Dock 放大(光标远离列表时各项自然衰减为横杠)。
-  const rail = $('msg-nav');
-  const list = rail.querySelector('.msg-nav-list');
+  const list = $('msg-nav').querySelector('.msg-nav-list');
   const MAG_RADIUS = 70;          // 影响半径(px)
   const SX0 = 26 / 190, SY0 = 6 / 22; // 横杠缩放系数(与 CSS 默认值一致,v0.9.20 横杠 6px 厚)
   const SMAX = 1.15;              // 中心项最大放大倍数
-  const PITCH = 16;               // 槽位 6px + 间距 10px(v0.9.20)
   const resetItem = (b) => { b.style.transform = ''; b.style.zIndex = ''; b.style.opacity = ''; b.classList.remove('hot'); };
-  rail.addEventListener('mousemove', (e) => {
+  list.addEventListener('mousemove', (e) => {
+    // 装不下(非 mag)时(v0.9.21):列表是居中的小窗,悬停位置即总列表的
+    // 相应位置——按光标在小窗内的纵向比例直接代理 scrollTop(数学上光标所指
+    // 恰好对应整体内容的同一比例处),配合上下淡出实现「省略但有定位感」
     if (!list.classList.contains('mag')) {
-      const H = rail.clientHeight, W = list.offsetHeight, total = list.scrollHeight;
-      if (total <= W) return;
-      const rr = rail.getBoundingClientRect();
-      const ratio = Math.min(1, Math.max(0, (e.clientY - rr.top) / H));
-      // 列表自身居中于 rail,窗口目标位置 = 居中位 + 偏移;scrollTop 吸附整项
-      list.scrollTop = Math.round((ratio * (total - W)) / PITCH) * PITCH;
-      list.style.transform = `translateY(${((ratio - 0.5) * (H - W)).toFixed(1)}px)`;
+      const lr = list.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (e.clientY - lr.top) / lr.height));
+      list.scrollTop = ratio * (list.scrollHeight - list.clientHeight);
       return;
     }
     let hot = null, hotK = 0;
@@ -132,8 +122,7 @@ export function init() {
       slot.firstChild.classList.toggle('hot', slot.firstChild === hot && hotK > 0.5);
     }
   });
-  rail.addEventListener('mouseleave', () => {
-    // 只复位展开/高亮;非 mag 的小窗位置保留在上次悬停处,不回弹
+  list.addEventListener('mouseleave', () => {
     for (const slot of list.children) resetItem(slot.firstChild);
   });
 }
