@@ -79,23 +79,30 @@ export function init() {
     ticking = true;
     requestAnimationFrame(() => { ticking = false; markActive(); });
   });
-  // Dock 式悬停放大(v0.9.14):光标所在项放大最多,邻近项按垂直距离二次衰减,
-  // 右缘为原点向左扩(导航条贴右侧,向左有聊天区空间);离开列表全部复位。
-  // 监听挂在容器上,rebuild 重建子项不影响。
+  // Dock 式悬停展开(v0.9.16):默认形态是一条条小横杠(26×4,字号 0,类 GPT);
+  // 光标所在项展开最完整(宽度/高度/字号),邻近项按垂直距离二次衰减,
+  // 越远离光标越小,直到退回横杠;离开列表全部复位。
+  // 行内尺寸 + CSS transition 驱动平滑渐变;监听挂在容器上,rebuild 重建子项不影响。
   const list = $('msg-nav').querySelector('.msg-nav-list');
-  const MAG_RADIUS = 80; // 影响半径(px)
-  const MAG_BOOST = 0.35; // 中心项最大放大到 1.35x
+  const MAG_RADIUS = 90;   // 影响半径(px)
+  const BAR_W = 26, BAR_H = 4;              // 横杠尺寸(px,与 CSS 一致)
+  const FULL_W = 190, FULL_H = 22, FULL_FS = 11; // 完全展开尺寸(px)
   list.addEventListener('mousemove', (e) => {
     if (!list.classList.contains('mag')) return;
     for (const b of list.children) {
       const r = b.getBoundingClientRect();
       const d = Math.abs(e.clientY - (r.top + r.height / 2));
       const t = Math.max(0, 1 - d / MAG_RADIUS);
-      const s = 1 + MAG_BOOST * t * t;
-      b.style.transform = s > 1.02 ? `scale(${s.toFixed(3)})` : '';
+      const k = t * t; // 二次衰减
+      if (k < 0.04) { b.style.cssText = ''; continue; }
+      b.style.width = `${(BAR_W + (FULL_W - BAR_W) * k).toFixed(1)}px`;
+      b.style.height = `${(BAR_H + (FULL_H - BAR_H) * k).toFixed(1)}px`;
+      b.style.fontSize = `${(FULL_FS * k).toFixed(2)}px`;
+      b.style.padding = k > 0.35 ? `0 ${(8 * k).toFixed(1)}px` : '';
+      b.style.opacity = (0.6 + 0.4 * k).toFixed(2);
     }
   });
   list.addEventListener('mouseleave', () => {
-    for (const b of list.children) b.style.transform = '';
+    for (const b of list.children) b.style.cssText = '';
   });
 }

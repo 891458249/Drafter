@@ -23,4 +23,5 @@
 - 2026-08-07 v0.9.13 同批 5(未 commit):系统托盘驻留——close 拦截 hide(app.isQuitting/darwin 除外),托盘左键唤出/右键菜单「显示/退出」;坑:updater.installAndRestart 必须先置 app.isQuitting 否则关窗拦截挡住自动更新;second-instance 改 showMainWindow;build/icon.png 加入打包 files;cleanup() 幂等复用。npm test 97/97。
 - 2026-08-10 v0.9.13 已发布:commit 7afdbeb 已 push;GitHub Release v0.9.13(id 367658671)已上传 exe+blockmap+latest.yml。发布脚本 .claude-ui/release-0.9.13.js(未入库)。顺带把 docs/mobile-remote-plan.md 一并入库了。
 - 2026-08-10 v0.9.14(未 commit):消息导航条 Dock 式悬停放大(msgnav.js mousemove 按光标距离二次衰减 scale,最大 1.35x,transform-origin right;仅内容不溢出时启用 .mag,可滚动时退回普通 hover——overflow-y:auto 时 transform 放大必被裁切)。npm test 97/97。
+- 2026-08-10 v0.9.15 已发布:commit 8040477 已 push;GitHub Release v0.9.15(id 367665021)已上传 exe+blockmap+latest.yml。内容:v0.9.14 Dock 放大+瞬时跳转 + v0.9.15 ⋯ 菜单「⚡ 瞬时跳转定位」设置项(state.instantJump,默认开,作用于导航定位与回到底部;关闭恢复平滑滚动)。发布脚本 .claude-ui/release-0.9.15.js(未入库)。注意:本轮改动部分由并行会话同步编辑完成(chat.js/app.js 的 instantJump 接线),合并后 npm test 97/97。
 - 2026-08-10 移动端远程控制策划案已产出:docs/mobile-remote-plan.md。核心思路:手机端=第二个渲染端,新增 remote-server.js 做现有 IPC 的 WebSocket 翻译;一期局域网直连+PWA(扫码配对/TLS/远程强制审批),二期云端中继或 Tailscale 解决异地;1 人 3-4 周到 MVP,建议作为 v1.0.0 旗舰特性。

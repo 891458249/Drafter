@@ -900,30 +900,33 @@ video.aigc-media { max-height: 360px; }
 
 /* ---------------- 用户消息缩略导航(v0.9.9,右侧悬浮条) ---------------- */
 .chat-col { position: relative; }
+/* v0.9.16:导航收进消息区包装层,只覆盖会话显示区,不再延伸到输入区 */
+.messages-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .msg-nav {
   position: absolute; top: 12px; right: 6px; bottom: 12px;
   display: flex; align-items: flex-start; z-index: 40; pointer-events: none;
 }
 .msg-nav-list {
-  display: flex; flex-direction: column; gap: 3px;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
   max-height: 100%; overflow-y: auto; width: 132px; pointer-events: auto;
-  scrollbar-width: thin;
+  scrollbar-width: thin; padding: 2px;
 }
+/* 默认形态:一条条小横杠(类 GPT);鼠标悬停时由 JS 按光标距离
+   由小到大渐变为完整摘要(越远离光标越小,直到退回横杠)(v0.9.16) */
 .msg-nav-list button {
-  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px;
-  color: var(--text-dim); font-size: 11px; padding: 4px 8px; cursor: pointer;
+  width: 26px; height: 4px; padding: 0; flex-shrink: 0;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 2px;
+  color: var(--text-dim); font-size: 0; cursor: pointer; opacity: .6;
   text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  opacity: .8; flex-shrink: 0;
+  transition: width .12s ease, height .12s ease, padding .12s ease,
+              font-size .12s ease, opacity .12s ease;
 }
-.msg-nav-list button:hover { opacity: 1; color: var(--text); }
-.msg-nav-list button.active { opacity: 1; color: var(--text); border-color: var(--accent); }
-/* Dock 式悬停放大(v0.9.14):仅 .mag(内容不溢出、无滚动)时启用;
-   右缘为原点向左放大,JS 按光标距离逐帧计算 scale */
+.msg-nav-list button.active { opacity: 1; border-color: var(--accent); background: var(--accent-bg); }
+/* .mag(内容不溢出、无滚动)时启用悬停渐变;overflow 可见避免展开被裁切 */
 .msg-nav-list.mag { overflow: visible; }
-.msg-nav-list.mag button {
-  transform-origin: right center;
-  transition: transform .1s ease-out;
-  will-change: transform;
+/* 内容溢出可滚动时 mag 关闭(展开会被裁切),退回整项悬停展开回退 */
+.msg-nav-list:not(.mag) button:hover {
+  width: 128px; height: 22px; padding: 0 6px; font-size: 11px; opacity: 1;
 }
 /* 导航点击定位的闪烁提示 */
 .msg.user.flash .bubble { outline: 2px solid var(--accent); transition: outline .15s ease; }

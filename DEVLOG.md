@@ -273,3 +273,9 @@ Git 工作流:
 - **右上角 ⋯ 菜单新增「⚡ 瞬时跳转定位」勾选**(默认开,保持 v0.9.14 行为):作用于消息导航点击定位与「回到底部」按钮;关闭则恢复平滑滚动
 - state.instantJump(boot 时 api.getStore 读 settings.instantJump);菜单每次打开刷新 ✓ 勾选态;切换即 api.setSetting 持久化
 - npm test 97/97
+
+### v0.9.16(2026-08-10):消息导航收进消息区 + 横杠默认形态/悬停按距离展开
+- **不再覆盖输入区**:#msg-nav 收进新增的 .messages-wrap(flex:1,只包裹 #messages),从「整个聊天列绝对定位」改为只覆盖会话显示区,底部不再压到消息发送栏
+- **默认形态 = 一条条小横杠**(类 GPT):26×4px、字号 0;悬停时由 JS 按光标垂直距离二次衰减展开——光标所在项展开到 190×22px 显示完整摘要,越远离光标越小,直到退回横杠(行内 width/height/font-size + CSS transition 驱动)
+- 内容溢出可滚动时 mag 关闭(展开会被 overflow 裁切),退回 CSS :hover 整项展开回退
+- npm test 97/97
