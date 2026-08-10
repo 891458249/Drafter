@@ -279,3 +279,10 @@ Git 工作流:
 - **默认形态 = 一条条小横杠**(类 GPT):26×4px、字号 0;悬停时由 JS 按光标垂直距离二次衰减展开——光标所在项展开到 190×22px 显示完整摘要,越远离光标越小,直到退回横杠(行内 width/height/font-size + CSS transition 驱动)
 - 内容溢出可滚动时 mag 关闭(展开会被 overflow 裁切),退回 CSS :hover 整项展开回退
 - npm test 97/97
+
+### v0.9.17(2026-08-10,未发布):代码卡片头部条 sticky——长代码块复制按钮跟随可视区
+- **痛点**:长代码块滚到中部想复制,得拉回块顶才能点到头部条的复制按钮
+- **实现**:.code-card-head 改 position:sticky;top:0(滚动容器 #messages),滚过长代码块时头部条(语言标签+复制按钮)吸附在可视区顶部,滚出卡片自动归位
+- **关键障碍**:.code-card 的 overflow:hidden 会让卡片成为滚动容器从而破坏 sticky——去掉;圆角改由头部条(border-radius:7px 7px 0 0)与卡片自身背景承担;头部条背景改不透底实色 #1e1c19,吸顶时下方代码不穿透
+- 纯 CSS 改动,sticky 链路(.bubble/.msg → #messages)无其他 overflow 裁剪
+- npm test 97/97

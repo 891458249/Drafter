@@ -248,14 +248,17 @@ html, body {
 .scroll-bottom:hover { color: var(--text); border-color: var(--accent); }
 
 /* 代码卡片(v0.9.12):IDE 风格——头部条(语言标签+复制按钮)+ 着色的代码区 */
+/* v0.9.17:去掉 overflow:hidden(它会破坏 sticky),圆角改由头部/卡片各自承担;
+   头部条 position:sticky,长代码块滚动时复制按钮跟随可视区顶部 */
 .code-card {
   background: #14120f; border: 1px solid var(--border); border-radius: 8px;
-  margin: 10px 0; overflow: hidden;
+  margin: 10px 0;
 }
 .code-card-head {
+  position: sticky; top: 0; z-index: 2;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 5px 10px 5px 14px; background: rgba(255,255,255,.04);
-  border-bottom: 1px solid var(--border);
+  padding: 5px 10px 5px 14px; background: #1e1c19; /* 不透底:吸顶时下方代码不可见 */
+  border-bottom: 1px solid var(--border); border-radius: 7px 7px 0 0;
 }
 .code-card-lang { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
 .code-copy-btn {
