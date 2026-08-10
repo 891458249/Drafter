@@ -84,16 +84,19 @@ export function init() {
     ticking = true;
     requestAnimationFrame(() => { ticking = false; markActive(); });
   });
-  // Dock 式悬停展开(v0.9.18):槽位布局尺寸恒定(26×4),距离一律按槽位中心
+  // Dock 式悬停展开(v0.9.19 调优):槽位布局尺寸恒定(26×4),距离一律按槽位中心
   // 测量——槽位在悬停期间不移动,因此无布局反馈抖动、上下衰减严格对称。
-  // 光标所在项放到最大(完整摘要),邻近项按垂直距离二次衰减,越远越小直到
-  // 退回横杠;只改 transform/opacity,不触发列表重排。离开列表全部复位。
+  // 对比强化:衰减指数 1.5(两侧项更快退回小横杠)+ 中心项最大放到 1.15x 并打
+  // .hot 高亮(主题色描边/底色),同时远处项压暗到 0.35——中心项明显更醒目。
+  // 只改 transform/opacity,不触发列表重排。离开列表全部复位。
   const list = $('msg-nav').querySelector('.msg-nav-list');
-  const MAG_RADIUS = 90;          // 影响半径(px)
+  const MAG_RADIUS = 70;          // 影响半径(px)
   const SX0 = 26 / 190, SY0 = 4 / 22; // 横杠缩放系数(与 CSS 默认值一致)
-  const resetItem = (b) => { b.style.transform = ''; b.style.zIndex = ''; b.style.opacity = ''; };
+  const SMAX = 1.15;              // 中心项最大放大倍数
+  const resetItem = (b) => { b.style.transform = ''; b.style.zIndex = ''; b.style.opacity = ''; b.classList.remove('hot'); };
   list.addEventListener('mousemove', (e) => {
     if (!list.classList.contains('mag')) return;
+    let hot = null, hotK = 0;
     for (const slot of list.children) {
       const b = slot.firstChild;
       const r = slot.getBoundingClientRect();
@@ -101,9 +104,14 @@ export function init() {
       const t = Math.max(0, 1 - d / MAG_RADIUS);
       const k = t * t; // 二次衰减
       if (k < 0.02) { resetItem(b); continue; }
-      b.style.transform = `scale(${(SX0 + (1 - SX0) * k).toFixed(3)}, ${(SY0 + (1 - SY0) * k).toFixed(3)})`;
+      const kk = Math.pow(k, 1.5); // 再压一次指数,拉开中心项与两侧的差距
+      b.style.transform = `scale(${(SX0 + (SMAX - SX0) * kk).toFixed(3)}, ${(SY0 + (SMAX - SY0) * kk).toFixed(3)})`;
       b.style.zIndex = String(Math.round(k * 100)); // 展开大的压在上面
-      b.style.opacity = (0.6 + 0.4 * k).toFixed(2);
+      b.style.opacity = (0.35 + 0.65 * k).toFixed(2); // 远处压暗,衬托中心项
+      if (k > hotK) { hotK = k; hot = b; }
+    }
+    for (const slot of list.children) {
+      slot.firstChild.classList.toggle('hot', slot.firstChild === hot && hotK > 0.5);
     }
   });
   list.addEventListener('mouseleave', () => {

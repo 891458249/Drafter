@@ -907,12 +907,17 @@ video.aigc-media { max-height: 360px; }
 .messages-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .msg-nav {
   position: absolute; top: 12px; right: 6px; bottom: 12px;
-  display: flex; align-items: flex-start; z-index: 40; pointer-events: none;
+  display: flex; align-items: center; z-index: 40; pointer-events: none; /* v0.9.19:列表垂直居中 */
 }
 .msg-nav-list {
   display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
   max-height: 100%; overflow-y: auto; width: 132px; pointer-events: auto;
   scrollbar-width: thin; padding: 2px;
+}
+/* v0.9.19:内容溢出(消息太多装不下)时上下边缘淡出,表示「两侧还有省略的」 */
+.msg-nav-list:not(.mag) {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
 }
 /* 默认形态:一条条小横杠(类 GPT)。v0.9.18 起改为「槽位 + transform」结构:
    槽位(.msg-nav-slot)布局尺寸恒定 26×4,按钮全尺寸(190×22)绝对定位于槽内、
@@ -930,10 +935,17 @@ video.aigc-media { max-height: 360px; }
   transition: transform .12s ease, opacity .12s ease;
 }
 .msg-nav-slot button.active { opacity: 1; border-color: var(--accent); background: var(--accent-bg); }
+/* v0.9.19:悬停中心项高亮(比两侧项更醒目),由 JS 按最大展开系数打 .hot */
+.msg-nav-slot button.hot {
+  background: var(--accent-bg); border-color: var(--accent); color: var(--text); opacity: 1;
+}
 /* .mag(内容不溢出、无滚动)时启用 JS 悬停渐变;overflow 可见避免展开被裁切 */
 .msg-nav-list.mag { overflow: visible; }
 /* 内容溢出可滚动时 mag 关闭(展开会被裁切),退回整项悬停展开回退(宽度收到列表内) */
-.msg-nav-list:not(.mag) .msg-nav-slot:hover button { transform: scale(0.674, 1); opacity: 1; z-index: 100; }
+.msg-nav-list:not(.mag) .msg-nav-slot:hover button {
+  transform: scale(0.674, 1); opacity: 1; z-index: 100;
+  background: var(--accent-bg); border-color: var(--accent); color: var(--text);
+}
 /* 导航点击定位的闪烁提示 */
 .msg.user.flash .bubble { outline: 2px solid var(--accent); transition: outline .15s ease; }
 /* 消息内联编辑(修改并重新生成) */
