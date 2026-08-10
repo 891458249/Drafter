@@ -28,10 +28,16 @@ export async function sendMessage() {
     const images = state.attachments.filter((a) => a.kind === 'image');
     const media = state.attachments.filter((a) => a.kind === 'media');
     const files = state.attachments.filter((a) => a.kind === 'file');
-    // 文本附件内联进消息文本(图片仍走原生 content block)
+    // 文本附件只按路径引用(v0.9.27):内容不内联、UI 只显示文件卡片,
+    // 由 AI 用 Read 工具按路径自行查看(大文件不再撑爆 UI 篇幅)
     let fullText = text || '';
     for (const f of files) {
-      fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}">\n${f.text}\n</附件>`;
+      if (f.path) {
+        fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}" path="${f.path}">内容未内联,请使用 Read 工具读取该路径查看文件内容</附件>`;
+      } else {
+        // 兜底:无路径的旧形态(理论上 v0.9.27 起不再产生)
+        fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}">\n${f.text}\n</附件>`;
+      }
     }
     if (images.length || media.length) {
       content = [];
@@ -101,9 +107,9 @@ async function sendAigcMessage(sess, text) {
 }
 
 // --- attachments ----------------------------------------------------------------
-// 附件两种形态:图片(content block 原生视觉)与文本文件(内联进消息文本)。
+// 附件形态:图片(content block 原生视觉)、文本文件(只按路径引用,AI 自行 Read,
+// v0.9.27 起不再内联内容)、音频/视频/3D 媒体(media_ref 路径)。
 // 附件随下一条消息发送后清空;文件夹是项目级常驻共享,走另一条通道。
-const FILE_ATTACH_LIMIT = 50 * 1024; // 文本附件截断阈值
 const TEXT_EXTS = new Set(('md,txt,js,mjs,cjs,ts,jsx,tsx,json,py,css,html,htm,sh,bash,ps1,bat,cmd,'
   + 'yml,yaml,toml,ini,cfg,conf,log,csv,xml,svg,c,h,cpp,hpp,java,go,rs,rb,php,vue,sql,'
   + 'gitignore,env,example,lock,diff,patch').split(','));
@@ -188,7 +194,23 @@ function addImageFile(file) {
   reader.readAsDataURL(file);
 }
 
-// 粘贴/拖拽/＋附件 的统一入口:图片走 base64,媒体保留路径,文本文件读内容,其余二进制拒收
+// 文本附件统一入口(v0.9.27):只登记路径(未知扩展名采样 4KB 做二进制检测),
+// 内容不读进 renderer——大文件不再撑爆 UI;AI 发送时收到路径引用,自行 Read
+async function addTextFileByPath(p, name) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (!TEXT_EXTS.has(ext)) {
+    const s = await api.fileSample(p);
+    if (!s || !s.ok) { alert('无法读取文件:' + ((s && s.error) || name)); return; }
+    if (!looksTextual(s.sample)) {
+      alert(`不支持的二进制文件:${name}(附件支持图片、文本、音频/视频/3D 文件)`);
+      return;
+    }
+  }
+  state.attachments.push({ kind: 'file', name, path: p });
+  renderAttachments();
+}
+
+// 粘贴/拖拽/＋附件 的统一入口:图片走 base64,媒体保留路径,文本文件按路径引用,其余二进制拒收
 function addAnyFile(file) {
   if (/^image\/(png|jpeg|gif|webp)$/.test(file.type)) return addImageFile(file);
   const ext = (file.name.split('.').pop() || '').toLowerCase();
@@ -204,17 +226,19 @@ function addAnyFile(file) {
     renderAttachments();
     return;
   }
+  // 文本文件:优先取磁盘路径;粘贴内容无路径时,落盘 userData/attachments/ 再按路径引用
+  const p = api.pathForFile ? api.pathForFile(file) : '';
+  if (p) return addTextFileByPath(p, file.name);
   const reader = new FileReader();
-  reader.onload = () => {
-    let text = String(reader.result);
+  reader.onload = async () => {
+    const text = String(reader.result);
     if (!TEXT_EXTS.has(ext) && !looksTextual(text)) {
       alert(`不支持的二进制文件:${file.name}(附件支持图片、文本、音频/视频/3D 文件)`);
       return;
     }
-    if (text.length > FILE_ATTACH_LIMIT) {
-      text = text.slice(0, FILE_ATTACH_LIMIT) + `\n… (已截断,原 ${text.length} 字符)`;
-    }
-    state.attachments.push({ kind: 'file', name: file.name, text });
+    const r = await api.fileSavePasted({ name: file.name, content: text });
+    if (!r || !r.ok) { alert('附件暂存失败:' + ((r && r.error) || '未知错误')); return; }
+    state.attachments.push({ kind: 'file', name: file.name, path: r.path });
     renderAttachments();
   };
   reader.readAsText(file);
@@ -375,18 +399,8 @@ export function init() {
         if (!st.ok) { alert(st.error); continue; }
         state.attachments.push({ kind: 'media', mediaKind: mk, name, path: p, size: st.size });
       } else {
-        const r = await api.fileRead({ cwd: state.cwd, path: p });
-        if (!r.ok) { alert(r.error); continue; }
-        let text = r.content;
-        const ext = (name.split('.').pop() || '').toLowerCase();
-        if (!TEXT_EXTS.has(ext) && !looksTextual(text)) {
-          alert(`不支持的二进制文件:${name}(附件支持图片、文本、音频/视频/3D 文件)`);
-          continue;
-        }
-        if (text.length > FILE_ATTACH_LIMIT) {
-          text = text.slice(0, FILE_ATTACH_LIMIT) + `\n… (已截断,原 ${r.content.length} 字符)`;
-        }
-        state.attachments.push({ kind: 'file', name, text });
+        // 文本文件(v0.9.27):只登记路径,内容不读进 UI
+        await addTextFileByPath(p, name);
       }
     }
     if (paths.length) renderAttachments();

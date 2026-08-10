@@ -703,6 +703,10 @@ ipcMain.handle('files:watch', (_e, { key, path: abs }) => {
 ipcMain.handle('files:unwatch', (_e, key) => { files.unwatchFile(key); return true; });
 ipcMain.handle('files:readImage', (_e, absPath) => files.readImageBase64(absPath));
 ipcMain.handle('files:stat', (_e, absPath) => files.statFile(absPath)); // 媒体附件卡片显示大小用
+ipcMain.handle('files:sample', (_e, absPath) => files.sampleFile(absPath)); // 文本附件二进制检测采样(v0.9.27)
+// 粘贴的文本附件无磁盘路径:落盘 userData/attachments/ 后按路径引用(v0.9.27)
+ipcMain.handle('files:savePasted', (_e, { name, content }) =>
+  files.savePastedAttachment(app.getPath('userData'), name, content));
 
 // ---------------------------------------------------------------------------
 // IPC: slash commands / mcp / cron

@@ -339,3 +339,9 @@ Git 工作流:
 - **问题**:Gem 选择器在输入区工具条(窗口底部),showMenu 固定 top=锚点.bottom+6 向下展开,窗口较矮时菜单被窗口底边裁掉
 - **修复**:先渲染量高,下方空间 ≥ 菜单高才向下;否则向上展开(top=锚点.top−6−高,钳 ≥8),并按锚点上方可用空间收 max-height(≥120),顶部也不越界;共享 showMenu 的「默认工具」菜单同享此逻辑
 - npm test 104/104
+
+### v0.9.27(2026-08-10):文本附件改路径引用——UI 只显示文件卡片,内容 AI 自行 Read
+- **痛点**:文本附件此前把全文内联进消息(`<附件 name>全文</附件>`,50KB 截断),大文件把会话 UI 撑得很长
+- **发送侧**(input.js):文本附件只登记 `{name, path}`——＋附件按钮/拖拽有磁盘路径直接用;粘贴内容无路径则落盘 userData/attachments/(新 IPC files:savePasted)再引用;二进制检测改 4KB 采样(files.sampleFile,新 IPC files:sample),不再读全文;发送时内联 `<附件 name path>请用 Read 工具读取</附件>` 引用块
+- **渲染侧**(chat.js renderUserBubble):ATTACH_BLOCK_RE 把附件块(含旧版内联全文的历史消息)折叠成 📄 文件卡片(.file-attach-chip,悬停显示路径)——旧会话的大附件消息同样不再占篇幅
+- npm test 104/104

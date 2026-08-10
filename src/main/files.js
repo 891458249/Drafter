@@ -113,4 +113,35 @@ function statFile(absPath) {
   }
 }
 
-module.exports = { listFiles, readFile, saveFile, watchFile, unwatchFile, readImageBase64, statFile };
+// 文本附件按路径引用(v0.9.27):只采样前几 KB 供二进制检测,不读全文
+function sampleFile(absPath, bytes = 4096) {
+  try {
+    const fd = fs.openSync(absPath, 'r');
+    try {
+      const buf = Buffer.alloc(bytes);
+      const n = fs.readSync(fd, buf, 0, bytes, 0);
+      const st = fs.statSync(absPath);
+      return { ok: true, sample: buf.toString('utf8', 0, n), size: st.size };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// 粘贴的文本没有磁盘路径:落盘到 userData/attachments/ 供 AI 按路径自行读取
+function savePastedAttachment(userDataDir, name, content) {
+  try {
+    const dir = path.join(userDataDir, 'attachments');
+    fs.mkdirSync(dir, { recursive: true });
+    const safe = String(name || 'pasted.txt').replace(/[<>:"|?*\\/]/g, '_').slice(-80);
+    const p = path.join(dir, Date.now() + '-' + safe);
+    fs.writeFileSync(p, content, 'utf8');
+    return { ok: true, path: p };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+module.exports = { listFiles, readFile, saveFile, watchFile, unwatchFile, readImageBase64, statFile, sampleFile, savePastedAttachment };

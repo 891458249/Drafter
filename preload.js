@@ -102,6 +102,8 @@ contextBridge.exposeInMainWorld('api', {
   fileUnwatch: (key) => ipcRenderer.invoke('files:unwatch', key),
   fileReadImage: (absPath) => ipcRenderer.invoke('files:readImage', absPath),
   fileStat: (absPath) => ipcRenderer.invoke('files:stat', absPath),
+  fileSample: (absPath) => ipcRenderer.invoke('files:sample', absPath),
+  fileSavePasted: invoke('files:savePasted'),
   // 拖拽/粘贴的 File 对象取本地路径(Electron 32+ 移除了 File.path,需走 webUtils)
   pathForFile: (f) => webUtils.getPathForFile(f),
 

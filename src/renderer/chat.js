@@ -295,17 +295,26 @@ function linkifyPaths(el) {
 }
 
 // --- user echo ---------------------------------------------------------------
+// 附件块折叠(v0.9.27):<附件 name=".." path="..">…</附件> 在用户气泡里只显示
+// 文件卡片(📄 文件名,悬停见路径),不显示内容——内容又长又占篇幅,AI 按路径
+// 自行 Read;旧版本内联全文的 <附件 name=".."> 历史消息同样折叠。
+const ATTACH_BLOCK_RE = /<附件\s+name="([^"]*)"(?:\s+path="([^"]*)")?\s*>[\s\S]*?<\/附件>/g;
+function collapseAttachBlocks(text) {
+  return String(text || '').replace(ATTACH_BLOCK_RE, (_m, name, p) =>
+    `\n\n<div class="file-attach-chip" title="${escapeHtml(p || name)}">📄 ${escapeHtml(name)}</div>\n\n`);
+}
+
 // 渲染用户消息 bubble 内容(addUserMessage 与编辑重生成的重渲染共用)
 export function renderUserBubble(bubble, content) {
   bubble.innerHTML = '';
   if (typeof content === 'string') {
-    bubble.innerHTML = enhanceCodeHtml(renderMarkdown(content));
+    bubble.innerHTML = enhanceCodeHtml(renderMarkdown(collapseAttachBlocks(content)));
     return;
   }
   for (const b of content) {
     if (b.type === 'text') {
       const d = document.createElement('div');
-      d.innerHTML = enhanceCodeHtml(renderMarkdown(b.text));
+      d.innerHTML = enhanceCodeHtml(renderMarkdown(collapseAttachBlocks(b.text)));
       bubble.appendChild(d);
     } else if (b.type === 'media_ref') {
       // 音频/视频/3D 附件卡片(媒体本体不进会话,发送时已注入分析/元信息文本)
