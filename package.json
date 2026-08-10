@@ -1,6 +1,6 @@
 {
   "name": "desktopui",
-  "version": "0.9.24",
+  "version": "0.9.25",
   "description": "A desktop UI for Claude Code",
   "main": "main.js",
   "scripts": {

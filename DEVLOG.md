@@ -328,3 +328,9 @@ Git 工作流:
 - **根因**:v0.9.23 回撤 v0.9.22 时把 scrollTop 整项吸附一并回掉,代理滚动回到连续值,窗口上下边缘的项被拦腰截断只显示半条
 - **修复**:代理滚动按项距 16px(槽位 6+间距 10)取整吸附,边缘项要么完整显示要么完整隐入淡出区;分侧边界淡出(v0.9.23)不受影响
 - npm test 104/104
+
+### v0.9.25(2026-08-10):导航禁滚轮 + 回到底部按钮移位 + macOS Dock 式边缘感应
+- **滚轮禁用**:list 的 wheel 事件 preventDefault({passive:false}),导航栏只吃悬停代理滚动,不再被滚轮误滚
+- **回到底部按钮移位**:从 chat-col(bottom:150px)移进 messages-wrap,钉在消息区右下角(right:12 bottom:10,导航栏尾端之下);z-index 50 压过 rail(40)保证可点
+- **macOS Dock 式边缘感应**:mousemove/mouseleave 提升到整条 rail(pointer-events:auto);mag 态光标 Y 先钳到首/末槽位中心之间——光标在导航上缘之上时最上面一条按「光标在其中心」拿满放大(1.15x+.hot),越过下缘同理(复刻 Dock 光标越过端点图标端点保持满倍);非 mag 态光标超出小窗上/下缘时 ratio 钳 0/1 直接探到顶/底
+- npm test 104/104

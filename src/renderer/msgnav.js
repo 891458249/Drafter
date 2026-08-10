@@ -98,30 +98,45 @@ export function init() {
   // 对比强化:衰减指数 1.5(两侧项更快退回小横杠)+ 中心项最大放到 1.15x 并打
   // .hot 高亮(主题色描边/底色),同时远处项压暗到 0.35——中心项明显更醒目。
   // 只改 transform/opacity,不触发列表重排。离开列表全部复位。
-  const list = $('msg-nav').querySelector('.msg-nav-list');
+  //
+  // v0.9.25:①监听提升到整条 rail(pointer-events:auto),感应区不再只有小窗;
+  // ②macOS Dock 式边缘钳制——光标 Y 先钳到首/末槽位中心之间:光标在导航上缘
+  //   之上时最上面一条按「光标在其中心」拿到满放大,越过下缘同理(macOS Dock
+  //   光标越过端点图标时端点保持满倍放大的行为);
+  // ③滚轮对导航栏禁用(wheel preventDefault),只允许悬停代理滚动。
+  const rail = $('msg-nav');
+  const list = rail.querySelector('.msg-nav-list');
   const MAG_RADIUS = 70;          // 影响半径(px)
   const SX0 = 26 / 190, SY0 = 6 / 22; // 横杠缩放系数(与 CSS 默认值一致,v0.9.20 横杠 6px 厚)
   const SMAX = 1.15;              // 中心项最大放大倍数
+  const PITCH = 16;               // 槽位 6px + 间距 10px(v0.9.20)
   const resetItem = (b) => { b.style.transform = ''; b.style.zIndex = ''; b.style.opacity = ''; b.classList.remove('hot'); };
-  list.addEventListener('mousemove', (e) => {
+  list.addEventListener('wheel', (e) => e.preventDefault(), { passive: false }); // ③
+  rail.addEventListener('mousemove', (e) => {
     // 装不下(非 mag)时(v0.9.21):列表是居中的小窗,悬停位置即总列表的
     // 相应位置——按光标在小窗内的纵向比例直接代理 scrollTop(数学上光标所指
-    // 恰好对应整体内容的同一比例处),配合上下淡出实现「省略但有定位感」
+    // 恰好对应整体内容的同一比例处);v0.9.25 光标超出小窗上/下缘时 ratio 钳到
+    // 0/1(探到边界),与 macOS Dock 端点行为一致
     if (!list.classList.contains('mag')) {
       const lr = list.getBoundingClientRect();
       const ratio = Math.min(1, Math.max(0, (e.clientY - lr.top) / lr.height));
-      // v0.9.24:按项距 16px(槽位 6+间距 10)吸附取整——连续值会让窗口上下
-      // 边缘的项只显示半条,吸附后边缘项要么完整显示要么完整隐入淡出区
-      const PITCH = 16;
+      // v0.9.24:按项距 16px 吸附取整——连续值会让窗口上下边缘的项只显示半条,
+      // 吸附后边缘项要么完整显示要么完整隐入淡出区
       const raw = ratio * (list.scrollHeight - list.clientHeight);
       list.scrollTop = Math.round(raw / PITCH) * PITCH;
       return;
     }
+    // ② 边缘钳制:光标在上缘之上 → 作用于首槽位中心(首项满放大);下缘同理
+    const slots = list.children;
+    if (!slots.length) return;
+    const fr = slots[0].getBoundingClientRect();
+    const br = slots[slots.length - 1].getBoundingClientRect();
+    const cy = Math.min(br.top + br.height / 2, Math.max(fr.top + fr.height / 2, e.clientY));
     let hot = null, hotK = 0;
-    for (const slot of list.children) {
+    for (const slot of slots) {
       const b = slot.firstChild;
       const r = slot.getBoundingClientRect();
-      const d = Math.abs(e.clientY - (r.top + r.height / 2));
+      const d = Math.abs(cy - (r.top + r.height / 2));
       const t = Math.max(0, 1 - d / MAG_RADIUS);
       const k = t * t; // 二次衰减
       if (k < 0.02) { resetItem(b); continue; }
@@ -131,13 +146,13 @@ export function init() {
       b.style.opacity = (0.35 + 0.65 * k).toFixed(2); // 远处压暗,衬托中心项
       if (k > hotK) { hotK = k; hot = b; }
     }
-    for (const slot of list.children) {
+    for (const slot of slots) {
       slot.firstChild.classList.toggle('hot', slot.firstChild === hot && hotK > 0.5);
     }
   });
-  list.addEventListener('mouseleave', () => {
+  rail.addEventListener('mouseleave', () => {
     for (const slot of list.children) resetItem(slot.firstChild);
   });
-  // 边界淡出维护(v0.9.23):代理滚动/滚轮都会触发 scroll,据 scrollTop 刷新
+  // 边界淡出维护(v0.9.23):代理滚动触发 scroll,据 scrollTop 刷新
   list.addEventListener('scroll', updateFade);
 }
