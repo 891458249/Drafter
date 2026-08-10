@@ -110,7 +110,11 @@ export function init() {
     if (!list.classList.contains('mag')) {
       const lr = list.getBoundingClientRect();
       const ratio = Math.min(1, Math.max(0, (e.clientY - lr.top) / lr.height));
-      list.scrollTop = ratio * (list.scrollHeight - list.clientHeight);
+      // v0.9.24:按项距 16px(槽位 6+间距 10)吸附取整——连续值会让窗口上下
+      // 边缘的项只显示半条,吸附后边缘项要么完整显示要么完整隐入淡出区
+      const PITCH = 16;
+      const raw = ratio * (list.scrollHeight - list.clientHeight);
+      list.scrollTop = Math.round(raw / PITCH) * PITCH;
       return;
     }
     let hot = null, hotK = 0;
