@@ -69,6 +69,8 @@
         <div id="messages" class="messages"></div>
         <!-- 用户消息缩略导航(v0.9.9):点击定位到对应消息,滚动联动高亮 -->
         <div id="msg-nav" class="msg-nav hidden"><div class="msg-nav-list"></div></div>
+        <!-- 回到底部(v0.9.13):上翻解除吸底后出现,点击恢复吸附并吸底 -->
+        <button id="btn-scroll-bottom" class="scroll-bottom hidden" title="回到底部">↓</button>
         <div class="composer">
           <div id="attachments" class="attachments hidden"></div>
           <div id="autocomplete" class="autocomplete hidden"></div>
@@ -110,6 +112,7 @@
           </div>
           <div id="turn-status" class="turn-status hidden">
             <span class="turn-star">✳</span><span id="turn-status-text"></span>
+            <div class="turn-progress"><div class="turn-progress-bar"></div></div>
           </div>
           <div class="input-wrap">
             <textarea id="input" class="input" rows="1"

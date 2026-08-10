@@ -227,3 +227,37 @@ Git 工作流:
 - **覆盖所有注入点**:chat.js 流式(scheduleAssistantRender/flushAssistantRender)、用户气泡(renderUserBubble)、计划卡片(plan-md);state.js 新增 PRE_CODE_RE/decodeCodeHtml 共享正则与解码
 - **联动修复**:msgmenu.js 复制整条消息的 msgText 剔除 .code-card-head,避免「python 复制」混进正文
 - npm test 97/97(新增 test/codeblock.test.js 4 例,window.hljs/document stub)
+
+### v0.9.13(2026-08-07):会话滚动吸附——上翻自由浏览,不再被流式渲染强制拉底
+- **问题**:会话思考/编辑流式输出时,scheduleAssistantRender/appendThinking/工具卡片/结果行等都无条件 scrollBottom,用户拖滚动条或滚轮上翻会被持续拉回底部
+- **修复**:chat.js 引入 stickToBottom 吸附态——#messages scroll 监听:距底 <80px 视为吸附,上翻即解除;scrollBottom 加 force 参数,仅吸附态(或 force)才吸底
+- **force 场景**:用户发消息(addUserMessage,含 aigc 回显)/切换会话(setActiveSession)/历史回放完成
+- **「↓ 回到底部」悬浮按钮**:非吸附态出现在消息区右下,点击平滑吸底并恢复吸附;切换会话时同步隐藏
+- npm test 97/97
+
+### v0.9.13(同日补充):Chat 会话 token 计数兜底 + 上下文 % 实时刷新
+- **问题**:部分网关(如 Kimi)流式 message_delta 不带 usage,turnTokens 只依赖该事件,回合状态恒显示「0 tokens」;lastUsage 也只在 result 时更新,「上下文 %」回合中不推进
+- **修复**:handleAssistantMessage 对 assistant 完整消息的 message.usage 兜底——流式已计过(msgDeltaCounted,message_stop 时记录)不重复计,否则按 output_tokens 补计 turnTokens;同步刷新 lastUsage 并发 usage-updated 事件,app.js 监听实时刷新「上下文 %」按钮
+- npm test 97/97
+
+### v0.9.13(同日补充 2):回合进度条 + 当前动作提示
+- **进度条**:turn-status 行下新增整宽细条(.turn-progress),往复滑动指示(agentic 回合无真实百分比,用指示条表达「正在推进」),仅 busy 时随状态行显示
+- **当前动作**:流式事件跟踪 s.ui.curAction——思考中/撰写回复/调用工具 Xxx/子任务 Xxx(完成即清除),合入状态行文本尾部;新回合(ui_status busy)重置
+- npm test 97/97
+
+### v0.9.13(同日补充 3):预测式进度条
+- **模型**:把往复滑动指示条改为时间双曲线预测——predictedPct = 92·t/(t+25000)(25 秒 ~46%、100 秒 ~74%),渐近逼近 92% 永不到 100,避免「卡在 100% 等结束」的误导;.turn-progress-bar 改 width 驱动 + transition 平滑
+- **补满反馈**:result 时进度补满 100% 停留 350ms 再隐藏状态行(setTimeout 内 busy 重入则不隐藏,防多回合闪烁);新回合 resetTurnProgress 归零
+- **量化显示**:状态行文本尾部加 `· ~N%`(每秒刷新)
+- npm test 97/97
+
+### v0.9.13(同日补充 4):回合结束系统通知
+- **每次回合结束都发 Windows toast**(此前仅非活跃会话):onTurnDone 去掉 activeId 限制,标题区分正常「任务完成」/出错「任务结束(出错)」,正文带用时(3m 21s 的回合 → "…的回合已结束,用时 201.0s");非活跃会话仍额外打点 sess:attention
+- 走 Electron Notification(isSupported 守卫,silent 失败),与权限请求通知共用 notify()
+- npm test 97/97
+
+### v0.9.13(同日补充 5):系统托盘驻留——关窗转后台,右键托盘退出
+- **关窗不再退出**:mainWindow close 拦截(非 darwin、非 isQuitting)→ hide();首次最小化弹一次系统通知「正在后台运行,右键托盘图标可退出」
+- **托盘**:build/icon.png 缩放到 16px 建 Tray;左键单击唤出;右键菜单「显示 DeskTopUI / 退出」;退出走 app.isQuitting=true + cleanup()(幂等:stopAll/closeAll/scheduler.stop)+ app.quit()
+- **配套**:updater.installAndRestart 先置 app.isQuitting(否则关窗拦截挡住自动更新重启);before-quit 统一置 isQuitting+cleanup 覆盖所有退出路径;second-instance 改为 showMainWindow(应用在托盘隐藏时二次启动能唤出);build/icon.png 加入打包 files
+- npm test 97/97

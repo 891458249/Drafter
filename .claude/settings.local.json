@@ -7,7 +7,9 @@
       "Bash(npm test *)",
       "Bash(ls ~/.claude/projects/ | head -30)",
       "AskUserQuestion",
-      "Bash(node --test test/gems.test.js)"
+      "Bash(node --test test/gems.test.js)",
+      "Bash",
+      "Bash(node -e \"console.log\\('icon exists'\\)\")"
     ]
   }
 }

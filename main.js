@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, Tray, Menu, nativeImage, Notification } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -39,7 +39,44 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow = null;
+let tray = null;
+let trayHintShown = false; // 首次最小化到托盘时提示一次
 const getWindow = () => mainWindow;
+
+// 退出前清理(幂等):停会话/终端/调度
+let cleanedUp = false;
+function cleanup() {
+  if (cleanedUp) return;
+  cleanedUp = true;
+  try { sessions.stopAll(); } catch {}
+  try { terms.closeAll(); } catch {}
+  try { scheduler.stop(); } catch {}
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return; }
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+// 系统托盘(v0.9.13):关窗后驻留后台,右键托盘图标退出
+function setupTray() {
+  try {
+    let img = nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png'));
+    if (img.isEmpty()) { console.error('[tray] icon.png 加载失败'); return; }
+    img = img.resize({ width: 16, height: 16 });
+    tray = new Tray(img);
+    tray.setToolTip('DeskTopUI');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: '显示 DeskTopUI', click: showMainWindow },
+      { type: 'separator' },
+      { label: '退出', click: () => { app.isQuitting = true; cleanup(); app.quit(); } },
+    ]));
+    tray.on('click', showMainWindow); // 左键单击直接唤出
+  } catch (e) {
+    console.error('[tray] 创建失败:', e.message);
+  }
+}
 
 // --- GPU / disk cache hardening ---------------------------------------------
 // Startup logs showed cache_util_win.cc "Unable to move the cache: 拒绝访问
@@ -59,10 +96,8 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    // 应用可能在托盘隐藏中:二次启动要 show 出来而不只是 focus
+    showMainWindow();
   });
 }
 
@@ -115,6 +150,18 @@ function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  // 关窗转入托盘后台(v0.9.13):仅托盘右键「退出」/自动更新重启才真正退出
+  mainWindow.on('close', (e) => {
+    if (app.isQuitting || process.platform === 'darwin') return;
+    e.preventDefault();
+    mainWindow.hide();
+    if (!trayHintShown) {
+      trayHintShown = true;
+      try {
+        new Notification({ title: 'DeskTopUI 正在后台运行', body: '窗口已最小化到系统托盘;右键托盘图标可退出。' }).show();
+      } catch {}
+    }
+  });
   // persist renderer errors (level >= 2) to userData/logs/renderer-errors.log
   mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
     if (level >= 2) {
@@ -155,6 +202,7 @@ app.whenReady().then(() => {
     console.error('[main] project migration failed:', e.message);
   }
   createWindow();
+  setupTray();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -171,10 +219,14 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => {
+  app.isQuitting = true; // 覆盖 Cmd+Q / app.quit() 等所有退出路径
+  cleanup();
+});
+
 app.on('window-all-closed', () => {
-  sessions.stopAll();
-  terms.closeAll();
-  scheduler.stop();
+  // Windows 上关窗被拦截转入托盘,不会走到这里;能到这里说明正在退出(或 macOS 关窗)
+  cleanup();
   if (process.platform !== 'darwin') app.quit();
 });
 

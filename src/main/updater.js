@@ -41,6 +41,7 @@ function checkNow(getWindow) {
 }
 
 function installAndRestart() {
+  try { require('electron').app.isQuitting = true; } catch {}
   autoUpdater.quitAndInstall();
 }
 

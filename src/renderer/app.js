@@ -243,6 +243,7 @@ on('turn-done', () => {
   updateUsageButton();
   if (!$('usage-pop').classList.contains('hidden')) renderUsagePop();
 });
+on('usage-updated', () => updateUsageButton()); // 回合中 assistant 消息带 usage 时实时刷新上下文 %(v0.9.13)
 on('session-activated', () => updateUsageButton());
 
 $('btn-sidebar').onclick = () => $('sidebar').classList.toggle('collapsed');

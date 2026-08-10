@@ -42,7 +42,10 @@ export function setActiveSession(sid) {
   const s = state.sessions.get(sid);
   if (s && !s.ui.replayed) replayHistory(sid);
   updateTopbarForSession(sid);
-  scrollBottom(sid);
+  stickToBottom = true; // 切换会话:回到吸附态并吸底
+  const sbBtn = $('btn-scroll-bottom');
+  if (sbBtn) sbBtn.classList.add('hidden');
+  scrollBottom(sid, { force: true });
   emit('session-activated', sid);
 }
 
@@ -88,6 +91,17 @@ function fmtDur(ms) {
   return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
 }
 
+// 预测进度(v0.9.13):agentic 回合总步数不可预知,用「时间双曲线」逼近——
+// 从 0 起渐近逼近 92%(永不到 100),回合结束补满 100% 后淡出。
+// 参数:半衰期 25s(25 秒到 ~46%,100 秒到 ~74%),对长短回合都有合理的视觉预期。
+const PREDICT_ASYMPTOTE = 92;
+const PREDICT_HALF_MS = 25000;
+
+function predictedPct(turnStart) {
+  const t = Date.now() - (turnStart || Date.now());
+  return Math.min(PREDICT_ASYMPTOTE, Math.round(PREDICT_ASYMPTOTE * t / (t + PREDICT_HALF_MS)));
+}
+
 export function updateTurnStatus() {
   const box = $('turn-status');
   if (!box) return;
@@ -98,11 +112,21 @@ export function updateTurnStatus() {
   let running = 0;
   for (const [, x] of state.sessions) if (x.ui.busy) running++;
   const toks = (s.ui.turnTokens || 0) + (s.ui.curMsgTokens || 0);
+  const action = s.ui.curAction ? ` · ${s.ui.curAction}` : '';
+  const pct = predictedPct(s.ui.turnStart);
   $('turn-status-text').textContent =
-    `${fmtDur(Date.now() - (s.ui.turnStart || Date.now()))} · ${fmtTokens(toks)} tokens · ${running} 个运行中任务`;
+    `${fmtDur(Date.now() - (s.ui.turnStart || Date.now()))} · ${fmtTokens(toks)} tokens · ${running} 个运行中任务${action} · ~${pct}%`;
+  const bar = box.querySelector('.turn-progress-bar');
+  if (bar) bar.style.width = pct + '%';
 }
 
 setInterval(updateTurnStatus, 1000);
+
+// 回合结束:进度条补满 100% 后随状态行一起消失(setBusyUI(false) 已隐藏,这里只复位宽度)
+function resetTurnProgress() {
+  const bar = $('turn-status') && $('turn-status').querySelector('.turn-progress-bar');
+  if (bar) bar.style.width = '0%';
+}
 
 async function replayHistory(sid) {
   const s = state.sessions.get(sid);
@@ -114,11 +138,34 @@ async function replayHistory(sid) {
   finalizeAssistant(s);
   finalizeAigcReplay(s); // 新媒体会话:未完成的历史任务标记中断
   emit('history-replayed', { sid }); // 消息导航条据此重建(v0.9.9)
-  scrollBottom(sid);
+  scrollBottom(sid, { force: true }); // 回放完成强制吸底
 }
 
-function scrollBottom(sid) {
+// 滚动吸附(v0.9.13):用户上翻(拖滚动条/滚轮)即解除吸底,自由浏览上下文;
+// 回到底部附近(80px 内)恢复吸附。流式渲染/工具卡片等只在本就吸底时才跟随,
+// 不再把正在阅读上文的用户强制拉到底部。非吸附态显示「↓ 回到底部」悬浮按钮。
+let stickToBottom = true;
+const STICK_THRESHOLD = 80;
+
+messagesEl().addEventListener('scroll', () => {
+  const el = messagesEl();
+  stickToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
+  const btn = $('btn-scroll-bottom');
+  if (btn) btn.classList.toggle('hidden', stickToBottom);
+}, { passive: true });
+
+const scrollBottomBtn = $('btn-scroll-bottom');
+if (scrollBottomBtn) scrollBottomBtn.onclick = () => {
+  stickToBottom = true;
+  scrollBottomBtn.classList.add('hidden');
+  const el = messagesEl();
+  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+};
+
+// force:用户自己发消息/切换会话/历史回放等场景强制吸底
+function scrollBottom(sid, { force = false } = {}) {
   if (sid !== state.activeSid) return;
+  if (!force && !stickToBottom) return;
   const el = messagesEl();
   el.scrollTop = el.scrollHeight;
 }
@@ -296,7 +343,8 @@ export function addUserMessage(sid, content, uuid) {
   s.ui.logEl.appendChild(msg);
   msg._umsg = { uuid: uuid || null, content }; // msgmenu.js 右键编辑/分支取用
   emit('user-msg-added', { sid });
-  scrollBottom(sid);
+  stickToBottom = true; // 用户发消息(含 aigc 回显):恢复吸附并吸底
+  scrollBottom(sid, { force: true });
   return msg;
 }
 
@@ -781,6 +829,7 @@ export function renderEvent(sid, ev, { replay }) {
       s.ui.turnStart = Date.now();
       s.ui.turnTokens = 0;
       s.ui.curMsgTokens = 0;
+      resetTurnProgress(); // 新回合:预测进度归零
     }
     if (sid === state.activeSid) setBusyUI(s.ui.busy);
     emit('session-status', { sid, busy: s.ui.busy, running: s.ui.running });
@@ -857,7 +906,17 @@ export function renderEvent(sid, ev, { replay }) {
       el.textContent = parts.join(' · ');
       s.ui.logEl.appendChild(el);
     }
-    if (sid === state.activeSid) { setBusyUI(false); updateTopbarForSession(sid); }
+    if (sid === state.activeSid) {
+      // 回合结束:进度补满 100% 短暂停留再隐藏,给「完成」的视觉反馈
+      const bar = $('turn-status') && $('turn-status').querySelector('.turn-progress-bar');
+      if (bar) bar.style.width = '100%';
+      setTimeout(() => {
+        if (s.ui.busy) return; // 350ms 内又来了新回合,不打断
+        setBusyUI(false);
+        updateTopbarForSession(sid);
+        resetTurnProgress();
+      }, 350);
+    }
     emit('session-status', { sid, busy: false, running: s.ui.running });
     emit('turn-done', { sid });
     scrollBottom(sid);
@@ -893,6 +952,7 @@ function handleStreamEvent(s, parentId, ev) {
     return;
   }
   if (type === 'message_stop') {
+    s.ui.msgDeltaCounted = (s.ui.curMsgTokens || 0) > 0; // 本条是否已被流式 usage 计过(v0.9.13)
     s.ui.turnTokens = (s.ui.turnTokens || 0) + (s.ui.curMsgTokens || 0);
     s.ui.curMsgTokens = 0;
     const a = s.ui.currentAssistant;
@@ -904,6 +964,18 @@ function handleStreamEvent(s, parentId, ev) {
 }
 
 function handleAssistantMessage(s, parentId, message, replay) {
+  // token/上下文兜底计数(v0.9.13):部分网关(如 Kimi)流式 message_delta 不带 usage,
+  // 回合状态会一直显示 0 tokens——用 assistant 完整消息的 message.usage 补计;
+  // 流式已计过的(msgDeltaCounted)不重复计。lastUsage 同步刷新,上下文 % 随回合推进。
+  if (!replay && message.usage) {
+    if (message.usage.output_tokens && !s.ui.msgDeltaCounted) {
+      s.ui.turnTokens = (s.ui.turnTokens || 0) + message.usage.output_tokens;
+      if (s.meta.id === state.activeSid) updateTurnStatus();
+    }
+    s.ui.msgDeltaCounted = false;
+    s.ui.lastUsage = message.usage;
+    if (s.meta.id === state.activeSid) emit('usage-updated');
+  }
   const content = message.content || [];
   for (const block of content) {
     if (block.type === 'tool_use') {

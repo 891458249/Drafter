@@ -346,7 +346,7 @@ class Session {
       };
       this._emit(ev, true);
       this._emit({ type: 'ui_status', running: this.running, busy: false });
-      this.m.onTurnDone(this);
+      this.m.onTurnDone(this, ev);
       // /add-dir 在回合中登记:回合结束后重启 query 使目录生效(v0.9.2)
       if (this.needRestart) {
         this.needRestart = false;
@@ -677,9 +677,14 @@ class SessionManager {
 
   setActive(id) { this.activeId = id; }
 
-  onTurnDone(session) {
+  onTurnDone(session, ev) {
+    // 每次回合结束都发系统通知(Windows 右下角 toast,v0.9.13);
+    // 非活跃会话额外打点提醒(此前只对非活跃发通知)
+    const name = session.meta.title || session.meta.cwd || '会话';
+    const dur = ev && ev.duration_ms != null ? ',用时 ' + (ev.duration_ms / 1000).toFixed(1) + 's' : '';
+    const err = !!(ev && ev.is_error);
+    this.notify(err ? '任务结束(出错)' : '任务完成', `${name} 的回合已结束${dur}`);
     if (session.id !== this.activeId) {
-      this.notify('任务完成', (session.meta.title || session.meta.cwd) + ' 的回合已结束');
       this.send('sess:attention', { sid: session.id });
     }
   }

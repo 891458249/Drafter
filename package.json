@@ -1,6 +1,6 @@
 {
   "name": "desktopui",
-  "version": "0.9.12",
+  "version": "0.9.13",
   "description": "A desktop UI for Claude Code",
   "main": "main.js",
   "scripts": {
@@ -34,6 +34,7 @@
       "main.js",
       "preload.js",
       "src/**/*",
+      "build/icon.png",
       "node_modules/**/*"
     ],
     "publish": {

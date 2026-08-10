@@ -237,6 +237,16 @@ html, body {
 .bubble code { font-family: var(--mono); font-size: 12.5px; }
 .bubble :not(pre) > code { background: var(--bg-input); padding: 1px 5px; border-radius: 4px; }
 
+/* 回到底部悬浮按钮(v0.9.13):用户上翻后出现 */
+.scroll-bottom {
+  position: absolute; right: 22px; bottom: 150px; z-index: 30;
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 16px; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,.4);
+}
+.scroll-bottom:hover { color: var(--text); border-color: var(--accent); }
+
 /* 代码卡片(v0.9.12):IDE 风格——头部条(语言标签+复制按钮)+ 着色的代码区 */
 .code-card {
   background: #14120f; border: 1px solid var(--border); border-radius: 8px;
@@ -680,6 +690,7 @@ kbd {
 .turn-status {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 7px;
   padding: 2px 4px 8px;
   font-size: 12px;
@@ -691,6 +702,16 @@ kbd {
   animation: spin-star 1.8s linear infinite;
 }
 @keyframes spin-star { to { transform: rotate(360deg); } }
+#turn-status-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 回合预测进度条(v0.9.13):时间双曲线趋近 92%,结束补满 100% */
+.turn-progress {
+  flex-basis: 100%; height: 3px; border-radius: 2px;
+  background: var(--bg-input); overflow: hidden;
+}
+.turn-progress-bar {
+  height: 100%; width: 0%; border-radius: 2px; background: var(--accent);
+  transition: width .9s ease-out; /* 每秒 +updateTurnStatus 的宽度步进平滑化 */
+}
 
 /* --- 输入框内图标式发送/停止 ---------------------------------------------- */
 .input-wrap { position: relative; }
