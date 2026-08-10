@@ -27,6 +27,7 @@ const title = require('./src/main/title');
 const gems = require('./src/main/gems');
 const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
+const migrations = require('./src/main/migrations');
 
 // 新媒体板块(kind):image/video/audio/model 会话不走 Agent SDK,走 AIGC 任务闭环
 const MEDIA_KINDS = ['image', 'video', 'audio', 'model'];
@@ -171,6 +172,15 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // 数据迁移与自愈(v0.9.17):版本升级后对全部存量会话统一迭代修复
+  // (transcript 迁移/降级、meta 去重等),报告写 userData/logs/migrations.log
+  try {
+    const report = migrations.run(app.getVersion());
+    const fixes = Object.keys(report).filter((k) => !['ts', 'from', 'to', 'migrations'].includes(k));
+    if (fixes.length || report.migrations.length) console.log('[migrations] report:', JSON.stringify(report));
+  } catch (e) {
+    console.error('[migrations] run failed:', e.message);
+  }
   // aigc://<trace_id>/<filename> → <userData>/aigc/<trace_id>/<filename>(防路径穿越)
   protocol.handle('aigc', (req) => {
     try {

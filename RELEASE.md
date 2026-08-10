@@ -31,6 +31,11 @@
 - 状态展示:检查中 → 发现新版本(版本号)→ 下载进度 % → 已就绪(点击重启安装)。
 - 检查失败(无网络、无 Release、开发环境未打包)**静默降级**,不打断使用。
 
+## 数据兼容性规则(v0.9.17 起)
+
+- 更新后首次启动时 `src/main/migrations.js` 会对全部存量会话做自愈(transcript 迁移/降级、meta 去重),报告在 `userData/logs/migrations.log`。
+- **任何破坏性的数据格式变更(store 字段、事件日志结构、transcript 位置假设)必须在 migrations.js 的 `MIGRATIONS` 登记一条版本化迁移**,模板见文件头注释;铁律是只修不删,修不好就降级。
+
 ## 如果仓库将来转为 private
 
 electron-updater 的 github provider 对私有仓库读取 Release 需要 token:

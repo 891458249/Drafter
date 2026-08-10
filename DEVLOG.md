@@ -286,3 +286,12 @@ Git 工作流:
 - **关键障碍**:.code-card 的 overflow:hidden 会让卡片成为滚动容器从而破坏 sticky——去掉;圆角改由头部条(border-radius:7px 7px 0 0)与卡片自身背景承担;头部条背景改不透底实色 #1e1c19,吸顶时下方代码不穿透
 - 纯 CSS 改动,sticky 链路(.bubble/.msg → #messages)无其他 overflow 裁剪
 - npm test 97/97
+
+### v0.9.17(同日):数据迁移/自愈框架——更新后旧会话统一迭代修复
+- **痛点**:每次版本更新后旧会话总会出些问题(resume 卡死、脏数据残留),且都要等用户点开会话才 lazy 兜底,没点到的会话一直是坏的
+- **框架**(src/main/migrations.js,main.js whenReady 最先执行):
+  - **repairs(每次启动幂等自愈)**:①transcript 健康扫描——记录不在当前 cwd 目录就 migrateTranscript 迁移(全盘兜底),全盘皆无则清 sdkSessionId 降级全新会话并记 resumeLostAt(echo 日志仍回放界面历史,会话不再卡死);②prevCwd 与 cwd 相同的残留清理;③会话 meta 按 id 去重
+  - **migrations(按版本一次性数据改写)**:游标存 settings.dataVersion,版本戳只前进不后退;单个迁移失败不影响其他;今后破坏性数据格式变更必须登记一条(模板在文件头注释)
+- **铁律:只修不删**——不删会话/事件日志/transcript;修不好就降级
+- 修复报告写 userData/logs/migrations.log(有实际修复才写)
+- test/migrations.test.js 7 例,npm test 104/104
