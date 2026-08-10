@@ -345,3 +345,9 @@ Git 工作流:
 - **发送侧**(input.js):文本附件只登记 `{name, path}`——＋附件按钮/拖拽有磁盘路径直接用;粘贴内容无路径则落盘 userData/attachments/(新 IPC files:savePasted)再引用;二进制检测改 4KB 采样(files.sampleFile,新 IPC files:sample),不再读全文;发送时内联 `<附件 name path>请用 Read 工具读取</附件>` 引用块
 - **渲染侧**(chat.js renderUserBubble):ATTACH_BLOCK_RE 把附件块(含旧版内联全文的历史消息)折叠成 📄 文件卡片(.file-attach-chip,悬停显示路径)——旧会话的大附件消息同样不再占篇幅
 - npm test 104/104
+
+### v0.9.28(2026-08-10):附件不限大小 + 双击附件卡片打开编辑器查看
+- **不限大小**:图片附件去掉 5MB 上限(readImageBase64);文本附件 v0.9.27 起本就只按路径引用无上限
+- **双击查看**:消息气泡里的 📄 附件卡片(data-path)双击 → emit('open-file') 打开右侧编辑器面板(msgmenu.js dblclick 委托,复用图片双击同一监听);输入框待发区的文件/媒体 chip 同样支持双击打开;无路径的旧消息卡片不可点
+- 编辑器读取上限 2MB→20MB(files.readFile),大附件双击能打开
+- npm test 104/104

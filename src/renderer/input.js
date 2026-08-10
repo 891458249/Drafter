@@ -155,6 +155,11 @@ function renderAttachments() {
       d.innerHTML = `<img src="data:${att.mediaType};base64,${att.data}" alt="" /><button class="rm">✕</button>`;
     }
     d.querySelector('.rm').onclick = () => { state.attachments.splice(i, 1); renderAttachments(); };
+    // 双击文件/媒体卡片:打开编辑器面板查看内容(v0.9.28)
+    if (att.path && (att.kind === 'file' || att.kind === 'media')) {
+      d.title = att.path + '\n双击打开编辑器查看';
+      d.ondblclick = () => emit('open-file', att.path);
+    }
     box.appendChild(d);
   });
 }

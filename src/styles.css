@@ -276,13 +276,15 @@ html, body {
 .bubble a { color: var(--accent); }
 .bubble .file-link { color: var(--accent); cursor: pointer; text-decoration: underline dotted; }
 .user-img-note { font-size: 11px; color: var(--text-dim); }
-/* 文本附件文件卡片(v0.9.27):气泡里只显示文件名,内容不展示(AI 按路径自行 Read) */
+/* 文本附件文件卡片(v0.9.27):气泡里只显示文件名,内容不展示(AI 按路径自行 Read);
+   v0.9.28:双击卡片打开编辑器面板查看内容 */
 .file-attach-chip {
   display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
   border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px;
   font-size: 12px; color: var(--text-dim); background: rgba(255,255,255,.03);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
 }
+.file-attach-chip:hover { border-color: var(--accent); color: var(--text); }
 
 .thinking {
   color: var(--text-dim); font-style: italic;

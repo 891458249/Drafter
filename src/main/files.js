@@ -48,7 +48,8 @@ function readFile(cwd, rel) {
   try {
     const abs = path.isAbsolute(rel) ? rel : path.join(cwd, rel);
     const st = fs.statSync(abs);
-    if (st.size > 2 * 1024 * 1024) return { ok: false, error: '文件超过 2MB,不在编辑器中打开' };
+    // v0.9.28:上限 2MB→20MB(附件不限大小,双击卡片进编辑器查看大文件也要能开)
+    if (st.size > 20 * 1024 * 1024) return { ok: false, error: '文件超过 20MB,不在编辑器中打开' };
     return { ok: true, content: fs.readFileSync(abs, 'utf8'), mtimeMs: st.mtimeMs, path: abs };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -89,6 +90,7 @@ function unwatchFile(key) {
 }
 
 // Read an image file as base64 for chat attachments.
+// v0.9.28:附件不限大小(去掉 5MB 上限)
 function readImageBase64(absPath) {
   try {
     const ext = path.extname(absPath).toLowerCase();
@@ -96,7 +98,6 @@ function readImageBase64(absPath) {
     const mediaType = map[ext];
     if (!mediaType) return { ok: false, error: '不支持的图片格式:' + ext };
     const buf = fs.readFileSync(absPath);
-    if (buf.length > 5 * 1024 * 1024) return { ok: false, error: '图片超过 5MB' };
     return { ok: true, mediaType, data: buf.toString('base64'), name: path.basename(absPath) };
   } catch (e) {
     return { ok: false, error: e.message };

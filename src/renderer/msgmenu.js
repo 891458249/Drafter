@@ -2,7 +2,7 @@
 // - 文本消息右键:复制(有选区复制选区,否则复制整条)/ 引用(markdown 引用块填入输入框)
 // - 图片(用户附件缩略图 .msg-img / 生成产物 .aigc-media)右键:查看 / 复制图片;双击进入查看模式
 // - 用户消息右键(v0.9.9):修改并重新生成(截断其下所有消息)/ 从此消息分支(复制上文为新会话)
-import { $, showCtxMenu } from './state.js';
+import { $, showCtxMenu, emit } from './state.js';
 import { addUserMessage, renderUserBubble, truncateAfter, ensureSession, setActiveSession } from './chat.js';
 import { refreshList } from './sessions-ui.js';
 
@@ -205,6 +205,13 @@ export function init() {
   });
 
   box.addEventListener('dblclick', (e) => {
+    // 文本附件卡片(v0.9.28):双击打开编辑器面板查看内容
+    const chip = e.target.closest && e.target.closest('.file-attach-chip');
+    if (chip && box.contains(chip)) {
+      const p = chip.dataset.path;
+      if (p) emit('open-file', p);
+      return;
+    }
     const img = isMsgImg(e.target);
     if (img && box.contains(img)) openViewer(img.src);
   });

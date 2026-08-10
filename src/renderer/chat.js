@@ -301,7 +301,7 @@ function linkifyPaths(el) {
 const ATTACH_BLOCK_RE = /<附件\s+name="([^"]*)"(?:\s+path="([^"]*)")?\s*>[\s\S]*?<\/附件>/g;
 function collapseAttachBlocks(text) {
   return String(text || '').replace(ATTACH_BLOCK_RE, (_m, name, p) =>
-    `\n\n<div class="file-attach-chip" title="${escapeHtml(p || name)}">📄 ${escapeHtml(name)}</div>\n\n`);
+    `\n\n<div class="file-attach-chip" data-path="${escapeHtml(p || '')}" title="${escapeHtml(p ? p + '\n双击打开编辑器查看' : name)}">📄 ${escapeHtml(name)}</div>\n\n`);
 }
 
 // 渲染用户消息 bubble 内容(addUserMessage 与编辑重生成的重渲染共用)
