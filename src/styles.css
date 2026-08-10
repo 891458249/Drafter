@@ -917,6 +917,14 @@ video.aigc-media { max-height: 360px; }
 }
 .msg-nav-list button:hover { opacity: 1; color: var(--text); }
 .msg-nav-list button.active { opacity: 1; color: var(--text); border-color: var(--accent); }
+/* Dock 式悬停放大(v0.9.14):仅 .mag(内容不溢出、无滚动)时启用;
+   右缘为原点向左放大,JS 按光标距离逐帧计算 scale */
+.msg-nav-list.mag { overflow: visible; }
+.msg-nav-list.mag button {
+  transform-origin: right center;
+  transition: transform .1s ease-out;
+  will-change: transform;
+}
 /* 导航点击定位的闪烁提示 */
 .msg.user.flash .bubble { outline: 2px solid var(--accent); transition: outline .15s ease; }
 /* 消息内联编辑(修改并重新生成) */

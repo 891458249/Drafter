@@ -1,6 +1,6 @@
 // 用户消息缩略导航栏(v0.9.9,类 GPT 右侧条):列出当前会话每条用户消息摘要,
 // 点击滚动定位到对应消息;滚动时联动高亮当前所在位置;无消息时隐藏。
-import { $, on } from './state.js';
+import { $, on, state } from './state.js';
 
 const itemText = (msgEl) => {
   const u = msgEl._umsg;
@@ -32,13 +32,17 @@ function rebuild() {
     b.textContent = itemText(m);
     b.title = b.textContent;
     b.onclick = () => {
-      m.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      // 瞬时跳转(v0.9.14)/平滑滚动按设置项切换(v0.9.15)
+      m.scrollIntoView({ block: 'start', ...(state.instantJump ? {} : { behavior: 'smooth' }) });
       m.classList.add('flash');
       setTimeout(() => m.classList.remove('flash'), 1200);
     };
     m._navItem = b; // 反向引用:滚动联动时按 DOM 序一次遍历
     list.appendChild(b);
   }
+  // 悬停放大(v0.9.14)仅在内容无需滚动时启用:列表 overflow-y:auto 时
+  // transform 放大必被裁切/出横向滚动条(CSS 溢出规则限制),可滚动时退回普通 hover
+  list.classList.toggle('mag', list.scrollHeight <= list.clientHeight + 1);
   requestAnimationFrame(markActive);
 }
 
@@ -74,5 +78,24 @@ export function init() {
     if (ticking) return;
     ticking = true;
     requestAnimationFrame(() => { ticking = false; markActive(); });
+  });
+  // Dock 式悬停放大(v0.9.14):光标所在项放大最多,邻近项按垂直距离二次衰减,
+  // 右缘为原点向左扩(导航条贴右侧,向左有聊天区空间);离开列表全部复位。
+  // 监听挂在容器上,rebuild 重建子项不影响。
+  const list = $('msg-nav').querySelector('.msg-nav-list');
+  const MAG_RADIUS = 80; // 影响半径(px)
+  const MAG_BOOST = 0.35; // 中心项最大放大到 1.35x
+  list.addEventListener('mousemove', (e) => {
+    if (!list.classList.contains('mag')) return;
+    for (const b of list.children) {
+      const r = b.getBoundingClientRect();
+      const d = Math.abs(e.clientY - (r.top + r.height / 2));
+      const t = Math.max(0, 1 - d / MAG_RADIUS);
+      const s = 1 + MAG_BOOST * t * t;
+      b.style.transform = s > 1.02 ? `scale(${s.toFixed(3)})` : '';
+    }
+  });
+  list.addEventListener('mouseleave', () => {
+    for (const b of list.children) b.style.transform = '';
   });
 }

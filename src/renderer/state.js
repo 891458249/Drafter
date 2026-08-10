@@ -13,6 +13,7 @@ export const state = {
   attachments: [],       // 待发送附件:image {mediaType, data(base64)} / file 文本 / media {mediaKind, path, size}
   diffComments: [],      // [{file, line, side, text}]
   gems: [],              // Gem 自定义助手缓存(v0.9.11),gems.js 负责刷新
+  instantJump: true,     // 导航点击/回到底部瞬时跳转(v0.9.15);false=平滑滚动,boot 时从设置载入
 };
 
 export const $ = (id) => document.getElementById(id);

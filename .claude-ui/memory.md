@@ -21,4 +21,6 @@
 - 2026-08-07 v0.9.13 同批 3(未 commit):进度条升级为预测式——时间双曲线 predictedPct=92·t/(t+25000) 渐近 92%(25s~46%,100s~74%),bar 改 width+transition 驱动;result 时补满 100% 停 350ms 再隐藏(busy 重入不隐藏);状态行尾部加 ~N% 量化。npm test 97/97。
 - 2026-08-07 v0.9.13 同批 4(未 commit):回合结束每次都发 Windows 右下角 toast(sessions.js onTurnDone 去掉 activeId 限制,标题区分出错,正文带用时);非活跃会话仍额外打点。npm test 97/97。
 - 2026-08-07 v0.9.13 同批 5(未 commit):系统托盘驻留——close 拦截 hide(app.isQuitting/darwin 除外),托盘左键唤出/右键菜单「显示/退出」;坑:updater.installAndRestart 必须先置 app.isQuitting 否则关窗拦截挡住自动更新;second-instance 改 showMainWindow;build/icon.png 加入打包 files;cleanup() 幂等复用。npm test 97/97。
+- 2026-08-10 v0.9.13 已发布:commit 7afdbeb 已 push;GitHub Release v0.9.13(id 367658671)已上传 exe+blockmap+latest.yml。发布脚本 .claude-ui/release-0.9.13.js(未入库)。顺带把 docs/mobile-remote-plan.md 一并入库了。
+- 2026-08-10 v0.9.14(未 commit):消息导航条 Dock 式悬停放大(msgnav.js mousemove 按光标距离二次衰减 scale,最大 1.35x,transform-origin right;仅内容不溢出时启用 .mag,可滚动时退回普通 hover——overflow-y:auto 时 transform 放大必被裁切)。npm test 97/97。
 - 2026-08-10 移动端远程控制策划案已产出:docs/mobile-remote-plan.md。核心思路:手机端=第二个渲染端,新增 remote-server.js 做现有 IPC 的 WebSocket 翻译;一期局域网直连+PWA(扫码配对/TLS/远程强制审批),二期云端中继或 Tailscale 解决异地;1 人 3-4 周到 MVP,建议作为 v1.0.0 旗舰特性。

@@ -74,6 +74,11 @@ $('update-chip').onclick = () => {
 // 项目目录不再进门,等用户在会话里按需添加(＋文件夹 / ⋯菜单)。
 // ---------------------------------------------------------------------------
 async function boot() {
+  // 设置项(v0.9.15):瞬时跳转定位(默认开)
+  try {
+    const st = await api.getStore();
+    if (st && st.settings && st.settings.instantJump === false) state.instantJump = false;
+  } catch {}
   populateModelSelects(); // 按活跃 Key 填充模型下拉(v0.7.0)
   const sdk = await api.sdkStatus();
   if (!sdk.ok) {
@@ -277,6 +282,9 @@ for (const t of document.querySelectorAll('.ptab')) {
 // ---------------------------------------------------------------------------
 $('btn-more').onclick = (e) => {
   e.stopPropagation();
+  // 打开时刷新「瞬时跳转定位」勾选态(v0.9.15)
+  const ij = document.querySelector('#more-menu [data-act="instantjump"]');
+  if (ij) ij.textContent = (state.instantJump ? '✓ ' : '　') + '⚡ 瞬时跳转定位';
   $('more-menu').classList.toggle('hidden');
 };
 document.addEventListener('click', () => $('more-menu').classList.add('hidden'));
@@ -295,6 +303,10 @@ $('more-menu').onclick = async (e) => {
   }
   if (act === 'logs') api.openLogs();
   if (act === 'perms') openPermsModal();
+  if (act === 'instantjump') { // 消息导航/回到底部:瞬时 ↔ 平滑
+    state.instantJump = !state.instantJump;
+    api.setSetting('instantJump', state.instantJump);
+  }
 };
 
 // ---------------------------------------------------------------------------

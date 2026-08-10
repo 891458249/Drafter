@@ -261,3 +261,15 @@ Git 工作流:
 - **托盘**:build/icon.png 缩放到 16px 建 Tray;左键单击唤出;右键菜单「显示 DeskTopUI / 退出」;退出走 app.isQuitting=true + cleanup()(幂等:stopAll/closeAll/scheduler.stop)+ app.quit()
 - **配套**:updater.installAndRestart 先置 app.isQuitting(否则关窗拦截挡住自动更新重启);before-quit 统一置 isQuitting+cleanup 覆盖所有退出路径;second-instance 改为 showMainWindow(应用在托盘隐藏时二次启动能唤出);build/icon.png 加入打包 files
 - npm test 97/97
+
+### v0.9.14(2026-08-10):消息导航条 Dock 式悬停放大
+- **效果**:鼠标在右侧消息缩略导航上滑动时,光标所在项放大最多(1.35x),邻近项按垂直距离二次衰减(影响半径 80px),右缘为原点向左扩(利用聊天区空间);离开列表全部复位
+- **启用条件**:仅导航内容无需滚动时(rebuild 时测量,挂 .mag class);可滚动时 transform 放大必被 overflow 裁切/出横向滚动条(CSS 规则限制),退回普通 hover 高亮
+- 监听挂在 .msg-nav-list 容器上,rebuild 重建子项不影响
+- **点击定位改为瞬时跳转**:scrollIntoView 去掉 smooth 动画,长会话不再慢速滚动晃眼
+- npm test 97/97
+
+### v0.9.15(2026-08-10):瞬时跳转设置项
+- **右上角 ⋯ 菜单新增「⚡ 瞬时跳转定位」勾选**(默认开,保持 v0.9.14 行为):作用于消息导航点击定位与「回到底部」按钮;关闭则恢复平滑滚动
+- state.instantJump(boot 时 api.getStore 读 settings.instantJump);菜单每次打开刷新 ✓ 勾选态;切换即 api.setSetting 持久化
+- npm test 97/97

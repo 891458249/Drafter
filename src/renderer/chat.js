@@ -159,7 +159,9 @@ if (scrollBottomBtn) scrollBottomBtn.onclick = () => {
   stickToBottom = true;
   scrollBottomBtn.classList.add('hidden');
   const el = messagesEl();
-  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  // 瞬时/平滑按设置项(v0.9.15)
+  if (state.instantJump) el.scrollTop = el.scrollHeight;
+  else el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
 };
 
 // force:用户自己发消息/切换会话/历史回放等场景强制吸底
