@@ -84,14 +84,14 @@ export function init() {
     ticking = true;
     requestAnimationFrame(() => { ticking = false; markActive(); });
   });
-  // Dock 式悬停展开(v0.9.19 调优):槽位布局尺寸恒定(26×4),距离一律按槽位中心
+  // Dock 式悬停展开(v0.9.19 调优):槽位布局尺寸恒定(26×6,v0.9.20 加厚防误触),距离一律按槽位中心
   // 测量——槽位在悬停期间不移动,因此无布局反馈抖动、上下衰减严格对称。
   // 对比强化:衰减指数 1.5(两侧项更快退回小横杠)+ 中心项最大放到 1.15x 并打
   // .hot 高亮(主题色描边/底色),同时远处项压暗到 0.35——中心项明显更醒目。
   // 只改 transform/opacity,不触发列表重排。离开列表全部复位。
   const list = $('msg-nav').querySelector('.msg-nav-list');
   const MAG_RADIUS = 70;          // 影响半径(px)
-  const SX0 = 26 / 190, SY0 = 4 / 22; // 横杠缩放系数(与 CSS 默认值一致)
+  const SX0 = 26 / 190, SY0 = 6 / 22; // 横杠缩放系数(与 CSS 默认值一致,v0.9.20 横杠 6px 厚)
   const SMAX = 1.15;              // 中心项最大放大倍数
   const resetItem = (b) => { b.style.transform = ''; b.style.zIndex = ''; b.style.opacity = ''; b.classList.remove('hot'); };
   list.addEventListener('mousemove', (e) => {

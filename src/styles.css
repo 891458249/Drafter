@@ -910,7 +910,7 @@ video.aigc-media { max-height: 360px; }
   display: flex; align-items: center; z-index: 40; pointer-events: none; /* v0.9.19:列表垂直居中 */
 }
 .msg-nav-list {
-  display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-end; /* v0.9.20:间距 6→10 防误触 */
   max-height: 100%; overflow-y: auto; width: 132px; pointer-events: auto;
   scrollbar-width: thin; padding: 2px;
 }
@@ -923,7 +923,7 @@ video.aigc-media { max-height: 360px; }
    槽位(.msg-nav-slot)布局尺寸恒定 26×4,按钮全尺寸(190×22)绝对定位于槽内、
    默认 transform 缩成横杠;悬停放大只改 transform,不推挤邻近项——
    上下衰减严格对称,修 v0.9.16 行内改 width/height 导致的「上下缩放不平均」 */
-.msg-nav-slot { position: relative; width: 26px; height: 4px; flex-shrink: 0; }
+.msg-nav-slot { position: relative; width: 26px; height: 6px; flex-shrink: 0; } /* v0.9.20:横杠 4→6px 厚,更好点 */
 .msg-nav-slot button {
   position: absolute; right: 0; top: 50%; margin-top: -11px; /* 22/2,垂直居中于槽位 */
   width: 190px; height: 22px; padding: 0 8px;
@@ -931,7 +931,7 @@ video.aigc-media { max-height: 360px; }
   color: var(--text-dim); font-size: 11px; line-height: 20px; cursor: pointer; opacity: .6;
   text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transform-origin: right center;
-  transform: scale(0.137, 0.182); /* 190×22 → 26×4 横杠 */
+  transform: scale(0.137, 0.273); /* 190×22 → 26×6 横杠 */
   transition: transform .12s ease, opacity .12s ease;
 }
 .msg-nav-slot button.active { opacity: 1; border-color: var(--accent); background: var(--accent-bg); }
