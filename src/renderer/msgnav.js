@@ -48,7 +48,16 @@ function rebuild() {
   // 悬停放大(v0.9.14)仅在内容无需滚动时启用:列表 overflow-y:auto 时
   // transform 放大必被裁切/出横向滚动条(CSS 溢出规则限制),可滚动时退回普通 hover
   list.classList.toggle('mag', list.scrollHeight <= list.clientHeight + 1);
+  updateFade();
   requestAnimationFrame(markActive);
+}
+
+// 边界淡出(v0.9.23):滚动未探到的一侧保持淡出,探到边界(顶/底)即去除该侧
+function updateFade() {
+  const list = $('msg-nav').querySelector('.msg-nav-list');
+  const max = list.scrollHeight - list.clientHeight;
+  list.classList.toggle('at-top', list.scrollTop <= 1);
+  list.classList.toggle('at-bottom', list.scrollTop >= max - 1);
 }
 
 // 滚动联动:视口参考线(顶部偏下)之上最后一条用户消息 = 当前位置
@@ -125,4 +134,6 @@ export function init() {
   list.addEventListener('mouseleave', () => {
     for (const slot of list.children) resetItem(slot.firstChild);
   });
+  // 边界淡出维护(v0.9.23):代理滚动/滚轮都会触发 scroll,据 scrollTop 刷新
+  list.addEventListener('scroll', updateFade);
 }

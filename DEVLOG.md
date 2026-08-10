@@ -318,3 +318,8 @@ Git 工作流:
 - **悬停位置 = 总列表相应位置**:非 mag(装不下)时 mousemove 按光标在小窗内的纵向比例直接代理 scrollTop(scrollTop = ratio·(scrollHeight-clientHeight),数学上光标所指恰为整体同一比例处),滚动条隐藏(scrollbar-width:none),上下淡出保留表示省略;滚轮滚动仍可用
 - mag(装得下)时维持 Dock 放大不变
 - npm test 104/104
+
+### v0.9.23(2026-08-10):回撤 v0.9.22 + 边界淡出分侧优化
+- **回撤 v0.9.22**(git revert 9f49735):整条 rail 悬停区 + 小窗跟随光标方案回滚,恢复 v0.9.21 的「居中小窗 + 窗内比例代理滚动」
+- **边界淡出分侧**:非 mag 时按 scrollTop 维护 at-top/at-bottom class——滚动未探到的一侧保持淡出,探到顶/底即去除该侧淡出(此前上下两侧恒定淡出,探到底了还淡出不合理);scroll 监听驱动,代理滚动/滚轮都覆盖
+- npm test 104/104

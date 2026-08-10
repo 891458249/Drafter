@@ -916,11 +916,22 @@ video.aigc-media { max-height: 360px; }
   max-height: 34%; overflow-y: auto; width: 132px; pointer-events: auto;
   scrollbar-width: none; padding: 2px;
 }
-/* v0.9.19:内容溢出(消息太多装不下)时上下边缘淡出,表示「两侧还有省略的」 */
+/* v0.9.19:内容溢出(消息太多装不下)时上下边缘淡出,表示「两侧还有省略的」;
+   v0.9.23 起按滚动位置分侧——未探到边界的一侧保持淡出,探到边界即去除该侧
+   (at-top/at-bottom 由 msgnav.js 滚动监听维护) */
 .msg-nav-list:not(.mag) {
   mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
 }
+.msg-nav-list:not(.mag).at-top { /* 已到顶:上侧不再淡出 */
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%);
+}
+.msg-nav-list:not(.mag).at-bottom { /* 已到底:下侧不再淡出 */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 100%);
+}
+.msg-nav-list:not(.mag).at-top.at-bottom { mask-image: none; -webkit-mask-image: none; }
 /* 默认形态:一条条小横杠(类 GPT)。v0.9.18 起改为「槽位 + transform」结构:
    槽位(.msg-nav-slot)布局尺寸恒定 26×4,按钮全尺寸(190×22)绝对定位于槽内、
    默认 transform 缩成横杠;悬停放大只改 transform,不推挤邻近项——

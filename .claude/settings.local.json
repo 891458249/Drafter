@@ -10,7 +10,8 @@
       "Bash(node --test test/gems.test.js)",
       "Bash",
       "Bash(node -e \"console.log\\('icon exists'\\)\")",
-      "PowerShell(npm test 2>&1)"
+      "PowerShell(npm test 2>&1)",
+      "PowerShell(git revert --no-edit 9f49735)"
     ]
   }
 }
