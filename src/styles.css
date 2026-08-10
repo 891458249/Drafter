@@ -914,33 +914,22 @@ video.aigc-media { max-height: 360px; }
   pointer-events: auto;
 }
 .msg-nav-list {
-  display: flex; flex-direction: column; gap: 10px; align-items: flex-end; /* v0.9.20:间距 6→10 防误触 */
-  /* v0.9.21:装不下时收成居中的小窗(约为会话区 1/3 高),不再占满整条;
-     滚动由悬停位置代理(msgnav.js),隐藏滚动条 */
-  max-height: 34%; overflow-y: auto; width: 132px; pointer-events: auto;
+  display: flex; flex-direction: column; align-items: flex-end;
+  /* v0.9.27:密度自适应——槽距/横杠厚度由 msgnav.js 按消息数写进 CSS 变量
+     (--pitch 槽距,--bar-h 横杠厚,--bar-k 横杠纵向缩放),消息多时等比压缩、
+     所有项始终全部可见,Dock 悬停放大在任何数量下都可用(修「消息过多显示不正确」);
+     仅极端数量(压到最小槽距仍装不下)才退回可滚动小窗(滚动由悬停位置代理,隐藏滚动条) */
+  gap: calc(var(--pitch, 16px) - var(--bar-h, 6px));
+  max-height: 100%; overflow-y: auto; width: 132px; pointer-events: auto;
   scrollbar-width: none; padding: 2px;
 }
-/* v0.9.19:内容溢出(消息太多装不下)时上下边缘淡出,表示「两侧还有省略的」;
-   v0.9.23 起按滚动位置分侧——未探到边界的一侧保持淡出,探到边界即去除该侧
-   (at-top/at-bottom 由 msgnav.js 滚动监听维护) */
-.msg-nav-list:not(.mag) {
-  mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
-}
-.msg-nav-list:not(.mag).at-top { /* 已到顶:上侧不再淡出 */
-  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%);
-}
-.msg-nav-list:not(.mag).at-bottom { /* 已到底:下侧不再淡出 */
-  mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 100%);
-}
-.msg-nav-list:not(.mag).at-top.at-bottom { mask-image: none; -webkit-mask-image: none; }
+/* 边界渐出(v0.9.27):不再用整列表 mask 遮罩,改为 msgnav.js 按槽位中心到
+   可视窗口边缘的距离逐项改按钮自身 opacity(消息按键自身渐淡,而非整体遮罩) */
 /* 默认形态:一条条小横杠(类 GPT)。v0.9.18 起改为「槽位 + transform」结构:
    槽位(.msg-nav-slot)布局尺寸恒定 26×4,按钮全尺寸(190×22)绝对定位于槽内、
    默认 transform 缩成横杠;悬停放大只改 transform,不推挤邻近项——
    上下衰减严格对称,修 v0.9.16 行内改 width/height 导致的「上下缩放不平均」 */
-.msg-nav-slot { position: relative; width: 26px; height: 6px; flex-shrink: 0; } /* v0.9.20:横杠 4→6px 厚,更好点 */
+.msg-nav-slot { position: relative; width: 26px; height: var(--bar-h, 6px); flex-shrink: 0; } /* v0.9.20:横杠 4→6px 厚;v0.9.27:厚度随密度变量收缩 */
 .msg-nav-slot button {
   position: absolute; right: 0; top: 50%; margin-top: -11px; /* 22/2,垂直居中于槽位 */
   width: 190px; height: 22px; padding: 0 8px;
@@ -948,7 +937,7 @@ video.aigc-media { max-height: 360px; }
   color: var(--text-dim); font-size: 11px; line-height: 20px; cursor: pointer; opacity: .6;
   text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transform-origin: right center;
-  transform: scale(0.137, 0.273); /* 190×22 → 26×6 横杠 */
+  transform: scale(0.137, var(--bar-k, 0.273)); /* 190×22 → 26×barH 横杠(v0.9.27 厚度变量化) */
   transition: transform .12s ease, opacity .12s ease;
 }
 .msg-nav-slot button.active { opacity: 1; border-color: var(--accent); background: var(--accent-bg); }

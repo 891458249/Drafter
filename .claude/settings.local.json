@@ -11,7 +11,9 @@
       "Bash",
       "Bash(node -e \"console.log\\('icon exists'\\)\")",
       "PowerShell(npm test 2>&1)",
-      "PowerShell(git revert --no-edit 9f49735)"
+      "PowerShell(git revert --no-edit 9f49735)",
+      "PowerShell(git add -A)",
+      "PowerShell(git push)"
     ]
   }
 }

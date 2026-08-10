@@ -45,19 +45,60 @@ function rebuild() {
     slot.appendChild(b);
     list.appendChild(slot);
   }
-  // 悬停放大(v0.9.14)仅在内容无需滚动时启用:列表 overflow-y:auto 时
-  // transform 放大必被裁切/出横向滚动条(CSS 溢出规则限制),可滚动时退回普通 hover
-  list.classList.toggle('mag', list.scrollHeight <= list.clientHeight + 1);
+  // v0.9.27:密度自适应——消息不多时槽距 16px/横杠 6px(同 v0.9.20),装不下时
+  // 按比例压缩槽距与横杠厚度,让所有项始终全部可见、Dock 悬停放大始终可用
+  // (修「消息过多时显示不正确」:旧方案把列表收成 34% 高的小窗+悬停代理滚动,
+  // 展开回退 scale(0.674,1) 被遮罩/裁切,与正常会话效果不一致)。
+  // 仅在极端数量(压缩到最小槽距仍装不下)时才退回可滚动小窗。
+  updateDensity();
   updateFade();
   requestAnimationFrame(markActive);
 }
 
-// 边界淡出(v0.9.23):滚动未探到的一侧保持淡出,探到边界(顶/底)即去除该侧
+// 密度自适应:全部项装进 rail 高度内;装不下则等比压缩槽距(横杠随之变薄)
+function updateDensity() {
+  const rail = $('msg-nav');
+  const list = rail.querySelector('.msg-nav-list');
+  const n = list.children.length;
+  if (!n || rail.classList.contains('hidden')) return;
+  const avail = rail.clientHeight - 4; // list padding 2px×2
+  const PITCH0 = 16, BAR0 = 6, MIN_PITCH = 3;
+  let pitch = PITCH0;
+  if (n * PITCH0 > avail) pitch = Math.max(MIN_PITCH, Math.floor(avail / n));
+  const barH = Math.min(BAR0, Math.max(2, pitch - 2));
+  list.style.setProperty('--pitch', pitch + 'px');
+  list.style.setProperty('--bar-h', barH + 'px');
+  list.style.setProperty('--bar-k', (barH / 22).toFixed(3)); // 横杠纵向缩放系数(按钮高 22px)
+  // mag(=Dock 悬停放大)仅在内容无需滚动时启用:overflow-y:auto 时
+  // transform 放大必被裁切/出横向滚动条(CSS 溢出规则限制)
+  list.classList.toggle('mag', n * pitch <= avail + 1);
+}
+
+// 边界渐出(v0.9.27 重写):不给整列表加 mask 遮罩,而是按各槽位中心距列表可视
+// 窗口上/下缘的距离,逐项改变按钮自身的 opacity——靠近边缘的项自身渐淡,
+// 未探到边界的一侧自然渐出,探到顶/底即该侧恢复全亮(滚动监听驱动,代理滚动覆盖)
 function updateFade() {
   const list = $('msg-nav').querySelector('.msg-nav-list');
-  const max = list.scrollHeight - list.clientHeight;
-  list.classList.toggle('at-top', list.scrollTop <= 1);
-  list.classList.toggle('at-bottom', list.scrollTop >= max - 1);
+  const mag = list.classList.contains('mag');
+  const lr = list.getBoundingClientRect();
+  const FADE = 28; // 渐出区高度(px)
+  for (const slot of list.children) {
+    const b = slot.firstChild;
+    if (mag) {
+      // mag 态无滚动不需渐出;只清非 mag 残留的渐出透明度,不碰 Dock 悬停写的
+      if (b._fade != null) { b._fade = null; b.style.opacity = ''; }
+      continue;
+    }
+    const r = slot.getBoundingClientRect(); // 槽位不动,悬停/滚动期间测量稳定
+    const c = r.top + r.height / 2;
+    let f = 1;
+    if (c < lr.top + FADE) f = (c - lr.top) / FADE;
+    else if (c > lr.bottom - FADE) f = (lr.bottom - c) / FADE;
+    f = Math.min(1, Math.max(0, f));
+    const base = b.classList.contains('active') || b.matches(':hover') ? 1 : 0.6;
+    b._fade = f;
+    b.style.opacity = (base * f).toFixed(2);
+  }
 }
 
 // 滚动联动:视口参考线(顶部偏下)之上最后一条用户消息 = 当前位置
@@ -74,6 +115,7 @@ function markActive() {
   }
   const first = navBtns()[0] || null;
   for (const b of navBtns()) b.classList.toggle('active', b === (current || first));
+  updateFade(); // active 基准透明度 0.6→1,渐出按新基准重算
 }
 
 export function init() {
@@ -106,10 +148,12 @@ export function init() {
   // ③滚轮对导航栏禁用(wheel preventDefault),只允许悬停代理滚动。
   const rail = $('msg-nav');
   const list = rail.querySelector('.msg-nav-list');
-  const MAG_RADIUS = 70;          // 影响半径(px)
-  const SX0 = 26 / 190, SY0 = 6 / 22; // 横杠缩放系数(与 CSS 默认值一致,v0.9.20 横杠 6px 厚)
-  const SMAX = 1.15;              // 中心项最大放大倍数
-  const PITCH = 16;               // 槽位 6px + 间距 10px(v0.9.20)
+  const SX0 = 26 / 190;             // 横杠横向缩放系数(槽宽 26px / 按钮宽 190px)
+  const SMAX = 1.15;                // 中心项最大放大倍数
+  // v0.9.27:槽距/横杠厚度/感应半径随密度自适应(见 updateDensity),从 CSS 变量回读
+  const curPitch = () => parseFloat(list.style.getPropertyValue('--pitch')) || 16;
+  const curSy0 = () => (parseFloat(list.style.getPropertyValue('--bar-h')) || 6) / 22;
+  const curRadius = () => Math.max(40, curPitch() * 4.375); // 槽距 16 → 70px(同旧常量)
   const resetItem = (b) => { b.style.transform = ''; b.style.zIndex = ''; b.style.opacity = ''; b.classList.remove('hot'); };
   list.addEventListener('wheel', (e) => e.preventDefault(), { passive: false }); // ③
   rail.addEventListener('mousemove', (e) => {
@@ -120,10 +164,10 @@ export function init() {
     if (!list.classList.contains('mag')) {
       const lr = list.getBoundingClientRect();
       const ratio = Math.min(1, Math.max(0, (e.clientY - lr.top) / lr.height));
-      // v0.9.24:按项距 16px 吸附取整——连续值会让窗口上下边缘的项只显示半条,
+      // v0.9.24:按槽距吸附取整——连续值会让窗口上下边缘的项只显示半条,
       // 吸附后边缘项要么完整显示要么完整隐入淡出区
       const raw = ratio * (list.scrollHeight - list.clientHeight);
-      list.scrollTop = Math.round(raw / PITCH) * PITCH;
+      list.scrollTop = Math.round(raw / curPitch()) * curPitch();
       return;
     }
     // ② 边缘钳制:光标在上缘之上 → 作用于首槽位中心(首项满放大);下缘同理
@@ -132,6 +176,7 @@ export function init() {
     const fr = slots[0].getBoundingClientRect();
     const br = slots[slots.length - 1].getBoundingClientRect();
     const cy = Math.min(br.top + br.height / 2, Math.max(fr.top + fr.height / 2, e.clientY));
+    const MAG_RADIUS = curRadius(), SY0 = curSy0();
     let hot = null, hotK = 0;
     for (const slot of slots) {
       const b = slot.firstChild;
@@ -155,4 +200,6 @@ export function init() {
   });
   // 边界淡出维护(v0.9.23):代理滚动触发 scroll,据 scrollTop 刷新
   list.addEventListener('scroll', updateFade);
+  // v0.9.27:窗口尺寸变化 → rail 高度变 → 重算槽距密度
+  window.addEventListener('resize', () => { updateDensity(); updateFade(); });
 }
