@@ -351,3 +351,10 @@ Git 工作流:
 - **双击查看**:消息气泡里的 📄 附件卡片(data-path)双击 → emit('open-file') 打开右侧编辑器面板(msgmenu.js dblclick 委托,复用图片双击同一监听);输入框待发区的文件/媒体 chip 同样支持双击打开;无路径的旧消息卡片不可点
 - 编辑器读取上限 2MB→20MB(files.readFile),大附件双击能打开
 - npm test 104/104
+
+### v0.9.29(2026-08-10):彻底修「附件被截断/乱码」严重 BUG
+- **根因 1(AI 侧截断)**:附件引用块只让 AI「去 Read」,而 Read 默认每次只返回前 2000 行——长文件 AI 读个开头就回答,用户感知即「附件被截断」。引用块改为显式指令:必须用 offset/limit 分段读完整个文件,禁止只读开头
+- **根因 2(编辑器截断)**:files.readFile 仍有 20MB 上限 → 双击附件卡片看大文件被拒。上限彻底移除(用户明确:不管多长禁止截断)
+- **根因 3(乱码/误判)**:采样与编辑器读取按 UTF-8 硬解,GBK/ANSI 编码的代码文件(中文 Windows 常见)解出 � → 被判二进制拒收、打开乱码;粘贴流 UTF-16 也乱码。新增 files.decodeBuffer:BOM(UTF-8/16LE/16BE)→ 严格 UTF-8 → GBK 兜底;sampleFile/readFile 与粘贴流全部接入
+- **粘贴落盘补二进制校验**:savePastedAttachment 落盘前按 �/NUL/控制字符比例拒收真实二进制(此前校验在被删的 renderer 分支里丢失)
+- test/file-decode.test.js 5 例(UTF-8/BOM/GBK/UTF-16LE/二进制),npm test 109/109

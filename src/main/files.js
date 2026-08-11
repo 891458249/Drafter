@@ -44,13 +44,33 @@ function walk(root, limit) {
   return out;
 }
 
+// 文本解码(v0.9.29,修乱码/误判):先认 BOM(UTF-8/16LE/16BE),无 BOM 严格校验
+// UTF-8,失败则按 GBK 解码(中文 Windows 的代码文件常是 ANSI/GBK,按 UTF-8 硬解
+// 会产生 � → 二进制误判拒收 + 编辑器乱码);GBK 不支持时兜底回 UTF-8。
+function decodeBuffer(buf) {
+  if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+    return buf.toString('utf8', 3);
+  }
+  if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
+    return new TextDecoder('utf-16le').decode(buf.subarray(2));
+  }
+  if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
+    return new TextDecoder('utf-16be').decode(buf.subarray(2));
+  }
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buf);
+    return buf.toString('utf8');
+  } catch {
+    try { return new TextDecoder('gbk').decode(buf); } catch { return buf.toString('utf8'); }
+  }
+}
+
 function readFile(cwd, rel) {
   try {
     const abs = path.isAbsolute(rel) ? rel : path.join(cwd, rel);
     const st = fs.statSync(abs);
-    // v0.9.28:上限 2MB→20MB(附件不限大小,双击卡片进编辑器查看大文件也要能开)
-    if (st.size > 20 * 1024 * 1024) return { ok: false, error: '文件超过 20MB,不在编辑器中打开' };
-    return { ok: true, content: fs.readFileSync(abs, 'utf8'), mtimeMs: st.mtimeMs, path: abs };
+    // v0.9.29:不再设大小上限(用户明确要求:不管多长都禁止截断)
+    return { ok: true, content: decodeBuffer(fs.readFileSync(abs)), mtimeMs: st.mtimeMs, path: abs };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -114,7 +134,8 @@ function statFile(absPath) {
   }
 }
 
-// 文本附件按路径引用(v0.9.27):只采样前几 KB 供二进制检测,不读全文
+// 文本附件按路径引用(v0.9.27):只采样前几 KB 供二进制检测,不读全文;
+// v0.9.29:采样经 decodeBuffer 解码(GBK 文件不再被误判为二进制拒收)
 function sampleFile(absPath, bytes = 4096) {
   try {
     const fd = fs.openSync(absPath, 'r');
@@ -122,7 +143,7 @@ function sampleFile(absPath, bytes = 4096) {
       const buf = Buffer.alloc(bytes);
       const n = fs.readSync(fd, buf, 0, bytes, 0);
       const st = fs.statSync(absPath);
-      return { ok: true, sample: buf.toString('utf8', 0, n), size: st.size };
+      return { ok: true, sample: decodeBuffer(buf.subarray(0, n)), size: st.size };
     } finally {
       fs.closeSync(fd);
     }
@@ -131,9 +152,15 @@ function sampleFile(absPath, bytes = 4096) {
   }
 }
 
-// 粘贴的文本没有磁盘路径:落盘到 userData/attachments/ 供 AI 按路径自行读取
+// 粘贴的文本没有磁盘路径:落盘到 userData/attachments/ 供 AI 按路径自行读取;
+// v0.9.29:落盘前做二进制校验(含 �/NUL 或控制字符超 2% 判定为二进制,拒收)
 function savePastedAttachment(userDataDir, name, content) {
   try {
+    const sample = String(content || '').slice(0, 2000);
+    if (sample.includes('�') || sample.includes('\0')
+        || ((sample.match(/[\x00-\x08\x0e-\x1f]/g) || []).length >= sample.length * 0.02)) {
+      return { ok: false, error: `不支持的二进制文件:${name}(附件支持图片、文本、音频/视频/3D 文件)` };
+    }
     const dir = path.join(userDataDir, 'attachments');
     fs.mkdirSync(dir, { recursive: true });
     const safe = String(name || 'pasted.txt').replace(/[<>:"|?*\\/]/g, '_').slice(-80);
@@ -145,4 +172,4 @@ function savePastedAttachment(userDataDir, name, content) {
   }
 }
 
-module.exports = { listFiles, readFile, saveFile, watchFile, unwatchFile, readImageBase64, statFile, sampleFile, savePastedAttachment };
+module.exports = { listFiles, readFile, saveFile, watchFile, unwatchFile, readImageBase64, statFile, sampleFile, savePastedAttachment, decodeBuffer };

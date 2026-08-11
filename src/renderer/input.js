@@ -28,12 +28,13 @@ export async function sendMessage() {
     const images = state.attachments.filter((a) => a.kind === 'image');
     const media = state.attachments.filter((a) => a.kind === 'media');
     const files = state.attachments.filter((a) => a.kind === 'file');
-    // 文本附件只按路径引用(v0.9.27):内容不内联、UI 只显示文件卡片,
-    // 由 AI 用 Read 工具按路径自行查看(大文件不再撑爆 UI 篇幅)
+    // 文本附件只按路径引用(v0.9.27):内容不内联、UI 只显示文件卡片;
+    // v0.9.29:显式指示 AI 分段读完(Read 默认只读前 2000 行,长文件只读开头
+    // 就回答 = 用户感知的「附件被截断」,属严重 BUG 修复)
     let fullText = text || '';
     for (const f of files) {
       if (f.path) {
-        fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}" path="${f.path}">内容未内联,请使用 Read 工具读取该路径查看文件内容</附件>`;
+        fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}" path="${f.path}">内容未内联,请使用 Read 工具读取该文件。重要:Read 每次默认只返回前 2000 行——若文件较长,必须用 offset/limit 参数分段继续读取,直到覆盖全部内容,禁止只读开头就作答。</附件>`;
       } else {
         // 兜底:无路径的旧形态(理论上 v0.9.27 起不再产生)
         fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}">\n${f.text}\n</附件>`;
@@ -218,7 +219,6 @@ async function addTextFileByPath(p, name) {
 // 粘贴/拖拽/＋附件 的统一入口:图片走 base64,媒体保留路径,文本文件按路径引用,其余二进制拒收
 function addAnyFile(file) {
   if (/^image\/(png|jpeg|gif|webp)$/.test(file.type)) return addImageFile(file);
-  const ext = (file.name.split('.').pop() || '').toLowerCase();
   const mk = mediaKindOf(file.name);
   if (mk) {
     // 拖拽/粘贴来的媒体文件:取本地路径(Electron 32+ 移除 File.path,走 preload 的 webUtils)
@@ -234,19 +234,31 @@ function addAnyFile(file) {
   // 文本文件:优先取磁盘路径;粘贴内容无路径时,落盘 userData/attachments/ 再按路径引用
   const p = api.pathForFile ? api.pathForFile(file) : '';
   if (p) return addTextFileByPath(p, file.name);
+  // 粘贴流:尝试按 UTF-16/GBK 解码(BOM/启发式),避免代码文件粘贴成乱码(v0.9.29);
+  // 落盘在主进程完成(files:savePasted 内做二进制校验)
   const reader = new FileReader();
   reader.onload = async () => {
-    const text = String(reader.result);
-    if (!TEXT_EXTS.has(ext) && !looksTextual(text)) {
-      alert(`不支持的二进制文件:${file.name}(附件支持图片、文本、音频/视频/3D 文件)`);
-      return;
+    const buf = new Uint8Array(reader.result);
+    let text;
+    if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+      text = new TextDecoder('utf-8').decode(buf.subarray(3));
+    } else if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
+      text = new TextDecoder('utf-16le').decode(buf.subarray(2));
+    } else if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
+      text = new TextDecoder('utf-16be').decode(buf.subarray(2));
+    } else {
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+      } catch {
+        try { text = new TextDecoder('gbk').decode(buf); } catch { text = new TextDecoder('utf-8').decode(buf); }
+      }
     }
     const r = await api.fileSavePasted({ name: file.name, content: text });
-    if (!r || !r.ok) { alert('附件暂存失败:' + ((r && r.error) || '未知错误')); return; }
+    if (!r || !r.ok) { alert((r && r.error) || '附件暂存失败'); return; }
     state.attachments.push({ kind: 'file', name: file.name, path: r.path });
     renderAttachments();
   };
-  reader.readAsText(file);
+  reader.readAsArrayBuffer(file);
 }
 
 // --- autocomplete ----------------------------------------------------------------
