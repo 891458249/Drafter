@@ -358,3 +358,11 @@ Git 工作流:
 - **根因 3(乱码/误判)**:采样与编辑器读取按 UTF-8 硬解,GBK/ANSI 编码的代码文件(中文 Windows 常见)解出 � → 被判二进制拒收、打开乱码;粘贴流 UTF-16 也乱码。新增 files.decodeBuffer:BOM(UTF-8/16LE/16BE)→ 严格 UTF-8 → GBK 兜底;sampleFile/readFile 与粘贴流全部接入
 - **粘贴落盘补二进制校验**:savePastedAttachment 落盘前按 �/NUL/控制字符比例拒收真实二进制(此前校验在被删的 renderer 分支里丢失)
 - test/file-decode.test.js 5 例(UTF-8/BOM/GBK/UTF-16LE/二进制),npm test 109/109
+
+### v0.9.30(2026-08-10,严重 BUG):打断后再编辑重生成会话卡死修复
+- **根因**:「停止」已对 query interrupt 过一次;「修改并重新生成」的 editRegenerate 里 `await this.interrupt()` 对同一 query 发起**第二次 interrupt**——SDK 的 interrupt 要等当前回合响应,第二次没有可打断的回合,承诺**永不 resolve**,sessEditRegenerate 永不返回,气泡停在「⏳ 重新生成中…」,会话卡死
+- **修复(sessions.js 三处)**:
+  ①interrupt() 幂等化——`_interrupting` 复用在途承诺 + Promise.race 6s 超时兜底,落地时校验 `this.q === 发起时的 q` 才清 busy(旧 interrupt 落地不得覆盖新 query 的回合并);
+  ②editRegenerate 的 stop→重启间等待从 setImmediate 改为按「this.q 已换/running 已落」轮询(30ms×100 上限 3s)——旧泵的 for-await 要等 claude 子进程退出才跑 finally,一个任务间隙不够;
+  ③_pump finally 校验 `this.q === 本泵的 q` 才写 running/busy 状态(stop+新 query 已启动时旧泵不得再清状态;旧权限卡照常了结);stop() 同时解除在途 _interrupting
+- npm test 109/109

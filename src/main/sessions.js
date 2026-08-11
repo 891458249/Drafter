@@ -267,17 +267,20 @@ class Session {
   }
 
   async _pump() {
+    const q = this.q; // v0.9.30:记录本次泵的 query——旧泵 finally 不得覆盖新 query 的状态
     try {
-      for await (const msg of this.q) {
+      for await (const msg of q) {
         this._handleMessage(msg);
       }
     } catch (e) {
       this._emit({ type: 'ui_error', message: '会话异常终止:' + (e && e.message || e) });
     } finally {
-      this.running = false;
-      this.busy = false;
-      this._emit({ type: 'ui_status', running: false, busy: false });
-      // fail any pending permission prompts
+      if (this.q === q) {
+        this.running = false;
+        this.busy = false;
+        this._emit({ type: 'ui_status', running: false, busy: false });
+      }
+      // fail any pending permission prompts(无论是否同一 query,旧权限卡都要了结)
       for (const [reqId, p] of this.pendingPerms) {
         try { p.resolve({ behavior: 'deny', message: '会话已结束' }); } catch {}
         this.pendingPerms.delete(reqId);
@@ -469,14 +472,37 @@ class Session {
     store.appendSessionEvent(this.id, ev);
   }
 
+  // interrupt 幂等化(v0.9.30):重复调用复用同一在途承诺,6s 超时兜底;
+  // 落地时校验「仍属同一 query」才清 busy——旧 query 的 interrupt 在 stop+新
+  // query 启动后才落地时,不得覆盖新回合的 busy。
+  // 旧实现无防护——用户点过「停止」后再触发第二次 interrupt(如编辑重生成),
+  // 对同一 query 重复 interrupt 的第二次调用永不 resolve,调用方 await 卡死。
   async interrupt() {
-    if (this.q && this.busy) {
-      try { await this.q.interrupt(); } catch (e) {
+    if (!(this.q && this.busy) && !this._interrupting) return;
+    if (this._interrupting) return this._interrupting;
+    const q = this.q;
+    const p = (async () => {
+      try {
+        await Promise.race([
+          q.interrupt().catch((e) => {
+            this._emit({ type: 'ui_error', message: 'interrupt 失败:' + e.message });
+          }),
+          new Promise((r) => setTimeout(r, 6000)),
+        ]);
+      } catch (e) {
         this._emit({ type: 'ui_error', message: 'interrupt 失败:' + e.message });
+      } finally {
+        if (this._interrupting === p) {
+          this._interrupting = null;
+          if (this.q === q) {
+            this.busy = false;
+            this._emit({ type: 'ui_status', running: this.running, busy: false });
+          }
+        }
       }
-      this.busy = false;
-      this._emit({ type: 'ui_status', running: this.running, busy: false });
-    }
+    })();
+    this._interrupting = p;
+    return p;
   }
 
   async setPermissionMode(mode) {
@@ -543,7 +569,9 @@ class Session {
   // SDK 侧 fork 到 echo 之前的锚点(resumeSessionAt),再发出编辑后的消息。
   // 返回 { ok, uuid? , error? }
   async editRegenerate(echoUuid, content, echoContent) {
-    if (this.busy) await this.interrupt();
+    // 等「停止」等任何在途中断彻底落地(v0.9.30 幂等化后,重复 await 是安全的——
+    // 此前用户先点停止再触发的第二次 interrupt 永不 resolve,流程卡死在这行)
+    if (this.busy || this._interrupting) await this.interrupt();
     const loc = store.locateEcho(this.id, echoUuid);
     if (!loc.ok) return loc;
     // 非首条消息但找不到前驱锚点(旧版本历史无 uuid):拒绝,避免静默丢失上文
@@ -554,8 +582,13 @@ class Session {
     const kept = [...loc.events.slice(0, loc.index), { ...loc.events[loc.index], content: slim }];
     store.writeSessionEvents(this.id, kept); // 校验通过后才落盘
     this.stop();
-    // 等旧 _pump 的 finally 跑完再重启,避免它把新回合的 busy 状态覆盖掉
-    await new Promise((r) => setImmediate(r));
+    // 旧 _pump 的 for-await 要等 claude 子进程退出才会跑 finally(stop 里的
+    // close()/SIGKILL 不是瞬时的)——按「当前 query 已换」轮询,而非 setImmediate
+    // 假设一个任务间隙(v0.9.30;旧泵 finally 在 this.q 已换时也不会再覆盖状态)
+    const oldQ = this.q;
+    for (let i = 0; i < 100 && this.q === oldQ && this.running; i++) {
+      await new Promise((r) => setTimeout(r, 30)); // 最长 3s
+    }
     const canResume = !!(loc.prevUuid && this.meta.sdkSessionId);
     if (!canResume) { // 首条消息或无 SDK 上下文:全新开始
       this.meta.sdkSessionId = null;
@@ -571,6 +604,9 @@ class Session {
     if (this.q && typeof this.q.close === 'function') { try { this.q.close(); } catch {} }
     this.running = false;
     this.busy = false;
+    // v0.9.30:解除任何在途的 interrupt(它 await 的是旧 query,resolve 后不得
+    // 覆盖新 query 的 busy 状态)
+    this._interrupting = null;
   }
 }
 
