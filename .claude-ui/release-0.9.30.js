@@ -3,11 +3,11 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const OWNER = '891458249', REPO = 'Drafter', TAG = 'v0.9.29';
+const OWNER = '891458249', REPO = 'Drafter', TAG = 'v0.9.30';
 const DIST = 'D:\\ClaudeUI\\dist';
 const ASSETS = [
-  'DeskTopUI Setup 0.9.29.exe',
-  'DeskTopUI Setup 0.9.29.exe.blockmap',
+  'DeskTopUI Setup 0.9.30.exe',
+  'DeskTopUI Setup 0.9.30.exe.blockmap',
   'latest.yml',
 ];
 
@@ -47,11 +47,9 @@ function api(method, urlPath, body, extraHeaders = {}, raw = null) {
   console.log('token ok, len', token.length);
 
   const notes = [
-    '### v0.9.29(2026-08-10):彻底修复附件截断/乱码(严重 BUG)',
+    '### v0.9.30(2026-08-10):修复严重 BUG——打断后再编辑重生成会话卡死',
     '',
-    '- **不再截断**:附件引用现在显式要求 AI 用 Read 的 offset/limit 分段读完整个文件(此前只读前 2000 行就作答);编辑器/预览不再设大小上限',
-    '- **不再乱码**:GBK/ANSI 编码的代码文件按 BOM→UTF-8→GBK 正确解码,不再被误判为二进制拒收或显示乱码',
-    '- 粘贴的文本附件同样完整保存,UTF-16/GBK 也能正确识别',
+    '- 修复「对话进行中点停止,然后修改消息并重新生成,会话卡住不执行」:对同一 query 重复 interrupt 第二次永不返回的问题,interrupt 已幂等化并加超时兜底,重新生成正常继续',
     '',
     '正在运行的 App 需重启进程生效(electron-updater 可自动更新)。',
   ].join('\n');
@@ -61,7 +59,7 @@ function api(method, urlPath, body, extraHeaders = {}, raw = null) {
     rel = await api('GET', `/repos/${OWNER}/${REPO}/releases/tags/${TAG}`);
     console.log('release exists, id', rel.id);
   } catch {
-    rel = await api('POST', `/repos/${OWNER}/${REPO}/releases`, { tag_name: TAG, name: 'DeskTopUI v0.9.29', body: notes, draft: false, prerelease: false });
+    rel = await api('POST', `/repos/${OWNER}/${REPO}/releases`, { tag_name: TAG, name: 'DeskTopUI v0.9.30', body: notes, draft: false, prerelease: false });
     console.log('release created, id', rel.id);
   }
 
@@ -79,4 +77,5 @@ function api(method, urlPath, body, extraHeaders = {}, raw = null) {
   }
   console.log('DONE');
 })().catch(e => { console.error('FAIL:', e.message); process.exit(1); });
+
 
