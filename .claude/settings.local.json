@@ -13,7 +13,8 @@
       "PowerShell(npm test 2>&1)",
       "PowerShell(git revert --no-edit 9f49735)",
       "PowerShell(git add -A)",
-      "PowerShell(git push)"
+      "PowerShell(git push)",
+      "PowerShell(Select-String -Path src\\\\index.html -Pattern 'btn-more' | ForEach-Object { $_.LineNumber.ToString\\(\\) + ': ' + $_.Line.Trim\\(\\) })"
     ]
   }
 }

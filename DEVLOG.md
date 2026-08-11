@@ -366,3 +366,9 @@ Git 工作流:
   ②editRegenerate 的 stop→重启间等待从 setImmediate 改为按「this.q 已换/running 已落」轮询(30ms×100 上限 3s)——旧泵的 for-await 要等 claude 子进程退出才跑 finally,一个任务间隙不够;
   ③_pump finally 校验 `this.q === 本泵的 q` 才写 running/busy 状态(stop+新 query 已启动时旧泵不得再清状态;旧权限卡照常了结);stop() 同时解除在途 _interrupting
 - npm test 109/109
+
+### v0.9.31(2026-08-11):皮肤定制 + 独立设置面板 + 活跃项对比修复
+- **活跃会话项对比修复**:.session-item.active 从 bg-input+border(与非活跃项几乎无差)改 accent 洗底+描边;同时发现 **--accent-bg/--bg-hover 被 msg-nav/.hot 等多处引用但从未在 :root 定义**(一直是无效值),已在 :root 补齐
+- **皮肤系统**(新模块 themes.js):主题=一组 CSS 变量覆盖集——深色(默认)/浅色/暗夜蓝/墨绿护眼 4 套,applyTheme 写 documentElement 内联变量(暗色=移除覆盖回落样式表),settings.theme 持久化,boot 时最先应用避免首帧闪错主题;代码卡片/hljs 硬编码深色各主题下统一保持
+- **独立设置面板**(settings-modal):原「⋯」下拉菜单全部入口并入——外观(皮肤卡片点击即时预览+持久化)/功能(Gem 助手/API Key/MCP 服务器/定时任务/权限规则/快捷键)/偏好(⚡ 瞬时跳转定位 checkbox)/其他(打开目录/打开日志目录);「⋯」按钮改为设置面板直入口,删除 more-menu 下拉及其 handlers,瞬时跳转从菜单勾选态改为 checkbox
+- npm test 109/109

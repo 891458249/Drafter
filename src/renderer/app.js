@@ -12,6 +12,7 @@ import * as tasks from './tasks.js';
 import * as term from './term.js';
 import * as gems from './gems.js';
 import * as codeblock from './codeblock.js';
+import { THEMES, applyTheme, currentTheme, bootTheme } from './themes.js';
 
 // ---------------------------------------------------------------------------
 // Global error reporting → main-process persistent log (metadata only)
@@ -71,9 +72,10 @@ $('update-chip').onclick = () => {
 
 // ---------------------------------------------------------------------------
 // Boot(v0.9.3 起无首屏落地页):直接进对话页 —— 恢复最近会话,没有则自动建独立会话;
-// 项目目录不再进门,等用户在会话里按需添加(＋文件夹 / ⋯菜单)。
+// 项目目录不再进门,等用户在会话里按需添加(＋文件夹 / 设置面板)。
 // ---------------------------------------------------------------------------
 async function boot() {
+  await bootTheme(); // 皮肤(v0.9.31):尽早应用,避免首帧用错主题
   // 设置项(v0.9.15):瞬时跳转定位(默认开)
   try {
     const st = await api.getStore();
@@ -278,20 +280,33 @@ for (const t of document.querySelectorAll('.ptab')) {
 }
 
 // ---------------------------------------------------------------------------
-// "More" menu
+// 设置面板(v0.9.31):原「⋯」下拉菜单全部入口并入;皮肤定制即时预览持久化
 // ---------------------------------------------------------------------------
-$('btn-more').onclick = (e) => {
-  e.stopPropagation();
-  // 打开时刷新「瞬时跳转定位」勾选态(v0.9.15)
-  const ij = document.querySelector('#more-menu [data-act="instantjump"]');
-  if (ij) ij.textContent = (state.instantJump ? '✓ ' : '　') + '⚡ 瞬时跳转定位';
-  $('more-menu').classList.toggle('hidden');
+function renderThemeCards() {
+  const box = $('theme-cards');
+  box.innerHTML = '';
+  for (const t of THEMES) {
+    const d = document.createElement('div');
+    d.className = 'theme-card' + (t.id === currentTheme() ? ' active' : '');
+    d.innerHTML = `<div class="theme-swatch">${t.swatch.map((c) => `<i style="background:${c}"></i>`).join('')}</div>${t.name}`;
+    d.onclick = () => { applyTheme(t.id, { persist: true }); renderThemeCards(); };
+    box.appendChild(d);
+  }
+}
+function openSettingsModal() {
+  renderThemeCards();
+  $('set-instantjump').checked = state.instantJump;
+  $('settings-modal').classList.remove('hidden');
+}
+$('settings-close').onclick = () => $('settings-modal').classList.add('hidden');
+$('set-instantjump').onchange = (e) => { // 瞬时 ↔ 平滑(原 v0.9.15 菜单项)
+  state.instantJump = !!e.target.checked;
+  api.setSetting('instantJump', state.instantJump);
 };
-document.addEventListener('click', () => $('more-menu').classList.add('hidden'));
-$('more-menu').onclick = async (e) => {
-  const act = e.target.dataset && e.target.dataset.act;
+$('settings-modal').onclick = async (e) => {
+  const act = e.target.dataset && e.target.dataset.set;
   if (!act) return;
-  $('more-menu').classList.add('hidden');
+  $('settings-modal').classList.add('hidden');
   if (act === 'apikey') openApiKeyModal();
   if (act === 'gems') gems.openGemModal();
   if (act === 'mcp') openMcpModal();
@@ -303,11 +318,12 @@ $('more-menu').onclick = async (e) => {
   }
   if (act === 'logs') api.openLogs();
   if (act === 'perms') openPermsModal();
-  if (act === 'instantjump') { // 消息导航/回到底部:瞬时 ↔ 平滑
-    state.instantJump = !state.instantJump;
-    api.setSetting('instantJump', state.instantJump);
-  }
 };
+
+// ---------------------------------------------------------------------------
+// 「⋯」按钮 = 设置面板入口(v0.9.31;原下拉菜单已并入)
+// ---------------------------------------------------------------------------
+$('btn-more').onclick = (e) => { e.stopPropagation(); openSettingsModal(); };
 
 // ---------------------------------------------------------------------------
 // Permission rules modal (view/delete rules in .claude/settings.local.json)

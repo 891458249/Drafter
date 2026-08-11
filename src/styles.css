@@ -13,6 +13,9 @@
   --green: #7cae7a;
   --red: #d67d6a;
   --yellow: #d6b46a;
+  /* v0.9.31:此前被 msg-nav/.hot 等引用但从未定义,补齐;主题系统(themes.js)可整体覆盖 */
+  --accent-bg: rgba(217,119,87,.15);
+  --bg-hover: rgba(255,255,255,.07);
   --radius: 10px;
   --font: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: "Cascadia Code", "Consolas", "SF Mono", Menlo, monospace;
@@ -171,7 +174,8 @@ html, body {
   border: 1px solid transparent;
 }
 .session-item:hover { background: var(--bg-input); }
-.session-item.active { background: var(--bg-input); border-color: var(--border); }
+/* v0.9.31:活跃项用主题色洗底+描边——此前 bg-input+border 与非活跃项对比太低看不清 */
+.session-item.active { background: var(--accent-bg); border-color: var(--accent); }
 .session-item.attention { border-color: var(--accent); }
 .session-title {
   font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -534,6 +538,25 @@ kbd {
   color: var(--text); font-size: 13px; padding: 9px 14px; cursor: pointer;
 }
 .more-menu button:hover { background: var(--bg-input); }
+
+/* ---------------- 设置面板(v0.9.31):「⋯」菜单全部入口 + 皮肤定制 ---------------- */
+.settings-modal { width: 560px; }
+.settings-sec { margin-bottom: 18px; }
+.settings-sec h3 { margin: 0 0 10px; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.settings-grid .btn { text-align: left; }
+.settings-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 皮肤卡片:三色色板 + 名称,点击即时预览并持久化 */
+.theme-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.theme-card {
+  border: 2px solid var(--border); border-radius: 10px; padding: 8px;
+  cursor: pointer; text-align: center; font-size: 12px; color: var(--text-dim);
+  background: var(--bg-elevated);
+}
+.theme-card:hover { border-color: var(--text-dim); }
+.theme-card.active { border-color: var(--accent); color: var(--text); }
+.theme-swatch { display: flex; height: 30px; border-radius: 6px; overflow: hidden; margin-bottom: 6px; }
+.theme-swatch i { flex: 1; }
 
 /* spinner */
 @keyframes spin { to { transform: rotate(360deg); } }

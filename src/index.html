@@ -38,7 +38,7 @@
           </select>
         </label>
         <button id="btn-panel" class="btn btn-sm code-only" title="右侧面板 (Ctrl+J)">面板</button>
-        <button id="btn-more" class="btn btn-sm">⋯</button>
+        <button id="btn-more" class="btn btn-sm" title="设置(皮肤/功能/偏好)">⋯</button>
       </div>
     </header>
 
@@ -415,17 +415,40 @@
   <!-- Gem 选择器/默认工具 共用小下拉(动态填充) -->
   <div id="gem-menu" class="more-menu gem-menu hidden"></div>
 
-  <!-- "More" dropdown -->
-  <div id="more-menu" class="more-menu hidden">
-    <button data-act="gems">💎 Gem 助手…</button>
-    <button data-act="apikey">API Key…</button>
-    <button data-act="mcp">MCP 服务器…</button>
-    <button data-act="cron">定时任务…</button>
-    <button data-act="shortcuts">快捷键 (Ctrl+/)</button>
-    <button data-act="switch">打开目录(新项目组)…</button>
-    <button data-act="perms">权限规则…</button>
-    <button data-act="instantjump">⚡ 瞬时跳转定位</button>
-    <button data-act="logs">打开日志目录</button>
+  <!-- 设置面板(v0.9.31):原「⋯」菜单全部入口并入 -->
+  <div id="settings-modal" class="modal-mask hidden">
+    <div class="modal settings-modal">
+      <h2>设置</h2>
+      <div class="settings-sec">
+        <h3>外观 · 皮肤</h3>
+        <div class="theme-cards" id="theme-cards"></div>
+      </div>
+      <div class="settings-sec">
+        <h3>功能</h3>
+        <div class="settings-grid">
+          <button class="btn btn-sm" data-set="gems">💎 Gem 助手…</button>
+          <button class="btn btn-sm" data-set="apikey">🔑 API Key…</button>
+          <button class="btn btn-sm" data-set="mcp">🧩 MCP 服务器…</button>
+          <button class="btn btn-sm" data-set="cron">⏰ 定时任务…</button>
+          <button class="btn btn-sm" data-set="perms">🛡 权限规则…</button>
+          <button class="btn btn-sm" data-set="shortcuts">⌨ 快捷键 (Ctrl+/)</button>
+        </div>
+      </div>
+      <div class="settings-sec">
+        <h3>偏好</h3>
+        <label class="settings-row" style="cursor:pointer">
+          <input type="checkbox" id="set-instantjump" /> ⚡ 瞬时跳转定位(消息导航/回到底部,关闭则平滑滚动)
+        </label>
+      </div>
+      <div class="settings-sec">
+        <h3>其他</h3>
+        <div class="settings-grid">
+          <button class="btn btn-sm" data-set="switch">📂 打开目录(新项目组)…</button>
+          <button class="btn btn-sm" data-set="logs">📄 打开日志目录</button>
+        </div>
+      </div>
+      <div class="modal-actions"><button id="settings-close" class="btn">关闭</button></div>
+    </div>
   </div>
 
   <script src="../node_modules/marked/marked.min.js"></script>
