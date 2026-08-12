@@ -3,6 +3,7 @@
 import { api, state, $, escapeHtml, truncate, renderMarkdown, fmtCost, fmtTokens, emit, modelSelValue, updateKeyChips, MEDIA_KINDS, modelLabel, sessionModelName, gemNameOf } from './state.js';
 import { highlightCode } from './hljs.js';
 import { enhanceCodeHtml } from './codeblock.js';
+import { parseFilePath, PATH_IN_TEXT_RE } from './filelink.js';
 
 const messagesEl = () => $('messages');
 
@@ -284,13 +285,56 @@ function appendThinking(s, parentId, delta) {
 }
 
 // Make file paths in assistant text clickable -> open in editor panel.
+// v0.9.32 重写:旧正则不含冒号,Windows 盘符路径(C:\…)永远匹配不上,
+// 含空格路径也不行;且只认行内 <code>,散文里的裸路径点不开。
+// 现在:①行内 code 整段交给 parseFilePath;②正文文本节点扫描绝对路径包 .file-link。
+function makeFileLink(text, hit) {
+  const span = document.createElement('span');
+  span.className = 'file-link';
+  span.textContent = text;
+  span.title = hit.path + '\n点击在右侧编辑器打开';
+  span.onclick = (e) => { e.stopPropagation(); emit('open-file', hit); };
+  return span;
+}
+
 function linkifyPaths(el) {
+  // ① 行内 <code>:整段文本是路径才链接化
   for (const code of el.querySelectorAll('code')) {
-    const t = code.textContent || '';
-    if (code.childElementCount === 0 && /^[\w./\\-]+\.[\w]{1,8}(:\d+)?$/.test(t.trim()) && t.length < 200) {
-      code.classList.add('file-link');
-      code.onclick = () => emit('open-file', t.trim().replace(/:\d+$/, ''));
+    if (code.childElementCount !== 0 || code.closest('.file-link')) continue;
+    const hit = parseFilePath(code.textContent || '');
+    if (!hit) continue;
+    code.classList.add('file-link');
+    code.title = hit.path + '\n点击在右侧编辑器打开';
+    code.onclick = (e) => { e.stopPropagation(); emit('open-file', hit); };
+  }
+  // ② 正文文本节点:绝对路径(无反引号)也可点击
+  const SKIP = 'pre,code,a,script,style,.file-link,.code-card-head';
+  const texts = [];
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode(n) {
+      if (!n.nodeValue || n.nodeValue.length < 4) return NodeFilter.FILTER_REJECT;
+      if (n.parentElement && n.parentElement.closest(SKIP)) return NodeFilter.FILTER_REJECT;
+      PATH_IN_TEXT_RE.lastIndex = 0;
+      return PATH_IN_TEXT_RE.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    },
+  });
+  let tn;
+  while ((tn = walker.nextNode())) texts.push(tn);
+  for (const t of texts) {
+    PATH_IN_TEXT_RE.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let last = 0, m, dirty = false;
+    while ((m = PATH_IN_TEXT_RE.exec(t.nodeValue))) {
+      const hit = parseFilePath(m[0]);
+      if (!hit) continue; // exec 内部 lastIndex 已前进,不会死循环
+      dirty = true;
+      if (m.index > last) frag.appendChild(document.createTextNode(t.nodeValue.slice(last, m.index)));
+      frag.appendChild(makeFileLink(m[0], hit));
+      last = m.index + m[0].length;
     }
+    if (!dirty) continue;
+    if (last < t.nodeValue.length) frag.appendChild(document.createTextNode(t.nodeValue.slice(last)));
+    t.parentNode.replaceChild(frag, t);
   }
 }
 
@@ -309,6 +353,7 @@ export function renderUserBubble(bubble, content) {
   bubble.innerHTML = '';
   if (typeof content === 'string') {
     bubble.innerHTML = enhanceCodeHtml(renderMarkdown(collapseAttachBlocks(content)));
+    linkifyPaths(bubble);
     return;
   }
   for (const b of content) {
@@ -341,6 +386,7 @@ export function renderUserBubble(bubble, content) {
       }
     }
   }
+  linkifyPaths(bubble);
 }
 
 export function addUserMessage(sid, content, uuid) {

@@ -1,6 +1,6 @@
-{
+﻿{
   "name": "desktopui",
-  "version": "0.9.31",
+  "version": "0.9.32",
   "description": "A desktop UI for Claude Code",
   "main": "main.js",
   "scripts": {
@@ -28,7 +28,7 @@
   "build": {
     "appId": "com.claudeui.app",
     "productName": "DeskTopUI",
-    "copyright": "Copyright © 2026 891458249",
+    "copyright": "Copyright 漏 2026 891458249",
     "npmRebuild": false,
     "files": [
       "main.js",

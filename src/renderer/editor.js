@@ -5,7 +5,10 @@ import { highlightCode } from './hljs.js';
 
 let current = null; // { rel, abs, mtimeMs, dirty, mode: 'preview'|'edit' }
 
-export async function openFile(rel, { mode = 'preview' } = {}) {
+export async function openFile(input, { mode = 'preview' } = {}) {
+  // input 兼容字符串(旧调用方)与 { path, line }(v0.9.32 起 file-link 带行号)
+  const rel = typeof input === 'string' ? input : (input && input.path) || '';
+  const line = typeof input === 'object' && input ? (input.line || null) : null;
   const res = await api.fileRead({ cwd: state.cwd, path: rel });
   const area = $('editor-area');
   const warn = $('editor-warning');
@@ -30,6 +33,26 @@ export async function openFile(rel, { mode = 'preview' } = {}) {
   api.fileWatch({ key: 'editor', path: res.path });
   applyMode();
   showPanel('editor');
+  if (line) scrollToLine(line);
+}
+
+// 跳到指定行:预览模式按行高估算 scrollTop(高亮 HTML 不拆行);编辑模式选中该行
+function scrollToLine(line) {
+  if (!current) return;
+  if (current.mode === 'edit') {
+    const area = $('editor-area');
+    const lines = area.value.split('\n');
+    let pos = 0;
+    for (let i = 0; i < Math.min(line - 1, lines.length); i++) pos += lines[i].length + 1;
+    area.focus();
+    area.setSelectionRange(pos, pos + (lines[line - 1] || '').length);
+    const lh = parseFloat(getComputedStyle(area).lineHeight) || 18;
+    area.scrollTop = Math.max(0, (line - 3) * lh);
+  } else {
+    const pre = $('editor-preview');
+    const lh = parseFloat(getComputedStyle(pre).lineHeight) || 18;
+    pre.scrollTop = Math.max(0, (line - 3) * lh);
+  }
 }
 
 // 按 current.mode 切换 预览(高亮只读) / 编辑(textarea) 视图
