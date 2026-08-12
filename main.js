@@ -151,6 +151,16 @@ function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  // 会话中的网页链接一律外抛系统浏览器(v0.9.33):渲染的 markdown <a> 默认行为是
+  // 主窗口就地导航——窗口变成"浏览器"且没有返回路。will-navigate 拦截 http(s) 外抛,
+  // setWindowOpenHandler 拦截 target=_blank/window.open;file://(本地 index.html)放行。
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (/^https?:\/\//i.test(url)) { e.preventDefault(); shell.openExternal(url); }
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
   // 关窗转入托盘后台(v0.9.13):仅托盘右键「退出」/自动更新重启才真正退出
   mainWindow.on('close', (e) => {
     if (app.isQuitting || process.platform === 'darwin') return;

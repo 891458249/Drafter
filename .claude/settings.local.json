@@ -15,7 +15,10 @@
       "PowerShell(git add -A)",
       "PowerShell(git push)",
       "PowerShell(Select-String -Path src\\\\index.html -Pattern 'btn-more' | ForEach-Object { $_.LineNumber.ToString\\(\\) + ': ' + $_.Line.Trim\\(\\) })",
-      "PowerShell(npm test)"
+      "PowerShell(npm test)",
+      "Read",
+      "PowerShell(node --check main.js)",
+      "PowerShell(node --check src/renderer/app.js)"
     ]
   }
 }

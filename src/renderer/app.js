@@ -897,7 +897,9 @@ function setSection(sec, { skipSessionPick } = {}) {
     b.classList.toggle('active', b.dataset.sec === sec);
   }
   $('sidebar-head-label').textContent = sec === 'code' ? '项目 / 会话' : '会话';
-  if (sec !== 'code') $('right-panel').classList.add('hidden'); // 非 code 板块无项目面板
+  // 面板对 code+chat 开放(v0.9.33):Chat 也处理代码任务,需要编辑器/预览/终端;
+  // 仅媒体板块(image/video/audio/model)隐藏。
+  if (sec !== 'code' && sec !== 'chat') $('right-panel').classList.add('hidden');
   sessionsUi.refreshList();
   if (skipSessionPick) { populateModelSelects(); return; }
   // 异步:先按板块重建模型下拉,再保证激活会话属于该板块。
