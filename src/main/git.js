@@ -65,21 +65,22 @@ async function diffFile(cwd, file, untracked) {
 }
 
 // --- Worktrees (per-session isolation) ---
+// v0.9.35 更名 Drafter:目录/分支前缀改 drafter;存量 .desktopui/.claude-ui-worktrees 不再托管(不再新建)。
 function worktreeRoot(repo) {
-  return path.join(repo, '.claude-ui-worktrees');
+  return path.join(repo, '.drafter-worktrees');
 }
 
 async function createWorktree(repo, name) {
   if (!(await isRepo(repo))) return { ok: false, error: '不是 git 仓库,无法创建 worktree' };
   const safe = name.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'session';
   const dir = path.join(worktreeRoot(repo), safe);
-  const branch = 'claude-ui/' + safe;
+  const branch = 'drafter/' + safe;
   const r = await git(['worktree', 'add', '-b', branch, dir], repo);
   if (!r.ok) return { ok: false, error: r.stderr || r.stdout };
   // keep worktree dir out of the repo's status
   try {
     const excl = path.join(repo, '.git', 'info', 'exclude');
-    const line = '.claude-ui-worktrees/';
+    const line = '.drafter-worktrees/';
     const cur = fs.existsSync(excl) ? fs.readFileSync(excl, 'utf8') : '';
     if (!cur.includes(line)) fs.appendFileSync(excl, '\n' + line + '\n');
   } catch {}

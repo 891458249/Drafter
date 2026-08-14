@@ -8,7 +8,7 @@ const os = require('os');
 const path = require('path');
 const { installElectronStub } = require('./helpers/electron-stub');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-transcript-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-transcript-test-'));
 installElectronStub(tmp);
 // 必须在 require sessions 之前:sessions.js 模块加载时按 CLAUDE_CONFIG_DIR 定位记录根目录
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude-cfg');

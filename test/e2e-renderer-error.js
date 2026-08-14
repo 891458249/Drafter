@@ -9,7 +9,7 @@ const os = require('os');
 const path = require('path');
 const logger = require('../src/main/logger');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-e2e-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-e2e-'));
 app.setPath('userData', tmp); // 隔离,不碰真实 userData
 
 app.whenReady().then(() => {

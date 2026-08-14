@@ -6,8 +6,31 @@ const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 
 // 允许通过环境变量覆盖 userData(便携模式/并行实例/隔离测试)
-if (process.env.CLAUDE_UI_USERDATA) {
-  app.setPath('userData', process.env.CLAUDE_UI_USERDATA);
+// v0.9.35 更名 Drafter:主变量 DRAFTER_USERDATA,旧名按新到旧依次兼容
+const USERDATA_OVERRIDE = process.env.DRAFTER_USERDATA || process.env.DESKTOPUI_USERDATA || process.env.CLAUDE_UI_USERDATA;
+if (USERDATA_OVERRIDE) {
+  app.setPath('userData', USERDATA_OVERRIDE);
+}
+
+// v0.9.35 更名 Drafter:userData 目录随 productName 变为 <appData>/Drafter。
+// 首次启动新目录不存在时,从旧品牌目录整体复制迁移(只复制不删除,旧目录原样保留可回滚;
+// 缓存目录不搬)。指定了 userData 覆盖时不迁移。
+if (!USERDATA_OVERRIDE) {
+  try {
+    const target = path.join(app.getPath('appData'), 'Drafter');
+    if (!fs.existsSync(target)) {
+      const skip = new Set(['Cache', 'GPUCache', 'Code Cache', 'cache']);
+      for (const legacy of ['DeskTopUI', 'desktopui', 'claude-ui']) {
+        const src = path.join(app.getPath('appData'), legacy);
+        if (!fs.existsSync(src)) continue;
+        fs.cpSync(src, target, { recursive: true, filter: (s) => !skip.has(path.basename(s)) });
+        console.log('[migrate] userData copied:', src, '->', target);
+        break;
+      }
+    }
+  } catch (e) {
+    console.error('[migrate] userData copy failed:', e.message);
+  }
 }
 
 const store = require('./src/main/store');
@@ -67,9 +90,9 @@ function setupTray() {
     if (img.isEmpty()) { console.error('[tray] icon.png 加载失败'); return; }
     img = img.resize({ width: 16, height: 16 });
     tray = new Tray(img);
-    tray.setToolTip('DeskTopUI');
+    tray.setToolTip('Drafter');
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: '显示 DeskTopUI', click: showMainWindow },
+      { label: '显示 Drafter', click: showMainWindow },
       { type: 'separator' },
       { label: '退出', click: () => { app.isQuitting = true; cleanup(); app.quit(); } },
     ]));
@@ -141,7 +164,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 560,
     backgroundColor: '#1a1815',
-    title: 'DeskTopUI',
+    title: 'Drafter',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -169,7 +192,7 @@ function createWindow() {
     if (!trayHintShown) {
       trayHintShown = true;
       try {
-        new Notification({ title: 'DeskTopUI 正在后台运行', body: '窗口已最小化到系统托盘;右键托盘图标可退出。' }).show();
+        new Notification({ title: 'Drafter 正在后台运行', body: '窗口已最小化到系统托盘;右键托盘图标可退出。' }).show();
       } catch {}
     }
   });

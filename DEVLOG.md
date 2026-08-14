@@ -168,7 +168,7 @@ Git 工作流:
 
 ### v0.9.2(2026-08-06):/add-dir 修复 + 更名 DeskTopUI + 模型身份 + 用户消息贴右
 - **/add-dir 修复**:SDK 流式输入(stream-json)不会执行 /add-dir 这类本地命令,发出去只是给模型看的文本。改为客户端拦截(main.js sess:send 开头匹配):目录持久化到会话 meta.extraDirs,projects.addDir 幂等同步项目组;运行中的会话重启 query(resume 保上下文)使 additionalDirectories 立即生效,回合进行中则标记 needRestart 回合结束后自动重启;目录不存在直接提示不发送。其余斜杠命令(/compact、自定义命令)由 CLI 本地命令通道处理(system/local_command_output),不受影响
-- **更名 DeskTopUI**:productName/窗口标题/落地页/引导卡/快捷方式全部改为 DeskTopUI;appId 保持 com.claudeui.app 不变(userData 与自动更新身份不受影响)
+- **更名 DeskTopUI**:productName/窗口标题/落地页/引导卡/快捷方式全部改为 DeskTopUI;appId 保持 com.claudeui.app 不变(userData 与自动更新身份不受影响)(⚠ 已于 v0.9.34 品牌清理中改为 com.desktopui.app,旧安装目录需手动卸载一次)
 - **用户消息贴右**:.msg.user 跳出 860px 居中内容列(margin-right:0),气泡贴聊天区右缘
 - **模型身份**:输入框 placeholder 变为「给 <当前模型> 发送消息…」,助手气泡角色名由固定「Claude」改为当前会话模型(state.js modelLabel/sessionModelName);顶栏/输入框两处模型下拉切换、SDK init 回传模型时同步刷新;新媒体任务卡片角色名同步走 modelLabel
 
@@ -372,3 +372,12 @@ Git 工作流:
 - **皮肤系统**(新模块 themes.js):主题=一组 CSS 变量覆盖集——深色(默认)/浅色/暗夜蓝/墨绿护眼 4 套,applyTheme 写 documentElement 内联变量(暗色=移除覆盖回落样式表),settings.theme 持久化,boot 时最先应用避免首帧闪错主题;代码卡片/hljs 硬编码深色各主题下统一保持
 - **独立设置面板**(settings-modal):原「⋯」下拉菜单全部入口并入——外观(皮肤卡片点击即时预览+持久化)/功能(Gem 助手/API Key/MCP 服务器/定时任务/权限规则/快捷键)/偏好(⚡ 瞬时跳转定位 checkbox)/其他(打开目录/打开日志目录);「⋯」按钮改为设置面板直入口,删除 more-menu 下拉及其 handlers,瞬时跳转从菜单勾选态改为 checkbox
 - npm test 109/109
+
+### v0.9.35(2026-08-12):更名 Drafter + ClaudeUI 品牌全面出清
+- **更名 Drafter**:productName/窗口标题/托盘/快捷方式/legalTrademarks/appId(com.drafter.app)全部改为 Drafter;包名 desktopui→drafter(中间品牌 DeskTopUI 未发版即被本轮取代)
+- **userData 自动迁移**:productName 变更使 userData 变为 %AppData%\Drafter,main.js 启动时新目录不存在则从 DeskTopUI/desktopui/claude-ui 旧目录整体复制(只复制不删,缓存目录不搬);CLAUDE_/DESKTOPUI_USERDATA 环境变量兼容保留
+- **产出物署名出清**:项目组注入改 <drafter-project-group>+「Drafter 的项目组」、共享记忆目录新建用 .drafter(存量 .desktopui/.claude-ui 只读识别)、Gem 注入改 <drafter-gem>、worktree 改 .drafter-worktrees+drafter/ 分支前缀——用本 App 产出的代码/插件不再带 ClaudeUI 痕迹
+- **Logo 重设计**:make-icon.js 由像素字母改为「层叠草稿纸」图形(呼应 Drafter=起草者),重生成 icon.png/icon.ico
+- **appId 变更代价**:旧版自动更新装新版时旧安装目录(Programs\claude-ui / DeskTopUI)不被接管,需手动卸载一次(数据已自动迁移)
+- 顺手修复:package.json copyright GBK 坏字(漏→©)、package-lock 过期 name/version
+- npm test 120/120

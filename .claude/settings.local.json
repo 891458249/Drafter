@@ -18,7 +18,8 @@
       "PowerShell(npm test)",
       "Read",
       "PowerShell(node --check main.js)",
-      "PowerShell(node --check src/renderer/app.js)"
+      "PowerShell(node --check src/renderer/app.js)",
+      "PowerShell(Get-ChildItem $env:APPDATA -Directory | Where-Object Name -match 'claude|desktop' | Select-Object Name; Get-ChildItem \"$env:LOCALAPPDATA\\\\Programs\" -Directory -ErrorAction SilentlyContinue | Where-Object Name -match 'claude|desktop' | Select-Object Name)"
     ]
   }
 }

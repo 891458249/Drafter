@@ -1,7 +1,7 @@
 // B23 重跑(F-005 修复后):＋终端应经回退链启动(cmd.exe),标签/切换/关闭/pty 独立
 const { CDP, sleep } = require('./cdp');
 const path = require('path');
-const WS_DIR = path.join(process.env.TEMP, 'claude-ui-reg');
+const WS_DIR = path.join(process.env.TEMP, 'drafter-reg');
 (async () => {
   const cdp = await new CDP().connect();
   // 打开终端面板

@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { installElectronStub } = require('./helpers/electron-stub');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-gems-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-gems-test-'));
 installElectronStub(tmp);
 const gems = require('../src/main/gems');
 
@@ -60,7 +60,7 @@ test('composeAppend:含指令/工具/知识摘录,超量截断', () => {
   fs.writeFileSync(f, '知识内容\n第二行');
   const g = gems.save({ name: 'A', desc: '说明', instructions: '指令', tools: ['Canvas'], knowledge: [{ path: f }] }).gem;
   const text = gems.composeAppend(g);
-  assert.ok(text.includes('claude-ui-gem name="A"'));
+  assert.ok(text.includes('drafter-gem name="A"'));
   assert.ok(text.includes('指令') && text.includes('Canvas'));
   assert.ok(text.includes('知识内容'), '文本文件应内联摘录');
   // knowledgeEnabled=false 时不含知识

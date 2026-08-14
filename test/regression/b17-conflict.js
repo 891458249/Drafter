@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { CDP, sleep } = require('./cdp');
-const target = path.join(process.env.TEMP, 'claude-ui-reg', 'edit-me.txt');
+const target = path.join(process.env.TEMP, 'drafter-reg', 'edit-me.txt');
 
 (async () => {
   const cdp = await new CDP().connect();

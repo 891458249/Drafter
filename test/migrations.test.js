@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { installElectronStub } = require('./helpers/electron-stub');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-migrations-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-migrations-test-'));
 installElectronStub(tmp);
 // 必须在 require 之前:sessions.js 模块加载时按 CLAUDE_CONFIG_DIR 定位记录根目录
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude-cfg');
@@ -16,7 +16,7 @@ const { run, compareVersions } = require('../src/main/migrations');
 const { encodeCwdForProjects } = require('../src/main/sessions');
 
 const PROJECTS = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects');
-const STORE_FILE = path.join(tmp, 'claude-ui-store.json');
+const STORE_FILE = path.join(tmp, 'drafter-store.json');
 const CWD = 'D:\\HealProject';
 const SID = 'sdk-session-abc';
 

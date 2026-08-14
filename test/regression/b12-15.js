@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { CDP, sleep } = require('./cdp');
-const WS_DIR = path.join(process.env.TEMP, 'claude-ui-reg');
+const WS_DIR = path.join(process.env.TEMP, 'drafter-reg');
 const sid = JSON.parse(fs.readFileSync(path.join(__dirname, '.reg-sid.json'), 'utf8')).sid;
 
 async function typeInInput(cdp, text) {

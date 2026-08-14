@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { installElectronStub } = require('./helpers/electron-stub');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-keys-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-keys-test-'));
 installElectronStub(tmp);
 const store = require('../src/main/store');
 const keys = require('../src/main/keys');

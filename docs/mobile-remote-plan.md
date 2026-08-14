@@ -1,13 +1,13 @@
-# DeskTopUI 移动端远程控制 · 策划案
+# Drafter 移动端远程控制 · 策划案
 
 > 版本:v0.1(2026-08-10) 状态:待评审
-> 目标:让 DeskTopUI 走出桌面——手机端随时随地给电脑端下达任务,电脑端基于本地项目自动执行,结果回流手机。
+> 目标:让 Drafter 走出桌面——手机端随时随地给电脑端下达任务,电脑端基于本地项目自动执行,结果回流手机。
 
 ---
 
 ## 一、背景与机会
 
-DeskTopUI 目前是 Windows 桌面端(Electron + Claude Agent SDK),已具备:
+Drafter 目前是 Windows 桌面端(Electron + Claude Agent SDK),已具备:
 
 - 完整的会话引擎(`src/main/sessions.js`):创建/resume/分支/编辑重生成/定时任务(scheduler)
 - 六板块渲染端、Gem 自定义助手、AIGC 生成、消息导航等成熟 UI
@@ -48,7 +48,7 @@ DeskTopUI 目前是 Windows 桌面端(Electron + Claude Agent SDK),已具备:
 
 ```
 ┌─────────────┐         ┌──────────────────────────────────┐
-│   手机端     │  WSS    │  电脑端 DeskTopUI                  │
+│   手机端     │  WSS    │  电脑端 Drafter                  │
 │ (浏览器/PWA) │◄───────►│  ┌────────────────────────────┐  │
 │  或套壳 App  │  JSON-RPC│  │ remote-server.js (新增)     │  │
 └─────────────┘         │  │  - WebSocket 服务 + TLS      │  │

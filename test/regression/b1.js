@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { CDP, sleep } = require('./cdp');
 
-const WS_DIR = path.join(process.env.TEMP, 'claude-ui-reg');
+const WS_DIR = path.join(process.env.TEMP, 'drafter-reg');
 const SID_FILE = path.join(__dirname, '.reg-sid.json');
 const loadSid = () => JSON.parse(fs.readFileSync(SID_FILE, 'utf8')).sid;
 const saveSid = (sid) => fs.writeFileSync(SID_FILE, JSON.stringify({ sid }));

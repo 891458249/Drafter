@@ -1,6 +1,6 @@
 {
-  "name": "desktopui",
-  "version": "0.9.33",
+  "name": "drafter",
+  "version": "0.9.35",
   "description": "A desktop UI for Claude Code",
   "main": "main.js",
   "scripts": {
@@ -26,9 +26,9 @@
     "node-pty": "^1.0.0"
   },
   "build": {
-    "appId": "com.claudeui.app",
-    "productName": "DeskTopUI",
-    "copyright": "Copyright 漏 2026 891458249",
+    "appId": "com.drafter.app",
+    "productName": "Drafter",
+    "copyright": "Copyright © 2026 891458249",
     "npmRebuild": false,
     "files": [
       "main.js",
@@ -45,14 +45,14 @@
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico",
-      "legalTrademarks": "Claude UI"
+      "legalTrademarks": "Drafter"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "DeskTopUI",
+      "shortcutName": "Drafter",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico"
     }

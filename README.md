@@ -1,4 +1,4 @@
-# Claude UI
+# Drafter
 
 Claude Code 的桌面界面(Electron)。基于 `@anthropic-ai/claude-agent-sdk` 与 Claude Code 直接通信,支持多会话并行、项目组管理、权限确认 UI、Git 工作流与内嵌终端,不必再在 PowerShell 里手动启动。
 

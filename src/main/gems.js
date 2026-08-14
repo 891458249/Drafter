@@ -125,7 +125,7 @@ function remove(id) {
 // 注入 SDK 会话的 systemPrompt append 文本
 function composeAppend(gem) {
   if (!gem) return '';
-  let text = `\n\n<claude-ui-gem name="${gem.name}">\n`;
+  let text = `\n\n<drafter-gem name="${gem.name}">\n`;
   text += `你以自定义助手「${gem.name}」的身份运行。\n`;
   if (gem.desc) text += `说明:${gem.desc}\n`;
   if (gem.instructions) text += `\n指令:\n${gem.instructions}\n`;
@@ -145,7 +145,7 @@ function composeAppend(gem) {
       } catch {} // 读取失败只保留路径
     }
   }
-  text += `</claude-ui-gem>\n`;
+  text += `</drafter-gem>\n`;
   return text.slice(0, MAX_APPEND);
 }
 

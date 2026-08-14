@@ -5,7 +5,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', '.next',
-  '.venv', 'venv', '__pycache__', '.idea', '.vscode', '.claude-ui-worktrees']);
+  '.venv', 'venv', '__pycache__', '.idea', '.vscode', '.drafter-worktrees', '.desktopui-worktrees', '.claude-ui-worktrees']);
 
 // List project files. Prefer `git ls-files` (fast, respects .gitignore);
 // fall back to a bounded recursive walk.

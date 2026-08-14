@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { CDP, sleep } = require('./cdp');
-const WS_DIR = path.join(process.env.TEMP, 'claude-ui-reg');
+const WS_DIR = path.join(process.env.TEMP, 'drafter-reg');
 
 (async () => {
   const cdp = await new CDP().connect();

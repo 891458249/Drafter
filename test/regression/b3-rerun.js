@@ -2,7 +2,7 @@
 const { execSync, spawn } = require('child_process');
 const path = require('path');
 const { CDP, sleep } = require('./cdp');
-const WS_DIR = path.join(process.env.TEMP, 'claude-ui-reg');
+const WS_DIR = path.join(process.env.TEMP, 'drafter-reg');
 const APP = path.join(__dirname, '..', '..');
 
 (async () => {

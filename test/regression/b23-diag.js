@@ -1,6 +1,6 @@
 // B23 诊断:分别尝试 claude / cmd.exe 终端
 const { CDP } = require('./cdp');
-const WS_DIR = require('path').join(process.env.TEMP, 'claude-ui-reg');
+const WS_DIR = require('path').join(process.env.TEMP, 'drafter-reg');
 (async () => {
   const cdp = await new CDP().connect();
   for (const cmd of ['claude', 'cmd.exe']) {

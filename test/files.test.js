@@ -8,7 +8,7 @@ const path = require('path');
 
 const files = require('../src/main/files');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-files-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-files-test-'));
 
 // 非 git 目录 → listFiles 走 walk 兜底
 fs.mkdirSync(path.join(tmp, 'src'));

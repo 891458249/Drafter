@@ -3,15 +3,21 @@ const { app } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-const STORE_PATH = () => path.join(app.getPath('userData'), 'claude-ui-store.json');
+const STORE_PATH = () => path.join(app.getPath('userData'), 'drafter-store.json');
+// v0.9.35 更名 Drafter:旧文件名按新到旧只读兜底(不删不改),写入一律走新文件名
+const STORE_PATH_LEGACY = () => [
+  path.join(app.getPath('userData'), 'desktopui-store.json'),
+  path.join(app.getPath('userData'), 'claude-ui-store.json'),
+];
 const SESSIONS_DIR = () => path.join(app.getPath('userData'), 'sessions');
 
 function loadStore() {
-  try {
-    return JSON.parse(fs.readFileSync(STORE_PATH(), 'utf8'));
-  } catch {
-    return { recentProjects: [], settings: {}, sessions: [], cronJobs: [] };
+  for (const f of [STORE_PATH(), ...STORE_PATH_LEGACY()]) {
+    try {
+      return JSON.parse(fs.readFileSync(f, 'utf8'));
+    } catch {}
   }
+  return { recentProjects: [], settings: {}, sessions: [], cronJobs: [] };
 }
 
 function saveStore(store) {

@@ -1,7 +1,7 @@
 // Project groups: sessions are grouped under projects. A project owns
 //  - dirs:  directories the project spans (first one is the primary dir)
 //  - files: individually loaded files with a live read-only/editable tag
-//  - a shared memory file (.claude-ui/memory.md in the primary dir) that all
+//  - a shared memory file (.drafter/memory.md in the primary dir; 存量项目组兼容 .desktopui/.claude-ui) that all
 //    sessions in the group read/write, so context flows across sessions and
 //    survives app restarts.
 const path = require('path');
@@ -137,8 +137,19 @@ function isReadonly(projectId, filePath) {
 }
 
 // --- shared memory -----------------------------------------------------------
+// v0.9.35 更名 Drafter:记忆目录新建一律 .drafter;存量目录按新到旧识别
+// (.desktopui → .claude-ui,只认不改名,已入库提交不受影响)。
+function memoryDir(p) {
+  const base = (p.dirs && p.dirs[0]) || '.';
+  for (const dir of ['.drafter', '.desktopui', '.claude-ui']) {
+    const full = path.join(base, dir);
+    if (fs.existsSync(full)) return full;
+  }
+  return path.join(base, '.drafter');
+}
+
 function memoryPath(p) {
-  return path.join((p.dirs && p.dirs[0]) || '.', '.claude-ui', 'memory.md');
+  return path.join(memoryDir(p), 'memory.md');
 }
 
 function readMemory(p) {
@@ -164,8 +175,8 @@ function contextFor(projectId, cwd) {
   const mem = readMemory(p).slice(0, 8000);
   const extraDirs = (p.dirs || []).filter((d) => norm(d) !== norm(cwd));
 
-  let text = `\n\n<claude-ui-project-group>\n`;
-  text += `你运行在 Claude UI 的项目组「${p.name}」中,该组内可能有多个并行会话。\n`;
+  let text = `\n\n<drafter-project-group>\n`;
+  text += `你运行在 Drafter 的项目组「${p.name}」中,该组内可能有多个并行会话。\n`;
   text += `共享记忆文件:${mp}\n`;
   text += `规则:\n`;
   text += `1. 得出对项目后续工作有价值的结论、决定或阶段性进展时,主动用编辑工具把要点追加到共享记忆文件(保持精炼,一条一行)。\n`;
@@ -178,7 +189,7 @@ function contextFor(projectId, cwd) {
     }
     text += `被标记为只读的文件绝对不要用 Edit/Write 等工具修改;若任务需要修改,请先告知用户更改标签。\n`;
   }
-  text += `\n当前共享记忆内容:\n${mem || '(空)'}\n</claude-ui-project-group>\n`;
+  text += `\n当前共享记忆内容:\n${mem || '(空)'}\n</drafter-project-group>\n`;
 
   return { append: text, additionalDirectories: extraDirs, project: p };
 }

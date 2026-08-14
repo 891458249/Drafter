@@ -8,7 +8,7 @@ const path = require('path');
 
 const git = require('../src/main/git');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-git-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-git-test-'));
 const repoDir = path.join(tmp, 'repo');
 const plainDir = path.join(tmp, 'plain');
 fs.mkdirSync(repoDir);

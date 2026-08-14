@@ -7,7 +7,7 @@ const path = require('path');
 
 const aux = require('../src/main/aux-models');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-aux-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-aux-test-'));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const KEY = { id: 'k_1', name: 'Kuro', key: 'kuro-test-key', baseUrl: 'https://gw.example.com', kind: 'authToken' };

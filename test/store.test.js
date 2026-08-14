@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { installElectronStub } = require('./helpers/electron-stub');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-store-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-store-test-'));
 installElectronStub(tmp);
 const store = require('../src/main/store');
 
@@ -46,6 +46,32 @@ test('JSONL 事件日志: 追加后按序读回', () => {
 
   // 不存在的会话返回空数组而不是抛错
   assert.deepStrictEqual(store.readSessionEvents('no-such-session'), []);
+});
+
+test('legacy store: 新文件缺失时读旧品牌 store 兜底,写入回落新文件名(v0.9.35 更名)', () => {
+  const newFile = path.join(tmp, 'drafter-store.json');
+  const midFile = path.join(tmp, 'desktopui-store.json');
+  const legacyFile = path.join(tmp, 'claude-ui-store.json');
+  const bak = fs.readFileSync(newFile, 'utf8'); // 前面的用例已写出新文件
+  fs.renameSync(newFile, newFile + '.bak');
+  fs.writeFileSync(legacyFile, JSON.stringify({ settings: { theme: 'legacy-mark' }, sessions: [], recentProjects: [], cronJobs: [] }));
+  try {
+    // 新文件缺失 → 最旧的 legacy 兜底读到
+    assert.strictEqual(store.getSetting('theme'), 'legacy-mark');
+    // 中间代 desktopui 存在时优先于最旧的 claude-ui
+    fs.writeFileSync(midFile, JSON.stringify({ settings: { theme: 'mid-mark' }, sessions: [], recentProjects: [], cronJobs: [] }));
+    assert.strictEqual(store.getSetting('theme'), 'mid-mark');
+    // 写入走新文件名;旧文件只读兜底不删
+    store.setSetting('theme', 'rewritten');
+    assert.ok(fs.existsSync(newFile));
+    assert.ok(fs.existsSync(legacyFile));
+    assert.strictEqual(store.getSetting('theme'), 'rewritten');
+  } finally {
+    fs.rmSync(legacyFile, { force: true });
+    fs.rmSync(midFile, { force: true });
+    fs.rmSync(newFile, { force: true });
+    fs.writeFileSync(newFile, bak);
+  }
 });
 
 test('modelUsage: 同模型用量累加', () => {

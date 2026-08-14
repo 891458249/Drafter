@@ -1,19 +1,69 @@
-// Placeholder icon generator (no dependencies): builds a 256x256 PNG
-// (dark background + coral "CU" letters) and wraps it in an .ico container.
+// Drafter logo generator (no dependencies): 256x256 PNG + .ico container.
+// 设计(v0.9.35 更名 Drafter):深色底 + 「层叠草稿纸」——三页错位的稿纸轮廓,
+// 前页珊瑚色描边 + 三行文字线,呼应 Drafter(起草者)。旧版为像素字母 CU/DU。
 // Run: node build/make-icon.js  →  build/icon.png + build/icon.ico
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
 const SIZE = 256;
-const BG = [0x1a, 0x18, 0x15, 0xff];   // #1a1815 (app background)
-const FG = [0xd9, 0x77, 0x57, 0xff];   // #d97757 coral accent
+const BG = [0x1a, 0x18, 0x15, 0xff];        // #1a1815 (app background)
+const CORAL = [0xd9, 0x77, 0x57, 0xff];     // #d97757 coral accent
+const DIM1 = [0x9a, 0x54, 0x3d, 0xff];      // coral 调暗(后页一)
+const DIM2 = [0x5a, 0x30, 0x24, 0xff];      // coral 更暗(后页二)
 
-// 5x7 bitmap glyphs for C and U
-const GLYPHS = {
-  C: ['01110', '10001', '10000', '10000', '10000', '10001', '01110'],
-  U: ['10001', '10001', '10001', '10001', '10001', '10001', '01110'],
-};
+// --- pixel buffer ---
+const px = Buffer.alloc(SIZE * SIZE * 4);
+for (let i = 0; i < SIZE * SIZE; i++) Buffer.from(BG).copy(px, i * 4);
+function fillRect(x, y, w, h, color) {
+  for (let yy = y; yy < y + h; yy++) {
+    for (let xx = x; xx < x + w; xx++) {
+      if (xx < 0 || yy < 0 || xx >= SIZE || yy >= SIZE) continue;
+      Buffer.from(color).copy(px, (yy * SIZE + xx) * 4);
+    }
+  }
+}
+// 稿纸:深色填充 + 描边
+function sheet(x, y, w, h, border, t) {
+  fillRect(x, y, w, h, BG);
+  fillRect(x, y, w, t, border);                    // top
+  fillRect(x, y + h - t, w, t, border);            // bottom
+  fillRect(x, y, t, h, border);                    // left
+  fillRect(x + w - t, y, t, h, border);            // right
+}
+
+function buildPng() {
+  const W = 104, H = 120, T = 8;
+  // 后页(左上错位,逐层变暗)
+  sheet(48, 40, W, H, DIM2, T);
+  sheet(66, 58, W, H, DIM1, T);
+  // 前页
+  sheet(84, 76, W, H, CORAL, T);
+  // 前页文字线(草稿内容)
+  const lineX = 84 + 18, lineW = W - 36;
+  fillRect(lineX, 104, lineW, 8, CORAL);
+  fillRect(lineX, 128, lineW, 8, CORAL);
+  fillRect(lineX, 152, Math.round(lineW * 0.62), 8, CORAL); // 末行较短,像未写完的草稿
+
+  // scanlines, filter byte 0 per row
+  const raw = Buffer.alloc(SIZE * (1 + SIZE * 4));
+  for (let y = 0; y < SIZE; y++) {
+    raw[y * (1 + SIZE * 4)] = 0;
+    px.copy(raw, y * (1 + SIZE * 4) + 1, y * SIZE * 4, (y + 1) * SIZE * 4);
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(SIZE, 0);
+  ihdr.writeUInt32BE(SIZE, 4);
+  ihdr[8] = 8;  // bit depth
+  ihdr[9] = 6;  // color type RGBA
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
 
 // --- CRC32 (PNG chunks) ---
 const crcTable = new Int32Array(256);
@@ -35,53 +85,6 @@ function chunk(type, data) {
   const crc = Buffer.alloc(4);
   crc.writeUInt32BE(crc32(body));
   return Buffer.concat([len, body, crc]);
-}
-
-function buildPng() {
-  const px = Buffer.alloc(SIZE * SIZE * 4);
-  for (let i = 0; i < SIZE * SIZE; i++) Buffer.from(BG).copy(px, i * 4);
-
-  const scale = 20, gap = 20;
-  const text = 'CU';
-  const glyphW = 5 * scale, glyphH = 7 * scale;
-  const totalW = text.length * glyphW + (text.length - 1) * gap;
-  const ox = Math.floor((SIZE - totalW) / 2);
-  const oy = Math.floor((SIZE - glyphH) / 2);
-
-  for (let gi = 0; gi < text.length; gi++) {
-    const rows = GLYPHS[text[gi]];
-    for (let r = 0; r < 7; r++) {
-      for (let c = 0; c < 5; c++) {
-        if (rows[r][c] !== '1') continue;
-        for (let dy = 0; dy < scale; dy++) {
-          for (let dx = 0; dx < scale; dx++) {
-            const x = ox + gi * (glyphW + gap) + c * scale + dx;
-            const y = oy + r * scale + dy;
-            Buffer.from(FG).copy(px, (y * SIZE + x) * 4);
-          }
-        }
-      }
-    }
-  }
-
-  // scanlines, filter byte 0 per row
-  const raw = Buffer.alloc(SIZE * (1 + SIZE * 4));
-  for (let y = 0; y < SIZE; y++) {
-    raw[y * (1 + SIZE * 4)] = 0;
-    px.copy(raw, y * (1 + SIZE * 4) + 1, y * SIZE * 4, (y + 1) * SIZE * 4);
-  }
-
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(SIZE, 0);
-  ihdr.writeUInt32BE(SIZE, 4);
-  ihdr[8] = 8;  // bit depth
-  ihdr[9] = 6;  // color type RGBA
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', ihdr),
-    chunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
 }
 
 function buildIco(png) {

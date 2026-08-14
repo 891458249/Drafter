@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { installElectronStub } = require('./helpers/electron-stub');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-logger-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-logger-test-'));
 installElectronStub(tmp);
 const logger = require('../src/main/logger');
 

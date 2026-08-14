@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { installElectronStub } = require('./helpers/electron-stub');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-projects-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-projects-test-'));
 installElectronStub(tmp);
 const projects = require('../src/main/projects');
 
@@ -47,6 +47,18 @@ test('setTag: 文件标签切换后持久化,isReadonly 实时生效', () => {
 
   // 未登记的路径不受限制
   assert.strictEqual(projects.isReadonly(p.id, path.join(projDir, 'other.txt')), false);
+});
+
+test('memoryPath: 存量目录逐代识别(.desktopui/.claude-ui),全新项目组用 .drafter(v0.9.35 更名)', () => {
+  const legacyDir = path.join(tmp, 'legacy-proj');
+  fs.mkdirSync(path.join(legacyDir, '.claude-ui'), { recursive: true });
+  const midDir = path.join(tmp, 'mid-proj');
+  fs.mkdirSync(path.join(midDir, '.desktopui'), { recursive: true });
+  const freshDir = path.join(tmp, 'fresh-proj');
+  fs.mkdirSync(freshDir, { recursive: true });
+  assert.strictEqual(projects.memoryPath({ dirs: [legacyDir] }), path.join(legacyDir, '.claude-ui', 'memory.md'));
+  assert.strictEqual(projects.memoryPath({ dirs: [midDir] }), path.join(midDir, '.desktopui', 'memory.md'));
+  assert.strictEqual(projects.memoryPath({ dirs: [freshDir] }), path.join(freshDir, '.drafter', 'memory.md'));
 });
 
 test('pruneMissing: 清理失效登记,主目录删除且无会话的组被移除', () => {

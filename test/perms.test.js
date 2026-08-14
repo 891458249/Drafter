@@ -8,7 +8,7 @@ const path = require('path');
 
 const perms = require('../src/main/perms');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ui-perms-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-perms-test-'));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const readJson = (cwd) => JSON.parse(fs.readFileSync(perms.settingsPath(cwd), 'utf8'));
