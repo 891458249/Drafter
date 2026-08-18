@@ -15,6 +15,9 @@ const perms = require('./perms');
 const keys = require('./keys');
 const gems = require('./gems');
 
+// 编辑类工具:只读硬拦截与 acceptEdits 本地放行共用
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+
 // The Agent SDK is ESM-only — load it via dynamic import().
 let sdk = null;
 let sdkError = null;
@@ -378,7 +381,7 @@ class Session {
   _onPermission(toolName, input, opts = {}) {
     // hard guard: read-only tagged files can never be modified (backup to the hook)
     try {
-      if (this.meta.projectId && ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(toolName)) {
+      if (this.meta.projectId && EDIT_TOOLS.has(toolName)) {
         const fp = input && (input.file_path || input.notebook_path);
         if (fp && projects.isReadonly(this.meta.projectId, fp)) {
           this._emit({ type: 'ui_error', message: `已拦截对只读文件的修改:${fp}` }, true);
@@ -389,6 +392,19 @@ class Session {
     // auto-allow if the user chose "always" for this tool in this session
     if (this.autoAllowTools.has(toolName)) {
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
+    }
+    // 模式热切本地兜底(v0.9.37):回合中刚切换模式时,CLI 侧应用控制请求可能有延迟;
+    // 放行/拒绝类语义在 App 层立即生效,不依赖 CLI 已应用新模式。
+    // 顺序有意放在 autoAllowTools 之后:dontAsk 的「拒绝未预先批准」要尊重会话级 always 记忆。
+    const mode = this.meta.permissionMode || 'default';
+    if (mode === 'bypassPermissions') {
+      return Promise.resolve({ behavior: 'allow', updatedInput: input });
+    }
+    if (mode === 'acceptEdits' && EDIT_TOOLS.has(toolName)) {
+      return Promise.resolve({ behavior: 'allow', updatedInput: input });
+    }
+    if (mode === 'dontAsk') {
+      return Promise.resolve({ behavior: 'deny', message: '当前为「不询问」模式:未预先批准的操作已自动拒绝' });
     }
     const reqId = 'perm_' + crypto.randomUUID();
     const suggestions = opts.suggestions || [];
@@ -508,8 +524,19 @@ class Session {
   async setPermissionMode(mode) {
     this.meta.permissionMode = mode;
     store.upsertSession({ id: this.id, permissionMode: mode });
+    // 热切:挂起的权限卡一并按新模式即时裁决,UI 卡片同步消失(v0.9.37)
+    for (const [reqId, p] of [...this.pendingPerms]) {
+      if (mode === 'bypassPermissions' || (mode === 'acceptEdits' && EDIT_TOOLS.has(p.toolName))) {
+        this.respondPermission(reqId, 'allow');
+      } else if (mode === 'dontAsk') {
+        this.respondPermission(reqId, 'deny', '已切换为「不询问」模式,自动拒绝');
+      }
+    }
+    // 运行中直接发 SDK 控制请求(set_permission_mode);失败只记日志——
+    // 放行/拒绝类语义已由 _onPermission 按最新 meta.permissionMode 本地兜底
     if (this.q && this.running) {
-      try { await this.q.setPermissionMode(mode); return true; } catch {}
+      try { await this.q.setPermissionMode(mode); return true; }
+      catch (e) { console.error('[sessions] setPermissionMode 控制请求失败:', e.message); }
     }
     return false;
   }
@@ -726,8 +753,10 @@ class SessionManager {
   }
 
   notifyPermission(session, toolName) {
+    // 任何板块、是否活跃会话都弹 toast(v0.9.37):窗口可能最小化/在托盘,
+    // 或用户正停留在别的板块——权限确认是阻塞等待,必须强提醒;点击跳转到该会话。
+    this.notify('需要权限确认', `${session.meta.title || '会话'} 请求使用 ${toolName}`, () => this.jumpToSession(session.id));
     if (session.id !== this.activeId) {
-      this.notify('需要权限确认', `${session.meta.title || '会话'} 请求使用 ${toolName}`, () => this.jumpToSession(session.id));
       this.send('sess:attention', { sid: session.id });
     }
   }

@@ -1,6 +1,6 @@
 {
   "name": "drafter",
-  "version": "0.9.36",
+  "version": "0.9.37",
   "description": "A desktop UI for Claude Code",
   "main": "main.js",
   "scripts": {
