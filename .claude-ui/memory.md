@@ -54,6 +54,6 @@
 
 - 2026-08-12 v0.9.36 已发布:commit 73d957e 已 push;Release v0.9.36(id 372207239)已上传 exe+blockmap+latest.yml;发布脚本 .claude-ui/release-0.9.36.js(已入库)。内容:系统通知可点击跳转会话。sessions.js notify 加 onClick 参数(Notification 持引用进 Set 防 GC 吞 click 监听,close 释放)+ jumpToSession(restore/show/focus 主窗口 + 发 sess:activate);onTurnDone 与 notifyPermission 都接上点击;preload api.on 白名单加 sess:activate;app.js 监听后 ensureSession(sessList 取 meta 兜底)+setActiveSession+refreshList,跨板块会话由 session-activated 自动切板块。npm test 120/120。运行中 App 需重启生效。
 
-- 2026-08-12 v0.9.37(未 commit):权限确认 toast 不再限非活跃会话——notifyPermission 去掉 activeId 门控,任何板块/活跃会话/窗口最小化都弹右下角通知(权限是阻塞等待需强提醒),点击跳转到该会话(v0.9.36 链路);非活跃仍额外打点。npm test 120/120。
+- 2026-08-12 v0.9.37 已发布:commit 25582d5 已 push;Release v0.9.37(id 372284068)已上传 exe+blockmap+latest.yml;发布脚本 .claude-ui/release-0.9.37.js(已入库)。内容:权限确认 toast 不再限非活跃会话——notifyPermission 去掉 activeId 门控,任何板块/活跃会话/窗口最小化都弹右下角通知(权限是阻塞等待需强提醒),点击跳转到该会话(v0.9.36 链路);非活跃仍额外打点。npm test 120/120。
 
-- 2026-08-12 v0.9.37 同批(未 commit):**权限模式热切换**。三层保障:①setPermissionMode 先把挂起的权限卡按新模式即时裁决(bypass/acceptEdits→allow 编辑类,dontAsk→deny,卡片同步消失);②SDK 控制请求 set_permission_mode 照发(失败不再静默吞,记日志);③_onPermission 按最新 meta.permissionMode 本地兜底——bypassPermissions 全放行、acceptEdits 放行编辑类、dontAsk 拒绝未预批准(顺序在 autoAllowTools 之后,尊重会话级 always);EDIT_TOOLS 提为模块常量,只读硬拦截保持最前(bypass 也拦)。npm test 120/120。
+- 2026-08-12 v0.9.37 同批(已发布):**权限模式热切换**。三层保障:①setPermissionMode 先把挂起的权限卡按新模式即时裁决(bypass/acceptEdits→allow 编辑类,dontAsk→deny,卡片同步消失);②SDK 控制请求 set_permission_mode 照发(失败不再静默吞,记日志);③_onPermission 按最新 meta.permissionMode 本地兜底——bypassPermissions 全放行、acceptEdits 放行编辑类、dontAsk 拒绝未预批准(顺序在 autoAllowTools 之后,尊重会话级 always);EDIT_TOOLS 提为模块常量,只读硬拦截保持最前(bypass 也拦)。npm test 120/120。
