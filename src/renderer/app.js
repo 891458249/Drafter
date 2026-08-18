@@ -863,6 +863,18 @@ for (const m of document.querySelectorAll('.modal-mask')) {
 api.on('sess:event', (payload) => chat.handleSessEvent(payload));
 api.on('aigc:status', (payload) => chat.handleAigcStatus(payload)); // 新媒体生成任务进度
 
+// 点击系统通知(任务完成/权限确认):跳转激活对应会话(v0.9.36)
+api.on('sess:activate', async ({ sid } = {}) => {
+  if (!sid) return;
+  if (!state.sessions.has(sid)) {
+    const meta = (await api.sessList()).find((m) => m.id === sid);
+    if (!meta) return;
+    chat.ensureSession(sid, meta);
+  }
+  chat.setActiveSession(sid);
+  sessionsUi.refreshList();
+});
+
 // Cross-project switching: the topbar always reflects the ACTIVE SESSION's
 // project group and its own directory — there is no global directory.
 on('session-activated', async (sid) => {

@@ -719,7 +719,7 @@ class SessionManager {
     const name = session.meta.title || session.meta.cwd || '会话';
     const dur = ev && ev.duration_ms != null ? ',用时 ' + (ev.duration_ms / 1000).toFixed(1) + 's' : '';
     const err = !!(ev && ev.is_error);
-    this.notify(err ? '任务结束(出错)' : '任务完成', `${name} 的回合已结束${dur}`);
+    this.notify(err ? '任务结束(出错)' : '任务完成', `${name} 的回合已结束${dur}`, () => this.jumpToSession(session.id));
     if (session.id !== this.activeId) {
       this.send('sess:attention', { sid: session.id });
     }
@@ -727,14 +727,31 @@ class SessionManager {
 
   notifyPermission(session, toolName) {
     if (session.id !== this.activeId) {
-      this.notify('需要权限确认', `${session.meta.title || '会话'} 请求使用 ${toolName}`);
+      this.notify('需要权限确认', `${session.meta.title || '会话'} 请求使用 ${toolName}`, () => this.jumpToSession(session.id));
       this.send('sess:attention', { sid: session.id });
     }
   }
 
-  notify(title, body) {
+  // 点击系统通知:唤出主窗口并让渲染端激活对应会话(v0.9.36)
+  jumpToSession(sid) {
+    const win = this.getWindow();
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+    this.send('sess:activate', { sid });
+  }
+
+  notify(title, body, onClick) {
     try {
-      if (Notification.isSupported()) new Notification({ title, body }).show();
+      if (!Notification.isSupported()) return;
+      const n = new Notification({ title, body });
+      if (onClick) n.on('click', onClick);
+      // 持引用防 GC 吞掉 click 监听,close 后释放
+      (this._notifications || (this._notifications = new Set())).add(n);
+      n.on('close', () => this._notifications.delete(n));
+      n.show();
     } catch {}
   }
 

@@ -125,7 +125,7 @@ contextBridge.exposeInMainWorld('api', {
   // events
   on: (channel, cb) => {
     const allowed = [
-      'sess:event', 'sess:attention', 'cron:fired',
+      'sess:event', 'sess:attention', 'sess:activate', 'cron:fired',
       'term:data', 'term:exit',
       'file:changed', 'update:status', 'aigc:status',
     ];
