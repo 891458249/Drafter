@@ -409,3 +409,9 @@ Git 工作流:
 - **素材库**(新板块「素材」,md 模块四雏形):创作会话+画布节点双源聚合网格(existsSync 剔除,时间倒序),类型 chips+搜索,**「用作参考图」一键塞回创作会话附件并跳转——md 图→视频跨模态主链路闭环**
 - 板块框架扩展:SECTIONS 五板块,非会话板块(canvas/assets)跳过会话挑选流程;素材板块全宽;画布板块侧栏=画布列表
 - 验证:npm test 129/129(canvases.test.js 5 例);CDP 冒烟(electron --remote-debugging-port + Node 内置 WebSocket).claude-ui/smoke-canvas.js 14/14 步;真实 Key 数据复验(29 模型 chips/真实产物网格/零渲染错误)
+
+### v0.10.1(2026-08-19):画布 MVP 收尾——文本生成节点 + 画布模板 + fork 导入导出
+- **文本生成节点(md 1.1 文本生成,接入多家 LLM)**:画布新增「文本生成」节点——prompt(可被上游文本节点接管)+ chat 模型多选 fan-out,走 /v1/chat/completions(新主进程模块 llmtext.js,鉴权/URL 归一与 aigc 同套),结果版本翻页+「采用」,采用版本文本即下游 prompt(prompt 槽文本源从纯文本节点扩展到文本生成节点)
+- **画布模板(md 1.2)**:工具栏「▦ 模板」菜单——当前画布存为模板(主进程 sanitize 剥离任务历史/上传文件),从模板一键新建画布;首次进入播种两个预置(文生图→图生视频 / LLM 提示词→图片生成);模板存 userData/canvases/templates/
+- **画布 fork/导入导出(md 1.2 只读分享与「复制项目」)**:导出当前画布副本为 .drafter-canvas.json(剥离任务历史,布局+模型/提示词配置随文件走);导入严格校验结构(非本应用导出拒绝)后以「(副本)」后缀新建画布
+- npm test 136/136(新增 llmtext.test.js 5 例、canvases 模板/导出用例 2 例);CDP 冒烟 17/17(llmtext 节点/模板菜单/从模板建画布 3 节点 2 连线)

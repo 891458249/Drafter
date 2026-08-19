@@ -94,6 +94,43 @@ async function step(name, fn) {
     return evalJs(`document.getElementById('canvas-save-hint').textContent.includes('已保存')`);
   });
 
+  await step('v0.10.1 文本生成节点(llmtext)', async () => {
+    await evalJs(`document.getElementById('btn-cv-add').click();'m'`);
+    await sleep(200);
+    const r = await evalJs(`(() => {
+      const b = document.querySelector('#cv-add-menu button[data-nt="llmtext"]');
+      if (!b) return 'menu-missing';
+      b.click();
+      return 'clicked';
+    })()`);
+    await sleep(400);
+    const body = await evalJs(`(() => {
+      const nodes = document.querySelectorAll('#drawflow .drawflow-node');
+      const last = nodes[nodes.length - 1];
+      const b = last && last.querySelector('.cv-body');
+      return b ? JSON.stringify({prompt: !!b.querySelector('.cv-prompt'), msel: !!b.querySelector('.cv-msel'), gen: !!b.querySelector('.cv-gen')}) : 'no-body';
+    })()`);
+    return r + ' ' + body;
+  });
+  await step('v0.10.1 模板菜单(预置播种 + 存为模板行)', async () => {
+    await evalJs(`document.getElementById('btn-cv-tpl').click();'t'`);
+    await sleep(400);
+    return evalJs(`JSON.stringify({
+      presets: [...document.querySelectorAll('#cv-tpl-menu .cv-tpl-use')].map((x) => x.textContent.trim()),
+      saveRow: !!document.querySelector('#cv-tpl-menu [data-tplsave]'),
+      exportRow: !!document.querySelector('#cv-tpl-menu [data-tplexport]'),
+    })`);
+  });
+  await step('v0.10.1 从模板新建画布(首个预置)', async () => {
+    await evalJs(`document.querySelector('#cv-tpl-menu .cv-tpl-use').click();'u'`);
+    await sleep(1200);
+    return evalJs(`JSON.stringify({
+      nodes: document.querySelectorAll('#drawflow .drawflow-node').length,
+      connections: document.querySelectorAll('#drawflow svg.connection').length,
+      saveHint: document.getElementById('canvas-save-hint').textContent,
+    })`);
+  });
+
   await step('切到素材板块', async () => {
     await evalJs(`document.querySelector('#section-switch button[data-sec="assets"]').click();'clicked'`);
     await sleep(1500);

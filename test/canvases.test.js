@@ -88,6 +88,45 @@ test('patchTask:终态写回画布 JSON(用户切走后任务完成历史仍完�
   assert.strictEqual(canvases.patchTask('cv_none', '3', 'ok-1', {}), false);
 });
 
+test('模板(v0.10.1):保存/列表/加载/删除 + sanitize 剥离任务历史与上传文件', () => {
+  const graph = { drawflow: { Home: { data: {
+    '1': { id: 1, name: 'gen', data: { type: 'image', prompt: '猫', models: ['k1|Vidu-q2'], tasks: [{ traceId: 't1', status: 'done' }], active: 2, view: 1 } },
+    '2': { id: 2, name: 'up', data: { type: 'upload', file: { path: '/x.png', name: 'x.png', data: 'b64' } } },
+    '3': { id: 3, name: 'llm', data: { type: 'llmtext', results: [{ text: 'old' }], active: 0, view: 0 } },
+  } } } };
+  const t = canvases.saveTemplate('我的模板', graph);
+  assert.match(t.id, /^t_/);
+  const loaded = canvases.loadTemplate(t.id);
+  const d1 = loaded.graph.drawflow.Home.data['1'].data;
+  assert.deepStrictEqual(d1.tasks, [], '任务历史被剥离');
+  assert.strictEqual(d1.active, -1);
+  assert.strictEqual(d1.prompt, '猫', '配置保留');
+  assert.deepStrictEqual(d1.models, ['k1|Vidu-q2'], '模型选择保留');
+  assert.strictEqual(loaded.graph.drawflow.Home.data['2'].data.file, null, '上传文件剥离');
+  assert.deepStrictEqual(loaded.graph.drawflow.Home.data['3'].data.results, [], '文本结果剥离');
+  assert.deepStrictEqual(canvases.listTemplates().map((x) => x.id), [t.id]);
+  assert.strictEqual(canvases.removeTemplate(t.id), true);
+  assert.strictEqual(canvases.loadTemplate(t.id), null);
+  assert.strictEqual(canvases.listTemplates().length, 0);
+});
+
+test('导出/导入载荷(v0.10.1 fork):导出剥离历史,导入严格校验并加副本名', () => {
+  const cv = canvases.create('原画布');
+  canvases.save(cv.id, { graph: { drawflow: { Home: { data: {
+    '1': { id: 1, name: 'gen', data: { type: 'image', prompt: '狗', tasks: [{ traceId: 'x' }], active: 0, view: 0 } },
+  } } } } });
+  const payload = canvases.exportPayload(cv.id);
+  assert.strictEqual(payload.app, 'drafter-canvas');
+  assert.strictEqual(payload.name, '原画布');
+  assert.deepStrictEqual(payload.graph.drawflow.Home.data['1'].data.tasks, [], '导出不带任务历史');
+  assert.strictEqual(payload.graph.drawflow.Home.data['1'].data.prompt, '狗');
+  const imp = canvases.importPayload(payload);
+  assert.strictEqual(imp.name, '原画布(副本)');
+  assert.ok(imp.graph.drawflow.Home.data['1']);
+  assert.throws(() => canvases.importPayload({ foo: 1 }), /不是本应用导出的画布 JSON/);
+  assert.throws(() => canvases.importPayload({ app: 'drafter-canvas' }), /不是本应用导出的画布 JSON/);
+});
+
 test('listAssets:会话 JSONL 与画布节点双源聚合,剔除磁盘缺失,时间倒序', () => {
   // --- 会话源:媒体会话 aigc_task done 事件 ---
   const fSess = touchFile('aigc/t1/cat.png');

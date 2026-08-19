@@ -80,6 +80,8 @@ contextBridge.exposeInMainWorld('api', {
   sessRemove: (sid) => ipcRenderer.invoke('sess:remove', sid),
   sessSetActive: (sid) => ipcRenderer.invoke('sess:setActive', sid),
   sessSetGem: (sid, gemId) => ipcRenderer.invoke('sess:setGem', { sid, gemId }),
+  // 极速问答 ⇄ Agent 模式切换(v0.10.2,仅 chat 会话)
+  sessSetChatMode: (sid, mode) => ipcRenderer.invoke('sess:setChatMode', { sid, mode }),
 
   // AIGC 生成任务(新媒体板块)
   aigcSend: invoke('aigc:send'),

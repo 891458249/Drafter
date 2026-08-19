@@ -164,15 +164,27 @@ function renderNodeBody(id) {
 // prompt 槽接管:text 节点连入 input_1 后,prompt 由文本节点供给(只读展示)
 // ---------------------------------------------------------------------------
 function linkedTextSource(id) {
-  // 返回连入该节点 input_1(prompt 槽)的文本节点 id;无则 null
+  // 返回连入该节点 input_1(prompt 槽)的文本来源节点 id(文本/文本生成);无则 null
   if (!editor) return null;
   const node = editor.getNodeFromId(id);
   const conns = node && node.inputs && node.inputs.input_1 && node.inputs.input_1.connections;
   for (const c of conns || []) {
     const src = nodeData.get(String(c.node));
-    if (src && src.type === 'text') return String(c.node);
+    if (src && (src.type === 'text' || src.type === 'llmtext')) return String(c.node);
   }
   return null;
+}
+
+// 文本来源的当前文本:文本节点=正文;文本生成节点=采用版本的文本
+function textOfNode(id) {
+  const d = nodeData.get(String(id));
+  if (!d) return '';
+  if (d.type === 'text') return d.text || '';
+  if (d.type === 'llmtext') {
+    const r = d.results && d.results[d.active];
+    return (r && r.text) || '';
+  }
+  return '';
 }
 
 function applyLinkedPrompt(id) {
@@ -183,7 +195,7 @@ function applyLinkedPrompt(id) {
   if (!ta) return;
   const src = linkedTextSource(id);
   if (src != null) {
-    ta.value = (nodeData.get(src) || {}).text || '';
+    ta.value = textOfNode(src);
     ta.readOnly = true;
     ta.placeholder = '(由文本节点接管)';
   } else {
@@ -227,7 +239,7 @@ function resolveRefFiles(id) {
 
 function resolvePrompt(id, d) {
   const src = linkedTextSource(id);
-  if (src != null) return ((nodeData.get(src) || {}).text || '').trim();
+  if (src != null) return textOfNode(src).trim();
   return (d.prompt || '').trim();
 }
 
@@ -422,6 +434,7 @@ export async function renderList() {
 export async function enterSection() {
   if (!editor) bootEditor();
   await loadModelOptions(true); // 每次进板块重取(Key 可能刚改过)
+  await seedPresetsIfEmpty();   // 模板铺底(一次性)
   await renderList();
   if (!cvId) {
     const list = await api.canvasList();
@@ -481,14 +494,117 @@ function buildAddMenu() {
     `<button data-nt="${k}">${t.ico} ${t.label}</button>`).join('');
 }
 
+// ---------------------------------------------------------------------------
+// 画布模板(md 1.2:保存/复用整套节点布局) + fork/导入导出(只读分享与复制项目)
+// ---------------------------------------------------------------------------
+function presetNode({ id, type, x, y, inputs = {}, outputs = {} }) {
+  const t = NODE_TYPES[type];
+  const ins = {};
+  for (let i = 1; i <= t.inputs; i++) ins['input_' + i] = { connections: inputs['input_' + i] || [] };
+  const outs = {};
+  for (let i = 1; i <= t.outputs; i++) outs['output_' + i] = { connections: outputs['output_' + i] || [] };
+  return [String(id), {
+    id, name: 'cv-' + type, data: defaultData(type), class: 'cv-nt-' + type,
+    html: nodeShellHtml(type), typenode: false, inputs: ins, outputs: outs, pos_x: x, pos_y: y,
+  }];
+}
+
+const PRESETS = [
+  ['文生图 → 图生视频', () => ({ drawflow: { Home: { data: Object.fromEntries([
+    presetNode({ id: 1, type: 'text', x: 60, y: 140, outputs: { output_1: [{ node: '2', output: 'input_1' }, { node: '3', output: 'input_1' }] } }),
+    presetNode({ id: 2, type: 'image', x: 430, y: 90, inputs: { input_1: [{ node: '1', input: 'output_1' }] }, outputs: { output_1: [{ node: '3', output: 'input_2' }] } }),
+    presetNode({ id: 3, type: 'video', x: 800, y: 140, inputs: { input_1: [{ node: '1', input: 'output_1' }], input_2: [{ node: '2', input: 'output_1' }] } }),
+  ]) } } })],
+  ['LLM 提示词 → 图片生成', () => ({ drawflow: { Home: { data: Object.fromEntries([
+    presetNode({ id: 1, type: 'text', x: 60, y: 140, outputs: { output_1: [{ node: '2', output: 'input_1' }] } }),
+    presetNode({ id: 2, type: 'llmtext', x: 400, y: 120, inputs: { input_1: [{ node: '1', input: 'output_1' }] }, outputs: { output_1: [{ node: '3', output: 'input_1' }] } }),
+    presetNode({ id: 3, type: 'image', x: 760, y: 140, inputs: { input_1: [{ node: '2', input: 'output_1' }] } }),
+  ]) } } })],
+];
+
+// 首次进入播种两个预置模板(gems 预置同款:无模板时一次性铺底)
+async function seedPresetsIfEmpty() {
+  if ((await api.canvasListTemplates()).length) return;
+  for (const [name, make] of PRESETS) await api.canvasSaveTemplate(name, make());
+}
+
+function tplMenuHtml(list) {
+  const items = list.map((t) =>
+    `<div class="cv-tpl-row"><button class="cv-tpl-use" data-tpl="${t.id}">📐 ${escapeHtml(t.name)}</button><button class="cv-tpl-del" data-tpldel="${t.id}" title="删除模板">✕</button></div>`).join('');
+  return `<div class="cv-tpl-save"><input id="cv-tpl-name" class="input-sm" placeholder="模板名…" /><button class="btn btn-sm btn-primary" data-tplsave>存为模板</button></div>
+    <div class="cv-tpl-list">${items || '<div class="cv-ref-src cv-tpl-none">(暂无模板)</div>'}</div>
+    <div class="ctx-sep"></div>
+    <button data-tplexport>⇩ 导出当前画布副本…</button>`;
+}
+
+async function newCanvasFromTemplate(tplId) {
+  const t = await api.canvasLoadTemplate(tplId);
+  if (!t) return;
+  const cv = await api.canvasCreate(t.name);
+  await api.canvasSave(cv.id, { graph: t.graph });
+  await openCanvas(cv.id);
+}
+
+function bindTemplateMenu() {
+  $('btn-cv-tpl').onclick = async (e) => {
+    e.stopPropagation();
+    const menu = $('cv-tpl-menu');
+    if (menu.classList.contains('hidden')) {
+      menu.innerHTML = tplMenuHtml(await api.canvasListTemplates());
+    }
+    menu.classList.toggle('hidden');
+  };
+  $('cv-tpl-menu').onclick = async (e) => {
+    const menu = $('cv-tpl-menu');
+    if (e.target.closest('[data-tplsave]')) {
+      const name = ($('cv-tpl-name').value || '').trim();
+      if (!name || !cvId || !editor) return;
+      await api.canvasSaveTemplate(name, editor.export()); // 主进程 sanitize 剥离任务历史
+      $('canvas-save-hint').textContent = '已存为模板「' + name + '」';
+      menu.innerHTML = tplMenuHtml(await api.canvasListTemplates());
+      return;
+    }
+    const use = e.target.closest('[data-tpl]');
+    if (use) {
+      menu.classList.add('hidden');
+      await newCanvasFromTemplate(use.dataset.tpl);
+      return;
+    }
+    const del = e.target.closest('[data-tpldel]');
+    if (del) {
+      e.stopPropagation();
+      await api.canvasRemoveTemplate(del.dataset.tpldel);
+      menu.innerHTML = tplMenuHtml(await api.canvasListTemplates());
+      return;
+    }
+    if (e.target.closest('[data-tplexport]')) {
+      menu.classList.add('hidden');
+      if (!cvId) return;
+      await flushSave();
+      const r = await api.canvasExportFile(cvId);
+      if (r && r.ok) $('canvas-save-hint').textContent = '已导出副本:' + r.path;
+      else if (r && r.error && !r.canceled) alert('导出失败:' + r.error);
+    }
+  };
+  $('btn-cv-import').onclick = async () => {
+    const r = await api.canvasImportFile();
+    if (r && r.ok && r.canvas) await openCanvas(r.canvas.id);
+    else if (r && r.error && !r.canceled) alert(r.error);
+  };
+}
+
 function bindToolbar() {
   buildAddMenu();
+  bindTemplateMenu();
   $('btn-cv-add').onclick = (e) => {
     e.stopPropagation();
     $('cv-add-menu').classList.toggle('hidden');
   };
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('.cv-add-wrap')) $('cv-add-menu').classList.add('hidden');
+    if (!e.target.closest('.cv-add-wrap')) {
+      $('cv-add-menu').classList.add('hidden');
+      $('cv-tpl-menu').classList.add('hidden');
+    }
   });
   $('cv-add-menu').onclick = async (e) => {
     const b = e.target.closest('button[data-nt]');
@@ -525,8 +641,8 @@ function bindDelegation() {
     if (chip && chip.dataset.path) { api.openPath(chip.dataset.path); return; }
 
     if (e.target.closest('.cv-cancel')) {
-      const view = Math.min(Math.max(0, d.view || 0), d.tasks.length - 1);
-      const task = d.tasks[view];
+      const view = Math.min(Math.max(0, d.view || 0), (d.tasks || []).length - 1);
+      const task = (d.tasks || [])[view];
       // traceId 未回(创建中)或本地失败的任务无可取消,忽略
       if (!task || !task.traceId || String(task.traceId).startsWith('local-err-')) return;
       await api.aigcCancel(cvId, task.traceId);
@@ -556,12 +672,14 @@ function bindDelegation() {
       renderNodeBody(id);
       scheduleSave();
     } else if (act === 'next') {
-      d.view = Math.min(d.tasks.length - 1, (d.view || 0) + 1);
+      d.view = Math.min(versionsOf(d).length - 1, (d.view || 0) + 1);
       renderNodeBody(id);
       scheduleSave();
     } else if (act === 'adopt') {
       d.active = d.view || 0;
       renderNodeBody(id);
+      // 采用版本变更:下游 prompt 槽的只读展示同步刷新(文本生成采用版即下游提示词)
+      if (d.type === 'llmtext') applyLinkedPromptsFromText(id);
       scheduleSave();
     }
   });

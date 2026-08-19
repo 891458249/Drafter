@@ -18,6 +18,16 @@ const gems = require('./gems');
 // 编辑类工具:只读硬拦截与 acceptEdits 本地放行共用
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
+// 极速问答的系统提示(v0.10.2):整体替换 claude_code preset——默认提示+全工具 schema
+// 首轮实测要 ~26k tokens 输入,纯问答场景全是浪费;对齐 Codex CLI 思路(极简提示+
+// 强简洁指令、零工具面),压到百字量级,首轮输入降到 ~2-4k,TTFT 与网页版同量级。
+const FAST_CHAT_SYSTEM_PROMPT = [
+  '你是 Drafter 桌面客户端内置的 AI 助手。Drafter 是一款 AI 工作台软件,当前为纯问答模式。',
+  '规则:先给结论再按需展开;默认简洁,不堆砌格式;代码放进代码块并注明语言;',
+  '你没有文件系统/命令执行/联网等任何工具能力,不要声称读取了文件或运行了命令;',
+  '用户消息里的 <附件> 块内容即附件全文(已在消息内给出),直接基于它回答。',
+].join('\n');
+
 // The Agent SDK is ESM-only — load it via dynamic import().
 let sdk = null;
 let sdkError = null;
@@ -168,12 +178,16 @@ class Session {
       this._emit({ type: 'ui_error', message: 'Agent SDK 未安装:' + sdkError });
       return;
     }
+    // 极速问答(v0.10.2):chat 会话(chatMode 缺省视为 fast)走 SDK 隔离配置——
+    // 零内置工具/零文件设置/零 MCP/极简系统提示。resume/流式/锚点机制与 Agent 模式一致。
+    const isFastChat = this.meta.kind === 'chat' && this.meta.chatMode !== 'agent';
     const options = {
       cwd: this.meta.cwd,
-      permissionMode: this.meta.permissionMode || 'default',
+      // fast 下零工具无需权限流程;显式 bypass 避免 plan/dontAsk 等模式的 CLI 侧行为残留
+      permissionMode: isFastChat ? 'bypassPermissions' : (this.meta.permissionMode || 'default'),
       includePartialMessages: true,
       env: this.m.buildEnv({ ELECTRON_RUN_AS_NODE: '1' }, this.meta.keyId), // 按会话绑定的 Key 注入凭据(v0.8.2)
-      settingSources: ['user', 'project', 'local'],
+      settingSources: isFastChat ? [] : ['user', 'project', 'local'],
       stderr: (data) => this._emit({ type: 'ui_stderr', text: String(data) }),
       canUseTool: (toolName, input, opts) => this._onPermission(toolName, input, opts),
     };
@@ -206,6 +220,21 @@ class Session {
         if (forkAt) options.resumeSessionAt = forkAt;
       }
     }
+    if (isFastChat) {
+      // 极速问答:自定义极简系统提示(整体替换 preset;Gem 指令/知识仍拼入,Gem 的
+      // 默认工具在此模式下本就不存在,无需处理),零内置工具、零 MCP。
+      let sp = FAST_CHAT_SYSTEM_PROMPT;
+      if (this.meta.gemId) {
+        try {
+          const ga = gems.composeAppend(gems.byId(this.meta.gemId));
+          if (ga) sp += '\n\n' + ga;
+        } catch {}
+      }
+      options.systemPrompt = sp;
+      options.tools = [];
+      options.mcpServers = {};
+      options.strictMcpConfig = true;
+    } else {
     // project-group context: shared memory + file tags + extra dirs + readonly hook
     let projCtx = null;
     try {
@@ -216,10 +245,17 @@ class Session {
     if (this.meta.gemId) {
       try { gemAppend = gems.composeAppend(gems.byId(this.meta.gemId)); } catch {}
     }
+    // 静态提示前缀(v0.10.2):会话创建时按「跨会话共享提示缓存」设置盖戳(meta.staticPrompt)。
+    // cwd/git/记忆等动态段移出系统提示(改由首条用户消息携带),前缀跨会话静态 → 缓存命中。
+    // 只对创建时盖戳的会话启用:既存会话不中途换提示,避免缓存前缀反复横跳。
+    const staticPrompt = !!this.meta.staticPrompt;
     if (projCtx || gemAppend) {
       const combined = ((projCtx && projCtx.append) || '') + gemAppend;
       options.systemPrompt = { type: 'preset', preset: 'claude_code', append: combined };
+      if (staticPrompt) options.systemPrompt.excludeDynamicSections = true;
       // 无项目组时的附加目录由下方 else-if 分支统一处理(行为与旧版一致)
+    } else if (staticPrompt) {
+      options.systemPrompt = { type: 'preset', preset: 'claude_code', excludeDynamicSections: true };
     }
     if (projCtx) {
       // systemPrompt 已在上方统一赋值(含 Gem append 合并)
@@ -256,6 +292,7 @@ class Session {
     } else if (this.meta.extraDirs && this.meta.extraDirs.length) {
       // 无项目组(v0.9.2 起独立会话也可 /add-dir):只挂附加目录
       options.additionalDirectories = this.meta.extraDirs;
+    }
     }
     try {
       this.q = sdk.query({ prompt: this.queue, options });
@@ -562,6 +599,22 @@ class Session {
     return false;
   }
 
+  // 极速问答 ⇄ Agent 模式切换(v0.10.2,仅 chat 会话):系统提示/工具集只在 query
+  // 启动时读取,复用 setGem 的 needRestart 模式——回合中标记,空闲立即
+  // stop+start(resume 保上下文,可见历史与 SDK 上下文都不丢)。
+  async setChatMode(mode) {
+    if (this.meta.kind !== 'chat') return false;
+    const m = mode === 'agent' ? 'agent' : 'fast';
+    if ((this.meta.chatMode || 'fast') === m) return true;
+    this.meta.chatMode = m;
+    store.upsertSession({ id: this.id, chatMode: m });
+    if (!this.running) return true;
+    if (this.busy) { this.needRestart = true; return true; }
+    this.stop();
+    await this.start({ resume: !!this.meta.sdkSessionId });
+    return true;
+  }
+
   // 绑定/切换/清除 Gem(v0.9.11):systemPrompt 只在 query 启动时读取,
   // 因此运行中的会话需重启 query 生效——复用 addDir 的 needRestart 模式:
   // 回合进行中不打断(回合结束后自动重启),空闲则立即 stop+start(resume 保上下文)。
@@ -662,7 +715,7 @@ class SessionManager {
     });
   }
 
-  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId, gemId }) {
+  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId, gemId, chatMode }) {
     const id = 's_' + crypto.randomUUID().slice(0, 12);
     const meta = {
       id, cwd, model: model || null,
@@ -673,9 +726,14 @@ class SessionManager {
       projectId: projectId || null,
       sdkSessionId: forkFrom || null, archived: false,
       standalone: !!standalone, // 独立会话:不属于任何项目组(v0.5.0 起新会话默认)
-      kind: kind || null, // 板块标记:'chat'(v0.6.0)/'image'/'video'/'audio'/'model'(v0.9.0);null = code
+      kind: kind || null, // 板块标记:'chat'(v0.6.0)/'media'(v0.9.38 起);null = code
       keyId: keyId || null, // 创建时活跃的 API key(额度归账,v0.8.0)
       gemId: gemId || null, // 绑定的 Gem 自定义助手(v0.9.11)
+      // 极速问答(v0.10.2):chat 会话默认 fast(零工具/SDK 隔离配置);'agent' = 完整 Agent
+      chatMode: kind === 'chat' ? (chatMode === 'agent' ? 'agent' : 'fast') : undefined,
+      // 静态提示前缀戳(v0.10.2):创建时按设置决定是否启用 excludeDynamicSections
+      //(既存会话无此戳 → 永不启用,提示不在会话生命周期中途更换)
+      staticPrompt: store.getSetting('sharedPromptCache', true) !== false,
     };
     store.upsertSession(meta);
     const s = new Session(this, meta);
@@ -702,6 +760,7 @@ class SessionManager {
       forkFrom: canFork ? m.sdkSessionId : null,
       forkAt: canFork ? anchorUuid : null,
       standalone: m.standalone || undefined, kind: m.kind || undefined, // 独立/板块会话的分支同侧栏归属
+      chatMode: m.chatMode || undefined, // chat 会话分支继承极速/Agent 模式(v0.10.2)
     });
     store.writeSessionEvents(meta.id, prefix);
     return { ok: true, meta, warning: canFork ? null : '无 SDK 上下文锚点,分支只复制了可见历史' };

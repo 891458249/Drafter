@@ -1207,3 +1207,17 @@ body.sec-canvas .sidebar-filter { display: none; }
 }
 .asset-ops { display: flex; gap: 5px; padding: 0 9px 9px; }
 .asset-ops .btn { flex: 1; font-size: 11px; padding: 3px 0; }
+
+/* ---------------- 画布模板菜单 + 文本生成节点(v0.10.1) ---------------- */
+.cv-tpl-menu { min-width: 230px; }
+.cv-tpl-save { display: flex; gap: 6px; padding: 4px 4px 8px; }
+.cv-tpl-save .input-sm { flex: 1; min-width: 0; }
+.cv-tpl-row { display: flex; align-items: center; }
+.cv-tpl-row .cv-tpl-use { flex: 1; text-align: left; }
+.cv-tpl-row .cv-tpl-del { flex: none; width: auto; padding: 6px 9px; }
+.cv-tpl-none { padding: 6px 10px; display: block; }
+.cv-text-out {
+  max-height: 180px; overflow-y: auto; font-size: 12px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-word;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+}

@@ -613,6 +613,12 @@ ipcMain.handle('sess:setGem', async (_e, { sid, gemId }) => {
   await s.setGem(gemId || null);
   return true;
 });
+// 极速问答 ⇄ Agent 模式切换(v0.10.2,仅 chat 会话;重启 query 生效,resume 保上下文)
+ipcMain.handle('sess:setChatMode', async (_e, { sid, mode }) => {
+  const s = sessions.get(sid);
+  if (!s) return false;
+  return s.setChatMode(mode);
+});
 ipcMain.handle('sess:history', (_e, sid) => sessions.history(sid));
 // 修改并重新生成(v0.9.9):截断 UI 日志,fork SDK 上下文后发送编辑后的消息
 ipcMain.handle('sess:editRegenerate', async (_e, { sid, echoUuid, content, echoContent }) => {
