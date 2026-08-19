@@ -46,6 +46,7 @@ const updater = require('./src/main/updater');
 const keys = require('./src/main/keys');
 const aigc = require('./src/main/aigc');
 const canvases = require('./src/main/canvases');
+const llmtext = require('./src/main/llmtext');
 const aux = require('./src/main/aux-models');
 const title = require('./src/main/title');
 const gems = require('./src/main/gems');
@@ -731,6 +732,56 @@ ipcMain.handle('canvas:saveUpload', (_e, { id, name, data } = {}) => {
 
 // 素材库:媒体会话产物 + 画布节点产物聚合(时间倒序)
 ipcMain.handle('assets:list', () => canvases.listAssets());
+
+// LLM 文本补全(v0.10.1,画布「文本生成」节点,md 1.1):/v1/chat/completions 单次
+ipcMain.handle('llm:complete', async (_e, { keyId, model, prompt, system } = {}) => {
+  const keyEntry = keys.byId(keyId || null);
+  if (!keyEntry) return { ok: false, error: '未找到可用的 API Key' };
+  if (!model || !prompt) return { ok: false, error: '缺少模型或提示词' };
+  return llmtext.complete(keyEntry, { model, prompt, system });
+});
+
+// 画布模板(v0.10.1,md 1.2):保存/复用整套节点布局(剥离任务历史的布局+配置)
+ipcMain.handle('canvas:templates:list', () => canvases.listTemplates());
+ipcMain.handle('canvas:templates:save', (_e, { name, graph } = {}) => canvases.saveTemplate(name, graph));
+ipcMain.handle('canvas:templates:load', (_e, { id } = {}) => canvases.loadTemplate(id));
+ipcMain.handle('canvas:templates:remove', (_e, { id } = {}) => canvases.removeTemplate(id));
+
+// 画布 fork/导入导出(v0.10.1,md 1.2 只读分享与「复制项目」):
+// 导出剥离任务历史(同模板规约);导入严格校验结构后创建为新画布
+ipcMain.handle('canvas:exportFile', async (_e, { id } = {}) => {
+  const payload = canvases.exportPayload(id);
+  if (!payload) return { ok: false, error: '画布不存在' };
+  const win = getWindow();
+  const r = await dialog.showSaveDialog(win, {
+    title: '导出画布副本', defaultPath: `${payload.name.replace(/[\\/:*?"<>|]/g, '_')}.drafter-canvas.json`,
+    filters: [{ name: 'Drafter 画布', extensions: ['json'] }],
+  });
+  if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+  try {
+    fs.writeFileSync(r.filePath, JSON.stringify(payload, null, 2), 'utf8');
+    return { ok: true, path: r.filePath };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+ipcMain.handle('canvas:importFile', async () => {
+  const win = getWindow();
+  const r = await dialog.showOpenDialog(win, {
+    title: '导入画布 JSON', properties: ['openFile'],
+    filters: [{ name: 'Drafter 画布', extensions: ['json'] }],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true };
+  try {
+    const json = JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8'));
+    const { name, graph } = canvases.importPayload(json);
+    const cv = canvases.create(name);
+    canvases.save(cv.id, { graph });
+    return { ok: true, canvas: cv };
+  } catch (e) {
+    return { ok: false, error: '导入失败:' + e.message };
+  }
+});
 
 // 参考图文件的 MIME(仅图片可作 ref;画布参考图来源为 assets 目录或上游产物目录)
 const REF_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };

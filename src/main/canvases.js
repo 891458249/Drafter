@@ -86,6 +86,76 @@ function saveUpload(id, { name, data } = {}) {
   return { path: fp, name: safe };
 }
 
+// --- 画布模板(md 1.2 画布模板:保存/复用整套节点布局) -------------------------
+const TEMPLATES_DIR = () => path.join(ROOT(), 'templates');
+const templatePath = (id) => path.join(TEMPLATES_DIR(), id + '.json');
+const TID_RE = /^t_[a-zA-Z0-9_-]+$/;
+
+// 模板只复用布局+配置:任务历史/版本索引/上传文件等个人数据剥离
+function sanitizeGraph(graph) {
+  const g = JSON.parse(JSON.stringify(graph || {}));
+  const nodes = g && g.drawflow && g.drawflow.Home && g.drawflow.Home.data;
+  for (const n of Object.values(nodes || {})) {
+    const d = n && n.data;
+    if (!d) continue;
+    if (Array.isArray(d.tasks)) { d.tasks = []; d.active = -1; d.view = 0; }
+    if (Array.isArray(d.results)) { d.results = []; d.active = -1; d.view = 0; }
+    if ('file' in d) d.file = null;
+  }
+  return g;
+}
+
+function listTemplates() {
+  let names = [];
+  try { names = fs.readdirSync(TEMPLATES_DIR()); } catch { return []; }
+  const out = [];
+  for (const n of names) {
+    if (!n.endsWith('.json')) continue;
+    try {
+      const j = JSON.parse(fs.readFileSync(path.join(TEMPLATES_DIR(), n), 'utf8'));
+      if (j && j.id) out.push({ id: j.id, name: j.name || '(未命名模板)', createdAt: j.createdAt });
+    } catch {}
+  }
+  return out.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+function saveTemplate(name, graph) {
+  const id = 't_' + crypto.randomUUID().slice(0, 12);
+  const t = { id, name: (name && String(name).trim()) || '未命名模板', createdAt: Date.now(), graph: sanitizeGraph(graph) };
+  fs.mkdirSync(TEMPLATES_DIR(), { recursive: true });
+  fs.writeFileSync(templatePath(id), JSON.stringify(t, null, 2), 'utf8');
+  return { id, name: t.name, createdAt: t.createdAt };
+}
+
+function loadTemplate(id) {
+  if (!TID_RE.test(id || '')) return null;
+  try {
+    const j = JSON.parse(fs.readFileSync(templatePath(id), 'utf8'));
+    return j && j.id ? j : null;
+  } catch { return null; }
+}
+
+function removeTemplate(id) {
+  if (!TID_RE.test(id || '')) return false;
+  try { fs.unlinkSync(templatePath(id)); return true; } catch { return false; }
+}
+
+// --- 画布 fork/导出(md 1.2 只读分享与「复制项目」) -----------------------------
+// 导出内容与模板同规:剥离任务历史,拿到的人从干净布局+模型/提示词配置开始
+function exportPayload(id) {
+  const cv = load(id);
+  if (!cv) return null;
+  return { app: 'drafter-canvas', version: 1, name: cv.name, graph: sanitizeGraph(cv.graph) };
+}
+
+// 导入校验:结构必须是本应用导出的画布 JSON
+function importPayload(json) {
+  if (!json || json.app !== 'drafter-canvas' || typeof json.graph !== 'object' || !json.graph) {
+    throw new Error('不是本应用导出的画布 JSON');
+  }
+  return { name: (json.name || '导入画布') + '(副本)', graph: json.graph };
+}
+
 // --- 素材库聚合 -------------------------------------------------------------
 const IMG_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp']);
 const VID_EXTS = new Set(['mp4', 'mov', 'webm']);
@@ -175,4 +245,7 @@ function patchTask(canvasId, nodeId, traceId, patch) {
   return true;
 }
 
-module.exports = { list, create, load, save, remove, saveUpload, listAssets, patchTask, extKind, ROOT, assetsDir };
+module.exports = {
+  list, create, load, save, remove, saveUpload, listAssets, patchTask, extKind, ROOT, assetsDir,
+  sanitizeGraph, listTemplates, saveTemplate, loadTemplate, removeTemplate, exportPayload, importPayload,
+};

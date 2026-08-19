@@ -95,6 +95,13 @@ contextBridge.exposeInMainWorld('api', {
   canvasSave: (id, payload) => ipcRenderer.invoke('canvas:save', { id, ...payload }),
   canvasDelete: (id) => ipcRenderer.invoke('canvas:delete', { id }),
   canvasSaveUpload: (id, name, data) => ipcRenderer.invoke('canvas:saveUpload', { id, name, data }),
+  canvasListTemplates: () => ipcRenderer.invoke('canvas:templates:list'),
+  canvasSaveTemplate: (name, graph) => ipcRenderer.invoke('canvas:templates:save', { name, graph }),
+  canvasLoadTemplate: (id) => ipcRenderer.invoke('canvas:templates:load', { id }),
+  canvasRemoveTemplate: (id) => ipcRenderer.invoke('canvas:templates:remove', { id }),
+  canvasExportFile: (id) => ipcRenderer.invoke('canvas:exportFile', { id }),
+  canvasImportFile: () => ipcRenderer.invoke('canvas:importFile'),
+  llmComplete: (p) => ipcRenderer.invoke('llm:complete', p), // 画布文本生成节点(v0.10.1)
   assetsList: () => ipcRenderer.invoke('assets:list'),
 
   // git / diff / PR

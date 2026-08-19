@@ -12,6 +12,7 @@ import { openViewer } from './msgmenu.js';
 // ---------------------------------------------------------------------------
 const NODE_TYPES = {
   text:    { label: '文本',     ico: '📝', modelType: null,    inputs: 0, outputs: 1, inTypes: [],                outType: 'text'  },
+  llmtext: { label: '文本生成', ico: '✍️', modelType: 'chat',  inputs: 1, outputs: 1, inTypes: ['text'],           outType: 'text', llm: true },
   upload:  { label: '参考图',   ico: '🖼️', modelType: null,    inputs: 0, outputs: 1, inTypes: [],                 outType: 'image' },
   image:   { label: '图片生成', ico: '🎨', modelType: 'image', inputs: 2, outputs: 1, inTypes: ['text', 'image'],  outType: 'image' },
   video:   { label: '视频生成', ico: '🎬', modelType: 'video', inputs: 2, outputs: 1, inTypes: ['text', 'image'],  outType: 'video' },
@@ -41,7 +42,13 @@ let addSeq = 0;             // 新节点错位摆放
 function defaultData(type) {
   if (type === 'text') return { type, text: '' };
   if (type === 'upload') return { type, file: null }; // file:{path,name,mediaType,data}
+  if (type === 'llmtext') return { type, prompt: '', models: [], results: [], active: -1, view: 0 };
   return { type, prompt: '', models: [], tasks: [], active: -1, view: 0 };
+}
+
+// 版本列表:媒体生成走 tasks(含 traceId),文本生成走 results(含 text)
+function versionsOf(d) {
+  return d && d.type === 'llmtext' ? (d.results || []) : (d.tasks || []);
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +58,7 @@ async function loadModelOptions(force = false) {
   if (modelOptions && !force) return;
   await ensureGroups();
   const entries = (await api.keysEnabledModels()) || [];
-  const byType = { image: [], video: [], audio: [], model: [] };
+  const byType = { chat: [], image: [], video: [], audio: [], model: [] };
   for (const e of entries) {
     const groups = state.GroupsCache.get(e.keyId);
     const g = groups && groups.find((x) => Array.isArray(x.models) && x.models.includes(e.model));
@@ -89,29 +96,38 @@ function taskFilesHtml(task) {
 }
 
 function galleryHtml(d) {
-  const total = d.tasks.length;
+  const list = versionsOf(d);
+  const total = list.length;
   if (!total) return '';
   const view = Math.min(Math.max(0, d.view || 0), total - 1);
-  const task = d.tasks[view];
-  const st = task.status || 'pending';
+  const v = list[view];
+  const st = v.status || 'pending';
   let inner = '';
-  if (st === 'done') {
-    inner = taskFilesHtml(task) || '<div class="cv-status">(无产物文件)</div>';
+  if (d.type === 'llmtext') {
+    // 文本生成:结果即文本(预览可滚动)
+    inner = st === 'fail'
+      ? `<div class="cv-status st-fail">${escapeHtml(v.failReason || '生成失败')}</div>`
+      : st === 'done'
+        ? `<div class="cv-text-out">${escapeHtml(v.text || '')}</div>`
+        : `<div class="cv-status"><span class="spin">◐</span> 生成中…</div>`;
+  } else if (st === 'done') {
+    inner = taskFilesHtml(v) || '<div class="cv-status">(无产物文件)</div>';
   } else if (AIGC_TERMINAL.has(st)) {
-    inner = `<div class="cv-status st-fail">${escapeHtml(task.failReason || STATUS_TEXT[st] || st)}</div>`;
+    inner = `<div class="cv-status st-fail">${escapeHtml(v.failReason || STATUS_TEXT[st] || st)}</div>`;
   } else {
     inner = `<div class="cv-status"><span class="spin">◐</span> ${STATUS_TEXT[st] || st}… <button class="cv-cancel" title="取消任务">✕</button></div>`;
   }
   const adopted = d.active === view;
+  const adoptable = st === 'done';
   return `<div class="cv-gallery" data-view="${view}">
     <div class="cv-result">${inner}</div>
     <div class="cv-pager">
       <button data-act="prev" ${total <= 1 ? 'disabled' : ''} title="上一版">◀</button>
       <span>${view + 1}/${total}</span>
       <button data-act="next" ${total <= 1 ? 'disabled' : ''} title="下一版">▶</button>
-      ${st === 'done' ? (adopted ? '<span class="cv-adopted-tag">✓ 已采用</span>' : '<button data-act="adopt" title="采用此版本作为下游输入">采用</button>') : ''}
+      ${adoptable ? (adopted ? '<span class="cv-adopted-tag">✓ 已采用</span>' : '<button data-act="adopt" title="采用此版本作为下游输入">采用</button>') : ''}
     </div>
-    <div class="cv-ref-src" title="${escapeHtml(task.prompt || '')}">${escapeHtml(modelLabel(task.model || '') || '')}</div>
+    <div class="cv-ref-src" title="${escapeHtml(v.prompt || '')}">${escapeHtml(modelLabel(v.model || '') || '')}</div>
   </div>`;
 }
 
@@ -225,6 +241,25 @@ async function runNode(id) {
   const prompt = resolvePrompt(id, d);
   if (!prompt) { alert('请先填写提示词(或连入文本节点)。'); return; }
   if (!d.models.length) { alert('请先勾选模型(可多选,同屏对比)。'); return; }
+
+  // 文本生成节点(走 /v1/chat/completions,串行调用,版本翻页与媒体节点同规)
+  if (d.type === 'llmtext') {
+    for (const modelVal of d.models) {
+      const { keyId, model } = parseModelValue(modelVal);
+      const entry = { model, prompt, status: 'pending', ts: Date.now(), text: '' };
+      d.results.push(entry);
+      d.view = d.results.length - 1;
+      renderNodeBody(id);
+      const r = await api.llmComplete({ keyId, model, prompt });
+      if (r && r.ok) { entry.status = 'done'; entry.text = r.text; }
+      else { entry.status = 'fail'; entry.failReason = (r && r.error) || '请求失败'; }
+      if (d.active < 0) d.active = d.results.length - 1;
+      renderNodeBody(id);
+    }
+    scheduleSave();
+    return;
+  }
+
   const refFiles = resolveRefFiles(id);
   for (const modelVal of d.models) {
     const { keyId, model } = parseModelValue(modelVal);
