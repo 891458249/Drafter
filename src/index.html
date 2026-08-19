@@ -8,6 +8,7 @@
   <title>Drafter</title>
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
   <link rel="stylesheet" href="../node_modules/highlight.js/styles/github-dark.css" />
+  <link rel="stylesheet" href="../node_modules/drawflow/dist/drawflow.min.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -20,10 +21,9 @@
         <div id="section-switch" class="section-switch">
           <button data-sec="code" class="active" title="Code 板块:面向项目的完整工作区">Code</button>
           <button data-sec="chat" title="Chat 板块:纯对话 AI,不服务项目">Chat</button>
-          <button data-sec="image" title="Image 板块:图像生成">Image</button>
-          <button data-sec="video" title="Video 板块:视频生成">Video</button>
-          <button data-sec="audio" title="Audio 板块:音频生成">Audio</button>
-          <button data-sec="model" title="Model 板块:3D 模型生成">Model</button>
+          <button data-sec="media" title="创作板块:图像/视频/音频/3D 一体化生成(v0.9.38 四大媒体板块合并)">创作</button>
+          <button data-sec="canvas" title="画布板块:无限画布节点工作流,多模型 fan-out 对比(v0.10.0)">画布</button>
+          <button data-sec="assets" title="素材板块:全部生成产物归档浏览与复用(v0.10.0)">素材</button>
         </div>
         <span id="branch-label" class="branch-label code-only"></span>
       </div>
@@ -61,6 +61,14 @@
           <label class="show-archived"><input type="checkbox" id="show-archived" /> 已归档</label>
           <button id="btn-proj-refresh" class="icon-btn" title="刷新项目列表(清理磁盘上已不存在的目录/文件;主目录已删且无会话的组将移除)">⟳</button>
         </div>
+        <!-- 创作板块工坊筛选(v0.9.38):按会话当前模型的生成类型过滤会话列表;仅创作板块显示 -->
+        <div id="shop-filter" class="shop-filter">
+          <button data-shop="all" class="active">全部</button>
+          <button data-shop="image">图片</button>
+          <button data-shop="video">视频</button>
+          <button data-shop="audio">音频</button>
+          <button data-shop="model">3D</button>
+        </div>
         <ul id="session-list" class="session-list"></ul>
       </aside>
 
@@ -74,6 +82,38 @@
           <!-- 回到底部(v0.9.13):上翻解除吸底后出现,点击恢复吸附并吸底;
                v0.9.25 移进 messages-wrap,位于导航栏尾端之下 -->
           <button id="btn-scroll-bottom" class="scroll-bottom hidden" title="回到底部">↓</button>
+        </div>
+        <!-- 无限画布板块(v0.10.0):节点工作流(Drawflow),多模型 fan-out / 节点生成历史 -->
+        <div id="canvas-root" class="canvas-root">
+          <div class="canvas-toolbar">
+            <div class="cv-add-wrap">
+              <button id="btn-cv-add" class="btn btn-sm" title="添加节点">＋ 节点</button>
+              <div id="cv-add-menu" class="cv-add-menu hidden"></div>
+            </div>
+            <span id="canvas-save-hint" class="canvas-save-hint" title="画布自动保存"></span>
+            <span class="grow"></span>
+            <button id="btn-cv-zoom-out" class="icon-btn" title="缩小">－</button>
+            <button id="btn-cv-zoom-reset" class="icon-btn" title="重置缩放">1:1</button>
+            <button id="btn-cv-zoom-in" class="icon-btn" title="放大">＋</button>
+          </div>
+          <div id="drawflow" class="drawflow-host"></div>
+          <div id="canvas-empty" class="canvas-empty hidden">还没有画布——点左侧「＋ 新画布」新建一个</div>
+        </div>
+        <!-- 素材板块(v0.10.0):全部生成产物的归档网格(会话 + 画布两源) -->
+        <div id="assets-root" class="assets-root">
+          <div class="assets-toolbar">
+            <div id="assets-filter" class="shop-filter assets-chips">
+              <button data-shop="all" class="active">全部</button>
+              <button data-shop="image">图片</button>
+              <button data-shop="video">视频</button>
+              <button data-shop="audio">音频</button>
+              <button data-shop="model">3D</button>
+            </div>
+            <input id="assets-search" class="input-sm" placeholder="搜索 prompt / 文件名 / 模型…" />
+            <button id="btn-assets-refresh" class="icon-btn" title="重新扫描">⟳</button>
+          </div>
+          <div id="assets-grid" class="assets-grid"></div>
+          <div id="assets-empty" class="assets-empty hidden">还没有生成产物——先去「创作」或「画布」生成内容</div>
         </div>
         <div class="composer">
           <div id="attachments" class="attachments hidden"></div>
@@ -453,6 +493,7 @@
 
   <script src="../node_modules/marked/marked.min.js"></script>
   <script src="vendor/hljs.js"></script>
+  <script src="../node_modules/drawflow/dist/drawflow.min.js"></script>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script type="module" src="renderer/app.js"></script>

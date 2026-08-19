@@ -1,6 +1,6 @@
 {
   "name": "drafter",
-  "version": "0.9.37",
+  "version": "0.10.0",
   "description": "A desktop UI for Claude Code",
   "main": "main.js",
   "scripts": {
@@ -20,6 +20,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.218",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "drawflow": "^0.0.60",
     "electron-updater": "^6.8.9",
     "highlight.js": "^11.10.0",
     "marked": "^14.1.3",

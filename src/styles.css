@@ -840,9 +840,9 @@ kbd {
   font-size: 12px; padding: 4px 10px; cursor: pointer;
 }
 .section-switch button.active { background: var(--accent); color: #1a1815; font-weight: 600; }
-/* code-only 元素仅 code 板块显示;body 启动即挂 sec-code,其余板块(sec-chat/image/...)统一隐藏 */
+/* code-only 元素仅 code 板块显示;body 启动即挂 sec-code,其余板块(sec-chat/sec-media)统一隐藏 */
 body:not(.sec-code) .code-only { display: none !important; }
-/* workspace-only 元素 code+chat 板块都显示(如「面板」按钮,v0.9.33),仅媒体板块隐藏 */
+/* workspace-only 元素 code+chat 板块都显示(如「面板」按钮,v0.9.33),仅创作板块隐藏 */
 body:not(.sec-code):not(.sec-chat) .workspace-only { display: none !important; }
 
 /* ---------------- Key 额度与模型勾选(v0.8.0) ---------------- */
@@ -871,9 +871,20 @@ body:not(.sec-code):not(.sec-chat) .workspace-only { display: none !important; }
   white-space: nowrap; user-select: none;
 }
 
-/* ---------------- AIGC 任务卡片(新媒体板块,v0.9.0) ---------------- */
-/* audio/model 板块首版无参考图入口 */
-body.sec-audio #btn-add-attach, body.sec-model #btn-add-attach { display: none; }
+/* ---------------- AIGC 任务卡片(创作板块,v0.9.0;v0.9.38 四大板块合并) ---------------- */
+/* 附件按钮按会话生成类型分段:仅 image/video 类型会话显示(参考图入口);
+   audio/model/类型未知时不显示(body.board-* 由会话激活/模型切换时同步) */
+body.sec-media:not(.board-image):not(.board-video) #btn-add-attach { display: none; }
+
+/* 工坊筛选 chips(v0.9.38):仅创作板块显示,按生成类型过滤会话列表 */
+body:not(.sec-media) #shop-filter { display: none; }
+.shop-filter { display: flex; gap: 4px; padding: 4px 10px 6px; }
+.shop-filter button {
+  flex: 1; background: none; border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text-dim); font-size: 11px; padding: 2px 0; cursor: pointer;
+}
+.shop-filter button:hover { color: var(--text); }
+.shop-filter button.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 
 .aigc-card {
   border: 1px solid var(--border); border-radius: 8px;
@@ -1007,9 +1018,8 @@ video.aigc-media { max-height: 360px; }
 }
 img.aigc-media { cursor: zoom-in; }
 
-/* sdk-only 元素仅 code/chat(SDK 会话)板块显示;新媒体板块隐藏(v0.9.6) */
-body.sec-image .sdk-only, body.sec-video .sdk-only,
-body.sec-audio .sdk-only, body.sec-model .sdk-only { display: none !important; }
+/* sdk-only 元素仅 code/chat(SDK 会话)板块显示;创作板块隐藏(v0.9.38 四大媒体板块合并) */
+body.sec-media .sdk-only { display: none !important; }
 
 /* 生成产物文件条(v0.9.6):文件名可点击打开/预览 */
 .aigc-file-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
@@ -1018,3 +1028,182 @@ body.sec-audio .sdk-only, body.sec-model .sdk-only { display: none !important; }
   cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .aigc-file-open:hover { text-decoration: underline; }
+
+/* ================= 无限画布 + 素材板块(v0.10.0) ================= */
+/* 板块容器显隐:画布/素材板块用专属根容器,隐藏消息流与输入区 */
+#canvas-root, #assets-root { display: none; }
+body.sec-canvas #canvas-root { display: flex; }
+body.sec-assets #assets-root { display: flex; }
+body.sec-canvas .messages-wrap, body.sec-canvas .composer,
+body.sec-assets .messages-wrap, body.sec-assets .composer { display: none !important; }
+/* 画布/素材板块无 SDK 会话要素(模式/推理深度/压缩) */
+body.sec-canvas .sdk-only, body.sec-assets .sdk-only { display: none !important; }
+/* 素材板块全宽网格,不带侧栏 */
+body.sec-assets #sidebar { display: none; }
+/* 画布板块侧栏给画布列表用,隐藏会话筛选项 */
+body.sec-canvas .sidebar-filter { display: none; }
+
+/* ---------------- 画布工具栏与根容器 ---------------- */
+#canvas-root { flex: 1; min-height: 0; flex-direction: column; }
+.canvas-toolbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+}
+.canvas-save-hint { font-size: 11px; color: var(--text-dim); margin-left: 8px; }
+.drawflow-host { flex: 1; min-height: 0; position: relative; }
+.canvas-empty {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); font-size: 13px; pointer-events: none;
+}
+.cv-add-wrap { position: relative; }
+.cv-add-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 60; min-width: 150px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+}
+.cv-add-menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: none;
+  color: var(--text); font-size: 12.5px; padding: 6px 10px; border-radius: 6px; cursor: pointer; text-align: left;
+}
+.cv-add-menu button:hover { background: var(--bg-hover); }
+
+/* ---------------- Drawflow 主题化(深色) ---------------- */
+#drawflow { background: var(--bg); }
+#drawflow .parent-drawflow { background: var(--bg); }
+#drawflow .drawflow-node {
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
+  padding: 0; width: 260px; color: var(--text);
+}
+#drawflow .drawflow-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+#drawflow .drawflow-node .drawflow_content_node { width: 100%; }
+#drawflow .drawflow-node .input, #drawflow .drawflow-node .output {
+  width: 12px; height: 12px; background: var(--bg); border: 2px solid var(--accent);
+}
+#drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { background: var(--accent); }
+#drawflow .main-path { stroke: var(--accent); stroke-width: 2.5px; }
+#drawflow .main-path:hover, #drawflow .main-path.selected { stroke: var(--accent-hover); }
+#drawflow .drawflow-delete {
+  background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border);
+  right: -12px; top: -12px;
+}
+#drawflow .drawflow-delete:hover { color: var(--red); border-color: var(--red); }
+#drawflow .connection .main-path { stroke: var(--text-dim); }
+#drawflow .drawflow-node .outputs, #drawflow .drawflow-node .inputs { padding-top: 4px; }
+
+/* ---------------- 节点内容 ---------------- */
+.cv-head {
+  display: flex; align-items: center; gap: 6px; padding: 7px 10px;
+  font-size: 12px; font-weight: 600; cursor: move; border-bottom: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+}
+.cv-head.nt-text { background: rgba(91,155,213,.14); } .cv-head.nt-upload { background: rgba(63,178,127,.14); }
+.cv-head.nt-image { background: rgba(63,178,127,.14); } .cv-head.nt-video { background: rgba(138,91,214,.16); }
+.cv-head.nt-audio { background: rgba(214,146,63,.15); } .cv-head.nt-model3d { background: rgba(63,167,178,.15); }
+.cv-head .cv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-head .cv-del {
+  background: none; border: none; color: var(--text-dim); font-size: 11px; cursor: pointer; padding: 0 2px;
+}
+.cv-head .cv-del:hover { color: var(--red); }
+.cv-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 7px; }
+.cv-body textarea {
+  width: 100%; resize: vertical; min-height: 44px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: 12px; padding: 6px 8px; font-family: var(--font);
+}
+.cv-body textarea:focus { outline: none; border-color: var(--accent); }
+.cv-body textarea[readonly] { opacity: .7; border-style: dashed; }
+.cv-pick {
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font-size: 11.5px; padding: 5px 8px; cursor: pointer; width: 100%; text-align: left;
+}
+.cv-pick:hover { border-color: var(--accent); }
+.cv-msel {
+  display: flex; flex-wrap: wrap; gap: 4px; max-height: 74px; overflow-y: auto;
+}
+.cv-msel label {
+  display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 9px; padding: 1px 7px; cursor: pointer; user-select: none;
+}
+.cv-msel label.on { border-color: var(--accent); color: var(--accent); }
+.cv-msel input { display: none; }
+.cv-gen {
+  background: var(--accent); color: #1a1815; border: none; border-radius: 6px;
+  font-size: 12px; font-weight: 600; padding: 6px 0; cursor: pointer;
+}
+.cv-gen:hover { background: var(--accent-hover); }
+.cv-gen:disabled { opacity: .5; cursor: default; }
+.cv-status { font-size: 11px; color: var(--text-dim); }
+.cv-status.st-fail, .cv-status.st-timeout { color: var(--red); }
+.cv-status.st-done { color: var(--green); }
+.cv-gallery { display: flex; flex-direction: column; gap: 5px; }
+.cv-result img, .cv-result video { width: 100%; border-radius: 6px; display: block; background: #000; }
+.cv-result img { cursor: zoom-in; }
+.cv-result audio { width: 100%; height: 26px; }
+.cv-file-chip {
+  font-family: var(--mono); font-size: 10.5px; color: var(--accent); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cv-file-chip:hover { text-decoration: underline; }
+.cv-pager {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 11px; color: var(--text-dim);
+}
+.cv-pager button {
+  background: none; border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text-dim); font-size: 10.5px; padding: 1px 7px; cursor: pointer;
+}
+.cv-pager button:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+.cv-pager button:disabled { opacity: .35; cursor: default; }
+.cv-adopted-tag { color: var(--green); font-size: 10px; }
+.cv-ref-src { font-size: 10.5px; color: var(--text-dim); }
+.cv-upload-thumb { width: 100%; border-radius: 6px; display: block; }
+.cv-zoom-overlay {
+  position: fixed; inset: 0; z-index: 500; background: rgba(0,0,0,.8);
+  display: flex; align-items: center; justify-content: center; cursor: zoom-out;
+}
+.cv-zoom-overlay img { max-width: 92vw; max-height: 92vh; border-radius: 8px; }
+
+/* ---------------- 素材板块 ---------------- */
+#assets-root { flex: 1; min-height: 0; flex-direction: column; }
+.assets-toolbar {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.assets-toolbar .shop-filter { padding: 0; flex: none; }
+.assets-toolbar #assets-search { flex: 1; max-width: 340px; }
+.assets-grid {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px; padding: 12px; align-content: start;
+}
+.assets-empty {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); font-size: 13px;
+}
+.asset-card {
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  background: var(--bg-elevated); display: flex; flex-direction: column;
+}
+.asset-card:hover { border-color: var(--text-dim); }
+.asset-thumb {
+  aspect-ratio: 4 / 3; background: #0008; display: flex; align-items: center; justify-content: center;
+  overflow: hidden; position: relative;
+}
+.asset-thumb img, .asset-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.asset-thumb .asset-big-ico { font-size: 40px; }
+.asset-kind-tag {
+  position: absolute; top: 6px; left: 6px; font-size: 10px; padding: 1px 7px;
+  background: rgba(0,0,0,.62); color: var(--text); border-radius: 8px;
+}
+.asset-body { padding: 7px 9px 6px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.asset-prompt {
+  font-size: 11.5px; color: var(--text); line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  word-break: break-all;
+}
+.asset-meta { font-size: 10px; color: var(--text-dim); display: flex; gap: 6px; flex-wrap: wrap; }
+.asset-origin {
+  font-size: 10px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.asset-ops { display: flex; gap: 5px; padding: 0 9px 9px; }
+.asset-ops .btn { flex: 1; font-size: 11px; padding: 3px 0; }

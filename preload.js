@@ -84,8 +84,18 @@ contextBridge.exposeInMainWorld('api', {
   // AIGC 生成任务(新媒体板块)
   aigcSend: invoke('aigc:send'),
   aigcCancel: (sessionId, traceId) => ipcRenderer.invoke('aigc:cancel', { sessionId, traceId }),
+  aigcExec: invoke('aigc:exec'), // 画布节点非会话执行(v0.10.0)
   shellShowItemInFolder: (p) => ipcRenderer.invoke('shell:showItemInFolder', p),
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
+
+  // 无限画布 + 素材库(v0.10.0)
+  canvasList: () => ipcRenderer.invoke('canvas:list'),
+  canvasCreate: (name) => ipcRenderer.invoke('canvas:create', { name }),
+  canvasLoad: (id) => ipcRenderer.invoke('canvas:load', { id }),
+  canvasSave: (id, payload) => ipcRenderer.invoke('canvas:save', { id, ...payload }),
+  canvasDelete: (id) => ipcRenderer.invoke('canvas:delete', { id }),
+  canvasSaveUpload: (id, name, data) => ipcRenderer.invoke('canvas:saveUpload', { id, name, data }),
+  assetsList: () => ipcRenderer.invoke('assets:list'),
 
   // git / diff / PR
   gitIsRepo: (cwd) => ipcRenderer.invoke('git:isRepo', cwd),
@@ -127,7 +137,7 @@ contextBridge.exposeInMainWorld('api', {
     const allowed = [
       'sess:event', 'sess:attention', 'sess:activate', 'cron:fired',
       'term:data', 'term:exit',
-      'file:changed', 'update:status', 'aigc:status',
+      'file:changed', 'update:status', 'aigc:status', 'aigc:exec-status',
     ];
     if (!allowed.includes(channel)) return () => {};
     const listener = (_e, payload) => cb(payload);

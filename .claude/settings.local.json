@@ -22,7 +22,12 @@
       "PowerShell(Get-ChildItem $env:APPDATA -Directory | Where-Object Name -match 'claude|desktop' | Select-Object Name; Get-ChildItem \"$env:LOCALAPPDATA\\\\Programs\" -Directory -ErrorAction SilentlyContinue | Where-Object Name -match 'claude|desktop' | Select-Object Name)",
       "PowerShell(node --check src/main/sessions.js)",
       "PowerShell(node --check preload.js)",
-      "PowerShell"
+      "PowerShell",
+      "Bash(npm version *)",
+      "Bash(node -p \"require\\('./package.json'\\).version\")",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "PowerShell(Get-Process)"
     ]
   }
 }

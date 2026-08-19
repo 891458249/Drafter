@@ -1,6 +1,6 @@
 // Composer: send, @file autocomplete, slash commands, image attachments,
 // append-while-running.
-import { api, state, $, escapeHtml, emit, on, parseModelValue, updateKeyChips, MEDIA_KINDS } from './state.js';
+import { api, state, $, escapeHtml, emit, on, parseModelValue, updateKeyChips, MEDIA_KINDS, sectionOfKind, boardOf, ensureGroups } from './state.js';
 import { addUserMessage, setBusyUI, aigcLocalEcho, aigcBusy, updateAigcSendUI, updateTopbarForSession } from './chat.js';
 import { refreshList } from './sessions-ui.js';
 
@@ -77,15 +77,17 @@ export async function sendMessage() {
   setBusyUI(true);
 }
 
-// 新媒体板块发送:prompt + 参考图(仅 image/video 板块)→ aigc:send;
+// 创作板块发送(v0.9.38 四大媒体板块合并):prompt + 参考图(仅图像/视频类型模型)→ aigc:send;
 // 发送后锁定发送按钮,直到任务卡片到终态(aigc:status 事件)才解锁
 async function sendAigcMessage(sess, text) {
   const el = inputEl();
-  const kind = sess.meta.kind;
   if (aigcBusy(sess.meta.id)) return; // 任务进行中不并发发(按钮已禁用,双保险)
   if (!text) return; // 媒体生成必须有提示词
-  // 参考图:仅 image/video 板块使用图片附件;文本/媒体附件对媒体生成无意义,直接忽略
-  const refImages = (kind === 'image' || kind === 'video')
+  await ensureGroups(); // boardOf 依赖分组缓存,首次懒加载
+  // 参考图:仅图像/视频类型模型可用(生成类型按所选模型的 model_type 判定,v0.9.38);
+  // 文本/媒体附件对媒体生成无意义,直接忽略
+  const board = boardOf(sess.meta.keyId, sess.meta.model, sess.meta.kind, sess.meta.board);
+  const refImages = (board === 'image' || board === 'video')
     ? state.attachments.filter((a) => a.kind === 'image').map((a) => ({ name: a.name, mediaType: a.mediaType, data: a.data }))
     : [];
   el.value = '';
@@ -167,6 +169,12 @@ function renderAttachments() {
 
 function clearAttachments() {
   state.attachments = [];
+  renderAttachments();
+}
+
+// 对外:把一张图片塞进当前会话附件区(素材板块「用作参考图」,v0.10.0)
+export function addImageAttachment({ name, mediaType, data }) {
+  state.attachments.push({ kind: 'image', name: name || 'ref.png', mediaType, data });
   renderAttachments();
 }
 
@@ -481,12 +489,12 @@ function askAdoptDir(dir) {
   $('model-sel').onchange = async () => {
     if (!state.activeSid) return;
     const s = state.sessions.get(state.activeSid);
-    if (((s && s.meta.kind) || 'code') !== state.section) return; // 板块/会话不匹配时不写模型(v0.9.5)
+    if (sectionOfKind(s && s.meta.kind) !== state.section) return; // 板块/会话不匹配时不写模型(v0.9.5)
     const sel = parseModelValue($('model-sel').value);
     await api.sessSetModel(state.activeSid, sel.model, sel.keyId);
     if (s) { s.meta.model = sel.model; s.meta.keyId = sel.keyId; }
     updateKeyChips(); // 同步 Key chip
-    updateTopbarForSession(state.activeSid); // 同步 placeholder 的模型身份
+    updateTopbarForSession(state.activeSid); // 同步 placeholder 的模型身份与 board class(创作板块)
     emit('session-status', { sid: state.activeSid });
   };
 

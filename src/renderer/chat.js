@@ -1,6 +1,6 @@
 // Chat rendering: per-session logs, streaming, tool cards, permission cards,
 // plan approval, subagent grouping, view modes, history replay.
-import { api, state, $, escapeHtml, truncate, renderMarkdown, fmtCost, fmtTokens, emit, modelSelValue, updateKeyChips, MEDIA_KINDS, modelLabel, sessionModelName, gemNameOf } from './state.js';
+import { api, state, $, escapeHtml, truncate, renderMarkdown, fmtCost, fmtTokens, emit, modelSelValue, updateKeyChips, MEDIA_KINDS, modelLabel, sessionModelName, gemNameOf, boardOf, setBoardClass, ensureGroups } from './state.js';
 import { highlightCode } from './hljs.js';
 import { enhanceCodeHtml } from './codeblock.js';
 import { parseFilePath, PATH_IN_TEXT_RE } from './filelink.js';
@@ -42,6 +42,9 @@ export function setActiveSession(sid) {
   }
   const s = state.sessions.get(sid);
   if (s && !s.ui.replayed) replayHistory(sid);
+  // 后台期间跳过的流式渲染(renderDirty/待渲染帧)在激活时补渲,保证内容即刻完整
+  const cur = s && s.ui.currentAssistant;
+  if (cur && (cur.renderTimer || cur.renderDirty)) flushAssistantRender(s, cur);
   updateTopbarForSession(sid);
   stickToBottom = true; // 切换会话:回到吸附态并吸底
   const sbBtn = $('btn-scroll-bottom');
@@ -65,6 +68,12 @@ export function updateTopbarForSession(sid) {
   $('input').placeholder = composerPlaceholder(s);
   setBusyUI(s.ui.busy);
   updateAigcSendUI(); // 媒体会话:发送锁按任务终态恢复
+  // 创作板块(v0.9.38):body board class 跟随会话当前模型的生成类型(附件按钮显隐等);
+  // 异步应用前复核激活会话,避免快速切换时乱序覆盖
+  ensureGroups().then(() => {
+    if (state.activeSid !== sid) return;
+    setBoardClass(MEDIA_KINDS.includes(m.kind) ? boardOf(m.keyId, m.model, m.kind, m.board) : null);
+  });
 }
 
 // 输入框 placeholder:Gem 名(若绑定) + 模型身份
@@ -165,6 +174,14 @@ if (scrollBottomBtn) scrollBottomBtn.onclick = () => {
   else el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
 };
 
+// 窗口从托盘/最小化复显:补渲隐藏期间被跳过的流式帧(与切回后台会话同理)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  const s = state.sessions.get(state.activeSid);
+  const a = s && s.ui.currentAssistant;
+  if (a && (a.renderTimer || a.renderDirty)) flushAssistantRender(s, a);
+});
+
 // force:用户自己发消息/切换会话/历史回放等场景强制吸底
 function scrollBottom(sid, { force = false } = {}) {
   if (sid !== state.activeSid) return;
@@ -220,6 +237,7 @@ function ensureAssistant(s, parentId) {
     el: msg, bubble: msg.querySelector('.bubble'),
     buf: '', textEl: null, parentId: parentId || null,
     activity: null,
+    thinkEl: null, thinkBuf: null, thinkOpen: false, renderDirty: false,
   };
   return s.ui.currentAssistant;
 }
@@ -236,29 +254,43 @@ function finalizeAssistant(s) {
 // 流式渲染节流(v0.9.10):此前每个 text delta 都把已累积全文重新 marked.parse 一遍
 // (消息越长越慢,O(n²)),且所有会话(含后台)共用渲染主线程——一个会话流式输出时
 // 其他会话的输入框被卡住无法打字。改为 80ms 合帧渲染,段落切换/回合结束时冲销。
+// v0.10.0 续修「输入框点击无反应」——主线程被打满的三个残余路径:
+//  ① thinking 此前不合帧:每个 thinking delta 直接 textContent +=(几万字思考 =
+//     几万次 DOM 写 + O(n²) 字符串拼接),是长思考模型(Kimi k3 类)最热的路径;
+//     现并入同一合帧(thinkBuf 累积,flush 时整体写入);
+//  ② 后台隐藏会话此前照样每 tick 全量重渲:现跳过只标脏,切回激活时补渲;
+//  ③ 超长消息自适应降帧:缓冲越大帧间隔越长(80ms→1.2s),避免单次 marked.parse
+//     超过帧间隔造成主线程持续饱和。
 const ASSISTANT_RENDER_MS = 80;
 
-function scheduleAssistantRender(s, a) {
-  if (a.renderTimer) return;
-  a.renderTimer = setTimeout(() => {
-    a.renderTimer = null;
-    if (a.textEl) {
-      a.textEl.innerHTML = enhanceCodeHtml(renderMarkdown(a.buf));
-      linkifyPaths(a.textEl);
-    }
-    scrollBottom(s.meta.id);
-  }, ASSISTANT_RENDER_MS);
-}
-
-function flushAssistantRender(s, a) {
-  if (!a || !a.renderTimer) return;
-  clearTimeout(a.renderTimer);
-  a.renderTimer = null;
+// 实际写入 DOM:正文 markdown 重渲 + 当前思考块文本(合帧后的唯一渲染出口)
+function renderAssistantNow(s, a) {
   if (a.textEl) {
     a.textEl.innerHTML = enhanceCodeHtml(renderMarkdown(a.buf));
     linkifyPaths(a.textEl);
   }
+  if (a.thinkEl && a.thinkBuf != null) a.thinkEl.textContent = a.thinkBuf;
   scrollBottom(s.meta.id);
+}
+
+function scheduleAssistantRender(s, a) {
+  if (a.renderTimer) return;
+  const len = a.buf.length + (a.thinkBuf ? a.thinkBuf.length : 0);
+  const delay = Math.min(ASSISTANT_RENDER_MS + Math.floor(len / 50), 1200); // ③
+  a.renderTimer = setTimeout(() => {
+    a.renderTimer = null;
+    // ② 非激活会话/窗口最小化到托盘:不重渲,只标脏(激活/复显时 flushAssistantRender 补)
+    if (s.meta.id !== state.activeSid || document.hidden) { a.renderDirty = true; return; }
+    a.renderDirty = false;
+    renderAssistantNow(s, a);
+  }, delay);
+}
+
+function flushAssistantRender(s, a) {
+  if (!a) return;
+  if (a.renderTimer) { clearTimeout(a.renderTimer); a.renderTimer = null; }
+  a.renderDirty = false;
+  renderAssistantNow(s, a);
 }
 
 function appendText(s, parentId, delta) {
@@ -273,15 +305,18 @@ function appendText(s, parentId, delta) {
 
 function appendThinking(s, parentId, delta) {
   const a = ensureAssistant(s, parentId);
-  let think = a.bubble.querySelector('.thinking.live');
-  if (!think) {
-    think = document.createElement('div');
+  if (!a.thinkOpen) {
+    flushAssistantRender(s, a); // 上一段内容先落定,保持块序(thinkEl 即将改指新块)
+    const think = document.createElement('div');
     think.className = 'thinking live';
     think.onclick = () => think.classList.toggle('expanded');
     a.bubble.appendChild(think);
+    a.thinkEl = think;
+    a.thinkBuf = '';
+    a.thinkOpen = true;
   }
-  think.textContent += delta;
-  scrollBottom(s.meta.id);
+  a.thinkBuf += delta; // 只拼字符串;DOM 写入合帧到 renderAssistantNow,不再每 token 写
+  scheduleAssistantRender(s, a);
 }
 
 // Make file paths in assistant text clickable -> open in editor panel.
@@ -496,7 +531,7 @@ function renderAigcCard(s, card, traceId) {
     AIGC_TERMINAL.has(st) ? '' : '<button class="aigc-cancel" title="取消任务(停止轮询)">✕</button>'}</div>`;
   let body = '';
   if (st === 'done') {
-    body = (card.files || []).map((f) => mediaHtml(s.meta.kind, traceId, f)).join('') || '<div class="aigc-note">(无产物文件)</div>';
+    body = (card.files || []).map((f) => mediaHtml(traceId, f)).join('') || '<div class="aigc-note">(无产物文件)</div>';
   } else if (st === 'fail' || st === 'timeout') {
     body = `<div class="aigc-error">${escapeHtml(card.failReason || (st === 'timeout' ? '任务超时' : '生成失败'))}</div>`;
   } else if (st === 'interrupted') {
@@ -533,15 +568,20 @@ function openGeneratedFile(p) {
   else api.openPath(p);
 }
 
-// 产物内联渲染:图片 <img> / 视频 <video> / 音频 <audio> / 3D 文件卡片;
+// 产物内联渲染:按文件扩展名选 <img>/<video>/<audio>/文件卡(v0.9.38 起不再按会话 kind——
+// 创作会话跨类型生成,同一会话里可并存图片与视频产物);
 // 每个产物带文件条——文件名可点击(文本进编辑器预览,其余系统程序打开),另有「打开所在文件夹」
-function mediaHtml(kind, traceId, f) {
+const AIGC_IMG_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp']);
+const AIGC_VIDEO_EXTS = new Set(['mp4', 'mov', 'webm']);
+const AIGC_AUDIO_EXTS = new Set(['mp3', 'wav', 'm4a', 'ogg']);
+function mediaHtml(traceId, f) {
   const src = `aigc://${traceId}/${encodeURIComponent(f.name)}`;
   const bar = `<div class="aigc-file-bar"><span class="aigc-file-open" data-path="${escapeHtml(f.path || '')}" title="点击打开/预览">📦 ${escapeHtml(f.name)}</span>` +
     `<button class="btn btn-sm aigc-open-dir" data-path="${escapeHtml(f.path || '')}">打开所在文件夹</button></div>`;
-  if (kind === 'image') return `<img class="aigc-media" src="${src}" alt="${escapeHtml(f.name)}" />` + bar;
-  if (kind === 'video') return `<video class="aigc-media" src="${src}" controls></video>` + bar;
-  if (kind === 'audio') return `<audio class="aigc-audio" src="${src}" controls></audio>` + bar;
+  const ext = ((f.name || '').split('.').pop() || '').toLowerCase();
+  if (AIGC_IMG_EXTS.has(ext)) return `<img class="aigc-media" src="${src}" alt="${escapeHtml(f.name)}" />` + bar;
+  if (AIGC_VIDEO_EXTS.has(ext)) return `<video class="aigc-media" src="${src}" controls></video>` + bar;
+  if (AIGC_AUDIO_EXTS.has(ext)) return `<audio class="aigc-audio" src="${src}" controls></audio>` + bar;
   return `<div class="aigc-file">${bar}</div>`;
 }
 
@@ -986,11 +1026,16 @@ function handleStreamEvent(s, parentId, ev) {
   if (type === 'content_block_start') {
     const block = ev.content_block;
     if (block && block.type === 'tool_use') addToolCard(s, parentId, block.id, block.name, block.input || null);
-    if (block && block.type === 'text') {
+    if (block && (block.type === 'text' || block.type === 'thinking')) {
       const a = ensureAssistant(s, parentId);
-      flushAssistantRender(s, a); // 新文本块开始前冲销上一段的待渲染帧
-      a.textEl = null; a.buf = '';
-      a.activity = null; // 文本出现后,后续工具进入新的进程组
+      flushAssistantRender(s, a); // 新块开始前冲销上一段的待渲染帧
+      a.thinkOpen = false; // 当前思考块(若有)到此结束,下个 thinking delta 开新块
+      const live = a.bubble.querySelector('.thinking.live');
+      if (live) live.classList.remove('live');
+      if (block.type === 'text') {
+        a.textEl = null; a.buf = '';
+        a.activity = null; // 文本出现后,后续工具进入新的进程组
+      }
     }
     return;
   }
@@ -1014,6 +1059,7 @@ function handleStreamEvent(s, parentId, ev) {
     s.ui.curMsgTokens = 0;
     const a = s.ui.currentAssistant;
     if (a) {
+      a.thinkOpen = false; // 思考块随本条消息结束;未冲销内容留给待渲染帧/激活补渲
       const live = a.bubble.querySelector('.thinking.live');
       if (live) live.classList.remove('live');
     }
@@ -1062,7 +1108,11 @@ function handleAssistantMessage(s, parentId, message, replay) {
     } else if (block.type === 'thinking' && replay) {
       if (block.thinking) appendThinking(s, parentId, block.thinking);
       const a = s.ui.currentAssistant;
-      if (a) { const live = a.bubble.querySelector('.thinking.live'); if (live) live.classList.remove('live'); }
+      if (a) {
+        a.thinkOpen = false;
+        const live = a.bubble.querySelector('.thinking.live');
+        if (live) live.classList.remove('live');
+      }
     }
   }
 }

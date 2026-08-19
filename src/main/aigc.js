@@ -12,6 +12,18 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 10 * 60 * 1000; // 总超时按 timeout 处理
 const HTTP_TIMEOUT_MS = 15000;
 
+// 生成类型解析(v0.9.38 四大媒体板块合并):创作会话统一 kind='media',生成类型
+// 改由所选模型的 model_type 决定。modelTypeOf(keyId, model) 由调用方注入
+// (主进程传 keys.modelType,便于单测);查不到类型时回退会话旧 kind(降级/未迁移
+// 存量),再不行返回 null——调用方应拦截发送并提示重选模型。
+function resolveBoard(modelTypeOf, keyId, model, legacyKind) {
+  let t = null;
+  try { t = modelTypeOf && modelTypeOf(keyId, model); } catch {}
+  if (CREATE_ENDPOINT[t]) return t;
+  if (CREATE_ENDPOINT[legacyKind]) return legacyKind;
+  return null;
+}
+
 // 与 keys.js 相同的归一化:去掉末尾 / 与 /v1 后缀
 function apiRoot(baseUrl) {
   return (baseUrl || '').replace(/\/+$/, '').replace(/\/v1$/i, '');
@@ -255,4 +267,4 @@ function guessNameFromUrl(url) {
   try { return decodeURIComponent(new URL(url).pathname.split('/').pop() || ''); } catch { return ''; }
 }
 
-module.exports = { createTask, pollTask, downloadResults, uploadRefFile, cosSign, apiRoot };
+module.exports = { createTask, pollTask, downloadResults, uploadRefFile, cosSign, apiRoot, resolveBoard };

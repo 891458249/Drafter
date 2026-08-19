@@ -45,6 +45,7 @@ const perms = require('./src/main/perms');
 const updater = require('./src/main/updater');
 const keys = require('./src/main/keys');
 const aigc = require('./src/main/aigc');
+const canvases = require('./src/main/canvases');
 const aux = require('./src/main/aux-models');
 const title = require('./src/main/title');
 const gems = require('./src/main/gems');
@@ -52,8 +53,9 @@ const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
 const migrations = require('./src/main/migrations');
 
-// 新媒体板块(kind):image/video/audio/model 会话不走 Agent SDK,走 AIGC 任务闭环
-const MEDIA_KINDS = ['image', 'video', 'audio', 'model'];
+// 创作板块会话(v0.9.38 起 kind 统一为 'media',四大媒体板块合并):不走 Agent SDK,
+// 走 AIGC 生成任务闭环;四类旧 kind 由 migrations 归一,数组保留旧值仅为兼容降级/未迁移存量
+const MEDIA_KINDS = ['media', 'image', 'video', 'audio', 'model'];
 const isMediaKind = (kind) => MEDIA_KINDS.includes(kind);
 const AIGC_DIR = () => path.join(app.getPath('userData'), 'aigc');
 
@@ -467,14 +469,22 @@ ipcMain.handle('sess:sdkStatus', () => sessions.sdkAvailable());
 ipcMain.handle('sess:list', () => sessions.list());
 ipcMain.handle('sess:create', async (_e, opts) => {
   if (isMediaKind(opts.kind)) {
-    // 新媒体板块会话(image/video/audio/model):不进 Agent SDK,只落 store 元数据;
+    // 创作板块会话(kind='media'):不进 Agent SDK,只落 store 元数据;
     // 消息走 AIGC 任务闭环(aigc:send),历史沿用每会话 JSONL(sess:history 可读)
     const id = 's_' + crypto.randomUUID().slice(0, 12);
+    const keyId = opts.keyId || (keys.activeKey() || {}).id || null;
+    // board 戳(v0.9.38):可解析即盖,modelGroups 失效后 aigc:send 仍可兜底
+    let board = null;
+    try {
+      const t = opts.model && keyId ? keys.modelType(keyId, opts.model) : null;
+      if (MEDIA_KINDS.includes(t) && t !== 'media') board = t;
+    } catch {}
     return store.upsertSession({
       id,
       kind: opts.kind,
       model: opts.model || null,
-      keyId: opts.keyId || (keys.activeKey() || {}).id || null,
+      keyId,
+      board,
       cwd: os.homedir(),
       projectId: null,
       standalone: true,
@@ -582,6 +592,13 @@ ipcMain.handle('sess:setModel', (_e, { sid, model, keyId }) => {
   // 防御(v0.9.5):新媒体类模型不能绑到 code/chat(SDK)会话——否则走 /v1/messages 必 403「模型未配置」
   const isMedia = !!(s.meta.kind && s.meta.kind !== 'code' && s.meta.kind !== 'chat');
   if (!isMedia && model && keyId && keys.modelType(keyId, model) !== 'chat') return false;
+  // 创作会话盖 board 戳(v0.9.38):生成类型跟随所选模型;非媒体模型清戳(aigc:send 会拦截)
+  if (isMedia && model && keyId) {
+    const t = keys.modelType(keyId, model);
+    const board = MEDIA_KINDS.includes(t) && t !== 'media' ? t : null;
+    s.meta.board = board;
+    store.upsertSession({ id: sid, board });
+  }
   return s.setModel(model, keyId);
 });
 ipcMain.handle('sess:setEffort', (_e, { sid, effort }) => {
@@ -660,16 +677,20 @@ function aigcRun(sessionId, keyEntry, traceId, model, prompt) {
 
 ipcMain.handle('aigc:send', async (_e, { sessionId, keyId, model, prompt, refImages }) => {
   const meta = store.listSessions().find((x) => x.id === sessionId);
-  if (!meta || !isMediaKind(meta.kind)) return { ok: false, error: '会话不存在或非新媒体会话' };
+  if (!meta || !isMediaKind(meta.kind)) return { ok: false, error: '会话不存在或非创作会话' };
   const keyEntry = keys.byId(keyId || meta.keyId);
   if (!keyEntry) return { ok: false, error: '未找到可用的 API Key' };
   const useModel = model || meta.model;
   if (!useModel) return { ok: false, error: '未选择模型' };
+  // 生成类型(v0.9.38):按所选模型的 model_type 决定(image/video/audio/model),
+  // 会话 kind 已统一为 'media';查不到类型时依次回退 board 戳与旧 kind,仍不行则拦截
+  const board = aigc.resolveBoard((kid, mdl) => keys.modelType(kid, mdl), keyEntry.id, useModel, meta.board || meta.kind);
+  if (!board) return { ok: false, error: '该模型不是媒体生成模型,请在下拉中重新选择' };
   // Gem 前缀(v0.9.11):媒体会话绑定的 Gem 指令拼在用户 prompt 前;回显/标题仍用原始 prompt
   const gem = meta.gemId ? gems.byId(meta.gemId) : null;
   const fullPrompt = (gem ? gems.composeMediaPrefix(gem) : '') + prompt;
   try {
-    const { traceId } = await aigc.createTask(keyEntry, meta.kind, {
+    const { traceId } = await aigc.createTask(keyEntry, board, {
       modelKey: useModel, prompt: fullPrompt, refImages: refImages || [],
     });
     // 用户消息与任务占位消息持久化(参考图保留 base64,历史回放可显示缩略图)
@@ -693,6 +714,85 @@ ipcMain.handle('aigc:cancel', (_e, { traceId }) => {
   const h = aigcTasks.get(traceId);
   if (h) h.cancel();
   return true;
+});
+
+// ---------------------------------------------------------------------------
+// IPC: 无限画布(v0.10.0)— 持久化 + 非会话执行
+// ---------------------------------------------------------------------------
+ipcMain.handle('canvas:list', () => canvases.list());
+ipcMain.handle('canvas:create', (_e, { name } = {}) => canvases.create(name));
+ipcMain.handle('canvas:load', (_e, { id } = {}) => canvases.load(id));
+ipcMain.handle('canvas:save', (_e, { id, name, graph } = {}) => canvases.save(id, { name, graph }));
+ipcMain.handle('canvas:delete', (_e, { id } = {}) => canvases.remove(id));
+ipcMain.handle('canvas:saveUpload', (_e, { id, name, data } = {}) => {
+  try { return { ok: true, ...canvases.saveUpload(id, { name, data }) }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
+// 素材库:媒体会话产物 + 画布节点产物聚合(时间倒序)
+ipcMain.handle('assets:list', () => canvases.listAssets());
+
+// 参考图文件的 MIME(仅图片可作 ref;画布参考图来源为 assets 目录或上游产物目录)
+const REF_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+
+// 画布节点直接建任务:生成类型按模型 model_type 解析(与 aigc:send 同规则,无语种旧 kind 兜底);
+// refFiles 限 AIGC 产物目录与画布 assets 目录(防任意文件读取),20MB 守卫
+function aigcExecRun({ canvasId, nodeId, keyEntry, traceId, model, prompt }) {
+  const push = (payload) => {
+    const win = getWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('aigc:exec-status', { canvasId, nodeId, traceId, model, prompt, ...payload });
+  };
+  // 终态写回画布 JSON(用户切走/关窗后历史仍完整;渲染端只管当前打开画布的实时 UI)
+  const patch = (p) => { try { canvases.patchTask(canvasId, nodeId, traceId, p); } catch {} };
+  const handle = aigc.pollTask(keyEntry, traceId, (st) => {
+    if (st.status === 'done') return; // done 等下载完成后连同 files 一起推
+    if (st.status === 'fail' || st.status === 'timeout') patch({ status: st.status, failReason: st.fail_reason || st.last_retry_reason || null });
+    push({ status: st.status, failReason: st.fail_reason || st.last_retry_reason || null });
+  });
+  aigcTasks.set(traceId, handle);
+  handle.promise.then(async (final) => {
+    aigcTasks.delete(traceId);
+    if (!final || final.status !== 'done') return; // 取消 / fail / timeout 已在回调里推过+落盘
+    try {
+      push({ status: 'downloading' });
+      const files = await aigc.downloadResults(keyEntry, traceId, path.join(AIGC_DIR(), traceId));
+      patch({ status: 'done', files });
+      push({ status: 'done', files });
+    } catch (e) {
+      patch({ status: 'fail', failReason: '产物下载失败:' + e.message });
+      push({ status: 'fail', failReason: '产物下载失败:' + e.message });
+    }
+  }).catch((e) => {
+    aigcTasks.delete(traceId);
+    patch({ status: 'fail', failReason: e.message });
+    push({ status: 'fail', failReason: e.message });
+  });
+}
+
+ipcMain.handle('aigc:exec', async (_e, { canvasId, nodeId, keyId, model, prompt, refFiles } = {}) => {
+  const keyEntry = keys.byId(keyId || null);
+  if (!keyEntry) return { ok: false, error: '未找到可用的 API Key' };
+  if (!model || !prompt) return { ok: false, error: '缺少模型或提示词' };
+  const board = aigc.resolveBoard((kid, mdl) => keys.modelType(kid, mdl), keyEntry.id, model, null);
+  if (!board) return { ok: false, error: '该模型不是媒体生成模型' };
+  const refImages = [];
+  const allowRoots = [path.resolve(AIGC_DIR()), path.resolve(canvases.ROOT())];
+  for (const f of refFiles || []) {
+    try {
+      const abs = path.resolve(String(f.path || ''));
+      if (!allowRoots.some((r) => abs.startsWith(r + path.sep)) || !fs.existsSync(abs)) continue;
+      if (fs.statSync(abs).size > 20 * 1024 * 1024) continue;
+      const ext = (abs.split('.').pop() || '').toLowerCase();
+      refImages.push({ name: f.name || path.basename(abs), mediaType: REF_MIME[ext] || 'image/png', data: fs.readFileSync(abs).toString('base64') });
+    } catch {} // 单个坏文件不阻塞其余
+  }
+  try {
+    const { traceId } = await aigc.createTask(keyEntry, board, { modelKey: model, prompt, refImages });
+    aigcExecRun({ canvasId, nodeId, keyEntry, traceId, model, prompt });
+    return { ok: true, traceId };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
 
 // 3D 产物卡片「打开所在文件夹」(限制在 aigc 产物目录内)

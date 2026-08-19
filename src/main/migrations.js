@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const store = require('./store');
 const { migrateTranscript } = require('./sessions');
+const keys = require('./keys');
 
 // --- semver 比较(只取前三段数字,够本项目的 x.y.z 用) -----------------------
 function compareVersions(a, b) {
@@ -73,12 +74,45 @@ function repairSessionMeta(report) {
   }
 }
 
-const REPAIRS = [repairTranscripts, repairSessionMeta];
+// 创作会话 board 戳补齐(v0.9.38):meta.board = 会话最近一次可解析的生成类型。
+// 它存在的意义:modelGroups 之后被清空(刷新失败回退 /v1/models)时,aigc:send
+// 仍可按 board 兜底建单——否则迁移后的 kind='media' 会话无从解析生成类型。
+// 只盖不删;当下无从解析(modelGroups 已失效且从未盖过戳)时保持原样。
+const MEDIA_BOARDS = ['image', 'video', 'audio', 'model'];
+function repairMediaBoard(report) {
+  for (const meta of store.listSessions()) {
+    if (!meta || meta.kind !== 'media' || !meta.model || !meta.keyId) continue;
+    if (MEDIA_BOARDS.includes(meta.board)) continue; // 已有有效戳
+    let t = null;
+    try { t = keys.modelType(meta.keyId, meta.model); } catch {}
+    if (MEDIA_BOARDS.includes(t)) {
+      store.upsertSession({ id: meta.id, board: t });
+      report.mediaBoardStamped = (report.mediaBoardStamped || 0) + 1;
+    }
+  }
+}
+
+const REPAIRS = [repairTranscripts, repairSessionMeta, repairMediaBoard];
 
 // --- migrations:按版本一次性执行的数据改写 -----------------------------------
 // 模板:
 //   { version: '0.9.18', desc: '做什么/为什么', run(ctx) { /* ctx.store */ } },
-const MIGRATIONS = [];
+const MIGRATIONS = [
+  // v0.9.38:四大媒体板块合并为「创作」(data-sec=media)——四类会话 kind
+  // (image/video/audio/model)统一为 'media',生成类型改由所选模型的
+  // model_type 决定(模型网关 modelGroups),为跨模态会话(图→视频)打底。
+  // 幂等:已是 'media'/其他 kind 的会话原样保留。
+  {
+    version: '0.9.38',
+    desc: '媒体会话 kind 四合一 → media(板块合并)并盖 board 戳',
+    run({ store }) {
+      const LEGACY = ['image', 'video', 'audio', 'model'];
+      for (const m of store.listSessions()) {
+        if (m && LEGACY.includes(m.kind)) store.upsertSession({ id: m.id, kind: 'media', board: m.kind });
+      }
+    },
+  },
+];
 
 // --- 入口 --------------------------------------------------------------------
 function logsDir() {

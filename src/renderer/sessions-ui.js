@@ -1,7 +1,7 @@
 // Sidebar: project groups with sessions nested under each group.
 // Group header: editable name, per-group "+" (new session), file manager
 // (load files/folders with live read-only/editable tags).
-import { api, state, $, escapeHtml, emit, on, parseModelValue, showCtxMenu, gemNameOf } from './state.js';
+import { api, state, $, escapeHtml, emit, on, parseModelValue, showCtxMenu, gemNameOf, sectionOfKind, boardOf, ensureGroups } from './state.js';
 import { ensureSession, setActiveSession } from './chat.js';
 
 const attention = new Set();
@@ -14,6 +14,9 @@ function showProjMenu(x, y, p) {
 }
 
 export async function refreshList() {
+  // 画布板块(v0.10.0):侧栏是画布列表,由 canvas.js 掌管;素材板块侧栏隐藏
+  if (state.section === 'canvas') { const m = await import('./canvas.js'); m.renderList(); return; }
+  if (state.section === 'assets') { $('session-list').innerHTML = ''; return; }
   const [projList, sessList] = await Promise.all([api.projList(), api.sessList()]);
   const filter = ($('session-filter').value || '').toLowerCase();
   const showArchived = $('show-archived').checked;
@@ -27,13 +30,18 @@ export async function refreshList() {
     byProject.get(pid).push(m);
   }
 
-  // --- 非 code 板块(chat/新媒体):对应 kind 的会话平铺列表(无项目组、无独立会话) ---
+  // --- 非 code 板块(chat/创作):对应板块的会话平铺列表(无项目组、无独立会话) ---
   if (state.section !== 'code') {
-    const chats = (byProject.get('_none') || [])
-      .filter((m) => m.kind === state.section)
+    let chats = (byProject.get('_none') || [])
+      .filter((m) => sectionOfKind(m.kind) === state.section)
       .filter((m) => showArchived ? true : !m.archived)
       .filter((m) => !filter || (m.title || '').toLowerCase().includes(filter))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    // 创作板块(v0.9.38):工坊 chips 按会话当前模型的生成类型过滤
+    if (state.section === 'media' && state.mediaShop !== 'all') {
+      await ensureGroups(); // boardOf 依赖 Kuro 分组缓存,首次懒加载
+      chats = chats.filter((m) => boardOf(m.keyId, m.model, m.kind, m.board) === state.mediaShop);
+    }
     const li = document.createElement('li');
     li.className = 'proj-group';
     const sessUl = document.createElement('ul');
@@ -273,12 +281,24 @@ async function createSessionInProject(p) {
 // Project sessions are created via the group's own ＋ button or the ⋯ menu's
 // "打开目录" flow.
 export async function createSession(extra = {}) {
-  const sel = parseModelValue($('model-sel').value);
+  // 画布板块点「＋ 新画布」:创建画布而不是会话(v0.10.0)
+  if (state.section === 'canvas') { const m = await import('./canvas.js'); return m.createFromSidebar(); }
+  let sel = parseModelValue($('model-sel').value);
   const board = state.section;
-  // 新媒体板块(image/video/audio/model)必须选中模型;无可用模型时拦截并提示
+  // 创作板块必须选中模型;无可用模型时拦截并提示
   if (board !== 'code' && board !== 'chat' && !sel.model) {
     alert('该板块暂无可用模型,请先在「配置 API Key」中刷新 Kuro 网关的模型列表。');
     return null;
+  }
+  // 工坊筛选下新建会话(v0.9.38):当前下拉所选模型类型与工坊不符时,预选该类型首个模型
+  if (board === 'media' && state.mediaShop !== 'all') {
+    await ensureGroups();
+    if (boardOf(sel.keyId, sel.model) !== state.mediaShop) {
+      for (const opt of $('model-sel').options) {
+        const v = parseModelValue(opt.value);
+        if (v.model && boardOf(v.keyId, v.model) === state.mediaShop) { sel = v; break; }
+      }
+    }
   }
   const meta = await api.sessCreate({
     standalone: true,
@@ -299,6 +319,14 @@ export function init() {
   $('btn-new-session').onclick = () => createSession();
   $('session-filter').oninput = refreshList;
   $('show-archived').onchange = refreshList;
+  // 创作板块工坊筛选 chips(v0.9.38):点击切换 state.mediaShop 并重绘列表
+  for (const b of document.querySelectorAll('#shop-filter button')) {
+    b.onclick = () => {
+      state.mediaShop = b.dataset.shop;
+      for (const x of document.querySelectorAll('#shop-filter button')) x.classList.toggle('active', x === b);
+      refreshList();
+    };
+  }
   $('btn-proj-refresh').onclick = async () => {
     const r = await api.projPrune();
     refreshList();

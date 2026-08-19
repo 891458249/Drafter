@@ -381,3 +381,31 @@ Git 工作流:
 - **appId 变更代价**:旧版自动更新装新版时旧安装目录(Programs\claude-ui / DeskTopUI)不被接管,需手动卸载一次(数据已自动迁移)
 - 顺手修复:package.json copyright GBK 坏字(漏→©)、package-lock 过期 name/version
 - npm test 120/120
+
+### v0.9.36(2026-08-12):系统通知可点击跳转到对应会话
+- sessions.js notify 加 onClick 参数(Notification 持引用进 Set 防 GC 吞 click 监听,close 释放)+ jumpToSession(restore/show/focus 主窗口 + 发 sess:activate);onTurnDone 与 notifyPermission 都接上点击;preload api.on 白名单加 sess:activate;app.js 监听后 ensureSession(sessList 取 meta 兜底)+setActiveSession+refreshList,跨板块会话由 session-activated 自动切板块
+- npm test 120/120
+
+### v0.9.37(2026-08-12):权限确认全板块弹 toast + 权限模式热切换
+- **权限确认全板块弹系统通知**:notifyPermission 去掉 activeId 门控,任何板块/活跃会话/窗口最小化都弹右下角通知(权限是阻塞等待需强提醒),点击跳转到该会话(v0.9.36 链路);非活跃仍额外打点
+- **权限模式热切换**:①setPermissionMode 先把挂起的权限卡按新模式即时裁决(bypass/acceptEdits→allow 编辑类,dontAsk→deny,卡片同步消失);②SDK 控制请求 set_permission_mode 照发(失败不再静默吞,记日志);③_onPermission 按最新 meta.permissionMode 本地兜底——bypassPermissions 全放行、acceptEdits 放行编辑类、dontAsk 拒绝未预批准(顺序在 autoAllowTools 之后,尊重会话级 always);EDIT_TOOLS 提为模块常量,只读硬拦截保持最前(bypass 也拦)
+- npm test 120/120
+
+### v0.9.38(2026-08-19):image/video/audio/model 四大媒体板块合并为「创作」
+- **彻底合并**(按 AI创作平台规划 md「工具集」单入口定位):会话 kind 统一为 'media'(migrations 版本化迁移 image/video/audio/model→media 并盖 board 戳,代码全面兼容旧 kind),**生成类型不再随会话 kind,改由所选模型的 model_type 决定**——同一会话可先生成图片再把产物当参考图生成视频,为 md 跨模态链路打底
+- **顶栏 4 按钮→「创作」单按钮**,侧栏加工坊筛选 chips(全部/图片/视频/音频/3D,按 boardOf 过滤,新建会话按工坊预选首模型);模型下拉按全部四类媒体模型列出,optgroup 按「Key · 类型」分组
+- **meta.board 戳三级兜底**:modelGroups→board 戳(迁移/建会话/换模型时盖)→旧 kind;新增 repairMediaBoard 每次启动自愈(分组被刷新失败清空后仍可按戳建单,消除旧版按 kind 建单可用的回归缺口)
+- body 挂 board-<type> class 跟随会话当前模型(附件按钮仅 image/video 类型显示);任务卡片产物改按文件扩展名渲染 img/video/audio/文件卡(跨类型会话并存);aigc:send 改主进程 resolveBoard 定建单端点(类型不可解析时拦截提示重选)
+- npm test 124/124(新增 resolveBoard/归一迁移/repairMediaBoard 用例)
+
+### v0.10.0(2026-08-19):无限画布 v1 + 素材库(AI 创作平台 MVP 两大核心模块)
+- **无限画布**(新板块「画布」,引擎 Drawflow 0.0.60/MIT——调研对比 litegraph.js(ComfyUI 同款)后选定:DOM 节点原生放 video/audio 播放器):
+  - 6 种节点(对齐 md 1.1 MVP 子集):文本(prompt 源)/参考图上传/图片·视频·音频·3D 生成
+  - 连线类型校验(ComfyUI 式类型槽):text→prompt 槽(连入接管 prompt,只读展示+实时同步),image→参考图/首帧槽
+  - **多模型 fan-out**(md 1.2):节点内模型多选 chips,每模型独立 aigc:exec 任务,结果并排翻页,「采用」版本供下游节点取用
+  - **节点生成历史**(md 1.2):每节点 tasks 全量留存翻页;画布 JSON 即历史,防抖自动保存 userData/canvases/<id>.json
+  - 执行任务后切走/关窗不丢:主进程 patchTask 终态补丁写回画布 JSON
+  - 侧栏画布列表(新建/行内 input 重命名/删除);aigc:exec 非会话执行(refFiles 限 AIGC/画布 assets 目录防任意读取)
+- **素材库**(新板块「素材」,md 模块四雏形):创作会话+画布节点双源聚合网格(existsSync 剔除,时间倒序),类型 chips+搜索,**「用作参考图」一键塞回创作会话附件并跳转——md 图→视频跨模态主链路闭环**
+- 板块框架扩展:SECTIONS 五板块,非会话板块(canvas/assets)跳过会话挑选流程;素材板块全宽;画布板块侧栏=画布列表
+- 验证:npm test 129/129(canvases.test.js 5 例);CDP 冒烟(electron --remote-debugging-port + Node 内置 WebSocket).claude-ui/smoke-canvas.js 14/14 步;真实 Key 数据复验(29 模型 chips/真实产物网格/零渲染错误)

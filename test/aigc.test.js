@@ -133,6 +133,23 @@ test('createTask:HTTP 错误与缺 trace_id 都抛错', async () => {
   await assert.rejects(() => aigc.createTask(KEY, 'image', { modelKey: 'm', prompt: 'p' }), /trace_id/);
 });
 
+// --- resolveBoard(v0.9.38 创作板块合并:生成类型按模型 model_type 决定) -----------
+test('resolveBoard:按模型 model_type 决定生成类型,不随会话 kind', () => {
+  const typeOf = (kid, mdl) => ({ 'Kling-3.0': 'video', 'Vidu-q2': 'image', 'speech-2.6': 'audio', 'Hunyuan3D-3.1': 'model' })[mdl] || 'chat';
+  assert.strictEqual(aigc.resolveBoard(typeOf, 'k1', 'Kling-3.0', 'media'), 'video');
+  assert.strictEqual(aigc.resolveBoard(typeOf, 'k1', 'Vidu-q2', 'media'), 'image');
+  assert.strictEqual(aigc.resolveBoard(typeOf, 'k1', 'speech-2.6', 'media'), 'audio');
+  assert.strictEqual(aigc.resolveBoard(typeOf, 'k1', 'Hunyuan3D-3.1', 'media'), 'model');
+});
+
+test('resolveBoard:类型查不到回退旧 kind;都不行返回 null(调用方拦截)', () => {
+  const typeOf = () => 'chat'; // 分组缺失/非 Kuro key
+  assert.strictEqual(aigc.resolveBoard(typeOf, 'k1', 'unknown', 'image'), 'image', '旧 kind 兜底');
+  assert.strictEqual(aigc.resolveBoard(typeOf, 'k1', 'unknown', 'media'), null, 'media 无类型可退');
+  assert.strictEqual(aigc.resolveBoard(null, 'k1', 'unknown', 'video'), 'video');
+  assert.strictEqual(aigc.resolveBoard(null, 'k1', 'unknown', null), null);
+});
+
 // --- pollTask ---------------------------------------------------------------
 test('pollTask:状态序列推进并在终态停止', async () => {
   queue = [

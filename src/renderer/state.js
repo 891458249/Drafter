@@ -4,7 +4,7 @@ export const api = window.api;
 export const state = {
   cwd: null,
   projectId: null,
-  section: 'code', // 板块:'code' 项目工作区;'chat' 纯对话(v0.6.0);'image'/'video'/'audio'/'model' 新媒体(v0.9.0)
+  section: 'code', // 板块:'code' 项目工作区;'chat' 纯对话(v0.6.0);'media' 创作板块(图/视/音/3D,v0.9.38 四大媒体板块合并)
   activeSid: null,
   sessions: new Map(),   // sid -> { meta, ui }
   viewMode: 'normal',
@@ -14,12 +14,54 @@ export const state = {
   diffComments: [],      // [{file, line, side, text}]
   gems: [],              // Gem 自定义助手缓存(v0.9.11),gems.js 负责刷新
   instantJump: true,     // 导航点击/回到底部瞬时跳转(v0.9.15);false=平滑滚动,boot 时从设置载入
+  mediaShop: 'all',      // 创作板块工坊筛选:'all'|'image'|'video'|'audio'|'model'(v0.9.38)
+  GroupsCache: new Map(),// Kuro 模型分组缓存:keyId → [{category, model_type, models}](populateModelSelects/ensureGroups 填充)
 };
 
 export const $ = (id) => document.getElementById(id);
 
-// 新媒体板块 kind(v0.9.0):这些会话不走 Agent SDK,走 AIGC 生成任务闭环
-export const MEDIA_KINDS = ['image', 'video', 'audio', 'model'];
+// 创作板块会话 kind:'media'(v0.9.38 起唯一的媒体会话 kind;四类旧 kind 由
+// migrations 归一,数组保留旧值仅为兼容手工降级/未迁移存量)。这些会话不走
+// Agent SDK,走 AIGC 生成任务闭环;生成类型按所选模型的 model_type 决定。
+export const MEDIA_KINDS = ['media', 'image', 'video', 'audio', 'model'];
+
+// 生成类型显示标签(工坊 chips/下拉 optgroup/任务卡片用)
+export const MEDIA_TYPE_LABEL = { image: '图片', video: '视频', audio: '音频', model: '3D' };
+
+// 会话 kind → 板块:四类旧媒体 kind 与 'media' 都映射到创作板块
+export function sectionOfKind(kind) {
+  return MEDIA_KINDS.includes(kind) ? 'media' : (kind || 'code');
+}
+
+// 确保分组缓存已加载(首次需要时拉一次 /my-models 结果;空结果也标记已拉取,避免重复请求)
+let groupsLoaded = false;
+export async function ensureGroups() {
+  if (groupsLoaded) return;
+  groupsLoaded = true;
+  try {
+    const { list } = await api.keysList();
+    for (const k of list || []) if (Array.isArray(k.modelGroups)) state.GroupsCache.set(k.id, k.modelGroups);
+  } catch {}
+}
+
+// 当前会话的生成类型(image/video/audio/model):优先按所选模型在 Kuro 分组
+// 缓存里的 model_type;查不到(分组失效)依次回退会话 board 戳(主进程在迁移/
+// 建会话/换模型时盖的最近已知类型)与旧 kind;都不行返回 null。
+const MEDIA_BOARDS = ['image', 'video', 'audio', 'model'];
+export function boardOf(keyId, model, kind, board) {
+  const groups = keyId ? state.GroupsCache.get(keyId) : null;
+  const g = groups && groups.find((x) => Array.isArray(x.models) && x.models.includes(model));
+  let t = g && MEDIA_BOARDS.includes(g.model_type) ? g.model_type : null;
+  if (!t && MEDIA_BOARDS.includes(board)) t = board;
+  if (!t && MEDIA_BOARDS.includes(kind)) t = kind; // 旧 kind 兜底(未迁移存量)
+  return t;
+}
+
+// body 挂 board-<type> class:附件按钮分段显隐(参考图按类型准入)等 UI 跟随生成类型。
+// board=null 时清掉全部 board class(切回 code/chat 或类型未知)。
+export function setBoardClass(board) {
+  for (const b of ['image', 'video', 'audio', 'model']) document.body.classList.toggle('board-' + b, b === board);
+}
 
 // Gem 名称查询(v0.9.11):gem 被删返回 null(调用方静默回退)
 export function gemNameOf(id) {

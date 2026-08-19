@@ -63,7 +63,8 @@ function setZoom(z) {
   $('img-viewer').querySelector('img').style.transform = `scale(${zoom})`;
 }
 
-function openViewer(src) {
+// 导出给画布/素材板块复用(v0.10.0):节点与素材卡的图片点击放大也走这里
+export function openViewer(src) {
   const v = $('img-viewer');
   v.querySelector('img').src = src;
   setZoom(1);

@@ -1,5 +1,5 @@
 // App entry: boot, project open, topbar, panels, modals, shortcuts, wiring.
-import { api, state, $, escapeHtml, on, emit, fmtTokens, parseModelValue, updateKeyChips } from './state.js';
+import { api, state, $, escapeHtml, on, emit, fmtTokens, parseModelValue, updateKeyChips, MEDIA_TYPE_LABEL, sectionOfKind } from './state.js';
 import * as chat from './chat.js';
 import * as sessionsUi from './sessions-ui.js';
 import * as input from './input.js';
@@ -12,6 +12,8 @@ import * as tasks from './tasks.js';
 import * as term from './term.js';
 import * as gems from './gems.js';
 import * as codeblock from './codeblock.js';
+import * as canvas from './canvas.js';
+import * as assets from './assets.js';
 import { THEMES, applyTheme, currentTheme, bootTheme } from './themes.js';
 
 // ---------------------------------------------------------------------------
@@ -655,36 +657,43 @@ function modelLabel(id) {
   return m[1][0].toUpperCase() + m[1].slice(1) + (m[2] ? ' ' + m[2] : '') + bracket;
 }
 // v0.8.2:按「启用」Key 分组聚合模型;选中项编码为 keyId|modelId,凭据与额度随 Key 走
-// 板块 → 模型类别(v0.9.0):code/chat 用文本对话模型;新媒体板块用同名 model_type
-const SECTION_MODEL_TYPE = { code: 'chat', chat: 'chat', image: 'image', video: 'video', audio: 'audio', model: 'model' };
+// 板块 → 模型类别集合(v0.9.38):code/chat 只用对话模型;创作板块合并后同时列出
+// 图/视/音/3D 四类模型,optgroup 按「Key · 类型」分组,生成类型随所选模型走。
+// 画布/素材板块不显示 composer,但沿用媒体类别集合(画布节点模型选择器同口径)。
+const SECTION_MODEL_TYPES = { code: ['chat'], chat: ['chat'], media: ['image', 'video', 'audio', 'model'],
+  canvas: ['image', 'video', 'audio', 'model'], assets: ['image', 'video', 'audio', 'model'] };
 async function populateModelSelects() {
   let entries = null;
-  const groupMap = new Map(); // keyId → modelGroups(Kuro 分组接口缓存)
   try {
     entries = await api.keysEnabledModels();
     const { list } = await api.keysList();
-    for (const k of list) if (Array.isArray(k.modelGroups)) groupMap.set(k.id, k.modelGroups);
+    // 刷新 Kuro 分组缓存(state.GroupsCache):boardOf/工坊筛选等懒加载路径共用
+    state.GroupsCache.clear();
+    for (const k of list) if (Array.isArray(k.modelGroups)) state.GroupsCache.set(k.id, k.modelGroups);
   } catch {}
   // 某模型在某 key 下的类别:查分组缓存;无分组(非 Kuro key)或查不到时视为 chat
-  const want = SECTION_MODEL_TYPE[state.section] || 'chat';
+  const want = SECTION_MODEL_TYPES[state.section] || ['chat'];
   const typeOf = (keyId, model) => {
-    const groups = groupMap.get(keyId);
+    const groups = state.GroupsCache.get(keyId);
     if (!groups) return 'chat';
     const g = groups.find((x) => Array.isArray(x.models) && x.models.includes(model));
     return g ? g.model_type : 'chat';
   };
-  const filtered = (entries || []).filter((e) => typeOf(e.keyId, e.model) === want);
-  const isChatBoard = want === 'chat';
+  const filtered = (entries || []).filter((e) => want.includes(typeOf(e.keyId, e.model)));
+  const isChatBoard = want.length === 1 && want[0] === 'chat';
   let html = isChatBoard ? '<option value="">默认</option>' : '';
   if (filtered.length) {
-    const groups = new Map();
+    const groups = new Map(); // groupKey = keyId(chat)/keyId|type(media)
     for (const e of filtered) {
-      if (!groups.has(e.keyId)) groups.set(e.keyId, { name: e.keyName, models: [] });
-      groups.get(e.keyId).models.push(e.model);
+      const t = typeOf(e.keyId, e.model);
+      const gk = isChatBoard ? e.keyId : e.keyId + '|' + t;
+      if (!groups.has(gk)) groups.set(gk, { keyId: e.keyId, name: e.keyName, type: t, models: [] });
+      groups.get(gk).models.push(e.model);
     }
-    for (const [keyId, g] of groups) {
-      html += `<optgroup label="${escapeHtml(g.name)}">` +
-        g.models.map((m) => `<option value="${keyId}|${escapeHtml(m)}">${escapeHtml(modelLabel(m))}</option>`).join('') +
+    for (const g of groups.values()) {
+      const label = isChatBoard ? g.name : `${g.name} · ${MEDIA_TYPE_LABEL[g.type] || g.type}`;
+      html += `<optgroup label="${escapeHtml(label)}">` +
+        g.models.map((m) => `<option value="${g.keyId}|${escapeHtml(m)}">${escapeHtml(modelLabel(m))}</option>`).join('') +
         '</optgroup>';
     }
   } else if (isChatBoard && !(entries && entries.length)) {
@@ -695,7 +704,7 @@ async function populateModelSelects() {
   for (const sel of [$('model-sel')]) {
     const cur = sel.value;
     sel.innerHTML = html;
-    // 当前值不在新列表时:code/chat 回到「默认」,新媒体板块落到第一个可用模型
+    // 当前值不在新列表时:code/chat 回到「默认」,创作板块落到第一个可用模型
     sel.value = sel.querySelector(`option[value="${cur}"]`) ? cur : ((sel.querySelector('option:not([disabled])') || {}).value || '');
   }
   updateKeyChips(); // 下拉重建后同步 Key chip
@@ -882,7 +891,7 @@ on('session-activated', async (sid) => {
   if (!s) return;
   gems.updateGemSelector(); // 顶栏 Gem 选择器跟随会话回显(v0.9.11)
   // 板块跟随会话类型:会话激活时自动切到其 kind 对应的板块(缺省 code)
-  const kind = s.meta.kind || 'code';
+  const kind = sectionOfKind(s.meta.kind);
   if (state.section !== kind) setSection(kind, { skipSessionPick: true });
   state.projectId = s.meta.projectId || null; // 独立会话不继承上个会话的项目
   const cwd = s.meta.cwd;
@@ -898,9 +907,11 @@ on('session-activated', async (sid) => {
 });
 
 // ---------------------------------------------------------------------------
-// 板块切换:Code(面向项目的完整工作区)/ Chat(纯对话)/ Image·Video·Audio·Model(新媒体,v0.9.0 骨架)
+// 板块切换:Code(项目工作区)/ Chat(纯对话)/ 创作(图·视·音·3D 一体化,v0.9.38 四大媒体板块合并)
 // ---------------------------------------------------------------------------
-const SECTIONS = ['code', 'chat', 'image', 'video', 'audio', 'model'];
+const SECTIONS = ['code', 'chat', 'media', 'canvas', 'assets'];
+// 画布/素材板块(v0.10.0)不走会话挑选流程(画布列表/素材网格各有数据源)
+const NON_SESSION_SECTIONS = ['canvas', 'assets'];
 function setSection(sec, { skipSessionPick } = {}) {
   if (state.section === sec) return;
   state.section = sec;
@@ -908,10 +919,20 @@ function setSection(sec, { skipSessionPick } = {}) {
   for (const b of document.querySelectorAll('#section-switch button')) {
     b.classList.toggle('active', b.dataset.sec === sec);
   }
-  $('sidebar-head-label').textContent = sec === 'code' ? '项目 / 会话' : '会话';
+  $('sidebar-head-label').textContent = sec === 'code' ? '项目 / 会话'
+    : sec === 'media' ? '创作会话'
+    : sec === 'canvas' ? '画布'
+    : sec === 'assets' ? '素材' : '会话';
+  $('btn-new-session').textContent = sec === 'canvas' ? '＋ 新画布' : '＋ 新会话';
   // 面板对 code+chat 开放(v0.9.33):Chat 也处理代码任务,需要编辑器/预览/终端;
-  // 仅媒体板块(image/video/audio/model)隐藏。
+  // 其余板块(创作/画布/素材)隐藏。
   if (sec !== 'code' && sec !== 'chat') $('right-panel').classList.add('hidden');
+  if (NON_SESSION_SECTIONS.includes(sec)) {
+    // 各板块自行填充侧栏与主区:画布渲染画布列表,素材重扫网格
+    if (sec === 'canvas') canvas.enterSection(); else assets.enterSection();
+    populateModelSelects();
+    return;
+  }
   sessionsUi.refreshList();
   if (skipSessionPick) { populateModelSelects(); return; }
   // 异步:先按板块重建模型下拉,再保证激活会话属于该板块。
@@ -920,18 +941,18 @@ function setSection(sec, { skipSessionPick } = {}) {
   (async () => {
     await populateModelSelects(); // 模型下拉按板块类别重新过滤
     const cur = state.sessions.get(state.activeSid);
-    const curKind = (cur && cur.meta.kind) || 'code';
+    const curKind = sectionOfKind(cur && cur.meta.kind);
     // 下拉重建后必须按会话真实模型回显,否则显示成回退项(看起来像模型被改了,v0.9.6)
     if (curKind === sec) { chat.updateTopbarForSession(state.activeSid); return; }
     const list = await api.sessList();
     const latest = list
-      .filter((m) => !m.archived && (m.kind || 'code') === sec)
+      .filter((m) => !m.archived && sectionOfKind(m.kind) === sec)
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
     if (latest) {
       chat.ensureSession(latest.id, latest);
       chat.setActiveSession(latest.id);
     } else {
-      await sessionsUi.createSession(); // 空板块:自动建会话(媒体板块用下拉首个模型)
+      await sessionsUi.createSession(); // 空板块:自动建会话(创作板块用下拉首个模型)
     }
   })();
 }
@@ -979,6 +1000,8 @@ editor.init();
 preview.init();
 tasks.init();
 term.init();
+canvas.init(); // 无限画布(v0.10.0):Drawflow 实例与画布板块接线
+assets.init(); // 素材板块(v0.10.0)
 document.body.classList.add('sec-' + state.section); // 启动即挂板块 class(code-only 元素据此显隐)
 chat.setViewMode('normal');
 boot();

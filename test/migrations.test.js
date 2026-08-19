@@ -108,6 +108,54 @@ test('版本迁移:dataVersion 门控——旧版本执行一次,重跑跳过,�
   assert.strictEqual(store.getSetting('dataVersion'), '0.9.18', '回退安装旧版不降低版本戳');
 });
 
+test('版本迁移(0.9.38):媒体会话 kind 四合一 → media 并盖 board 戳,不动其他 kind', () => {
+  store.update((s) => {
+    s.sessions = [
+      { id: 'm1', kind: 'image', cwd: 'D:\\x' },
+      { id: 'm2', kind: 'video', cwd: 'D:\\x' },
+      { id: 'm3', kind: 'audio', cwd: 'D:\\x' },
+      { id: 'm4', kind: 'model', cwd: 'D:\\x' },
+      { id: 'c1', kind: 'chat', cwd: 'D:\\x' },
+      { id: 'p1', cwd: 'D:\\x' }, // code(无 kind)
+    ];
+  });
+  run('0.9.38');
+  const pick = (id) => store.listSessions().find((m) => m.id === id);
+  for (const id of ['m1', 'm2', 'm3', 'm4']) assert.strictEqual(pick(id).kind, 'media', id + ' 应归一为 media');
+  assert.strictEqual(pick('m1').board, 'image', 'board 戳 = 原 kind,分组失效时兜底');
+  assert.strictEqual(pick('m2').board, 'video');
+  assert.strictEqual(pick('m3').board, 'audio');
+  assert.strictEqual(pick('m4').board, 'model');
+  assert.strictEqual(pick('c1').kind, 'chat', 'chat 会话不动');
+  assert.ok(!pick('p1').kind && !pick('p1').board, 'code 会话不动');
+  // 幂等:版本戳门控下重跑跳过,结果不变
+  run('0.9.38');
+  assert.strictEqual(pick('m1').kind, 'media');
+  assert.strictEqual(pick('m1').board, 'image');
+});
+
+test('自愈(repairMediaBoard):media 会话缺/坏 board 戳时按 modelGroups 补齐', () => {
+  // 模拟一个带 modelGroups 的 key
+  const keyId = 'k_test_board';
+  store.setSetting('apiKeys', [{ id: keyId, name: 'Kuro', key: 'k', baseUrl: 'https://gw.example.com', kind: 'authToken',
+    models: ['Vidu-q2'], modelsAt: 1, modelGroups: [{ category: '图像', model_type: 'image', models: ['Vidu-q2'] }] }]);
+  store.update((s) => {
+    s.sessions = [
+      { id: 'mb1', kind: 'media', model: 'Vidu-q2', keyId, cwd: 'D:\\x' }, // 缺戳 → 补 image
+      { id: 'mb2', kind: 'media', model: 'Vidu-q2', keyId, board: 'bogus', cwd: 'D:\\x' }, // 坏戳 → 纠 image
+      { id: 'mb3', kind: 'media', model: 'Vidu-q2', keyId, board: 'video', cwd: 'D:\\x' }, // 已盖戳 → 不动
+      { id: 'mb4', kind: 'media', model: 'unknown-m', keyId, cwd: 'D:\\x' }, // 无从解析 → 保持无戳
+    ];
+  });
+  const report = run('0.9.38');
+  const pick = (id) => store.listSessions().find((m) => m.id === id);
+  assert.strictEqual(pick('mb1').board, 'image');
+  assert.strictEqual(pick('mb2').board, 'image');
+  assert.strictEqual(pick('mb3').board, 'video', '已有有效戳不覆盖');
+  assert.ok(!('board' in pick('mb4')) || pick('mb4').board == null, '无从解析保持无戳');
+  assert.strictEqual(report.mediaBoardStamped, 2);
+});
+
 test('版本迁移:单个迁移抛错不影响其他迁移与版本戳', () => {
   let ok = 0;
   const mig = [
