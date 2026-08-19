@@ -844,6 +844,9 @@ kbd {
 body:not(.sec-code) .code-only { display: none !important; }
 /* workspace-only 元素 code+chat 板块都显示(如「面板」按钮,v0.9.33),仅创作板块隐藏 */
 body:not(.sec-code):not(.sec-chat) .workspace-only { display: none !important; }
+/* chat-only 元素仅 chat 板块显示(极速/Agent 切换钮,v0.10.2) */
+body:not(.sec-chat) .chat-only { display: none !important; }
+#btn-chat-mode.chat-mode-on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 
 /* ---------------- Key 额度与模型勾选(v0.8.0) ---------------- */
 .key-quota {

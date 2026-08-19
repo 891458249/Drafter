@@ -28,6 +28,22 @@ const FAST_CHAT_SYSTEM_PROMPT = [
   '用户消息里的 <附件> 块内容即附件全文(已在消息内给出),直接基于它回答。',
 ].join('\n');
 
+// 极速问答 options 覆盖(v0.10.2,抽成纯函数便于单测):
+// chat 会话且未显式切 Agent → SDK 隔离配置;否则返回 null(走完整 Agent 配置)。
+// 实测依据:默认 preset+全工具 schema 首轮输入 ~26k tokens,极速配置降到 ~2-4k。
+function fastChatOverrides(meta, gemAppend) {
+  if (!meta || meta.kind !== 'chat' || meta.chatMode === 'agent') return null;
+  return {
+    // fast 下零工具无需权限流程;显式 bypass 避免 plan/dontAsk 等模式的 CLI 侧行为残留
+    permissionMode: 'bypassPermissions',
+    settingSources: [],
+    systemPrompt: gemAppend ? FAST_CHAT_SYSTEM_PROMPT + '\n\n' + gemAppend : FAST_CHAT_SYSTEM_PROMPT,
+    tools: [],
+    mcpServers: {},
+    strictMcpConfig: true,
+  };
+}
+
 // The Agent SDK is ESM-only — load it via dynamic import().
 let sdk = null;
 let sdkError = null;
@@ -180,14 +196,17 @@ class Session {
     }
     // 极速问答(v0.10.2):chat 会话(chatMode 缺省视为 fast)走 SDK 隔离配置——
     // 零内置工具/零文件设置/零 MCP/极简系统提示。resume/流式/锚点机制与 Agent 模式一致。
-    const isFastChat = this.meta.kind === 'chat' && this.meta.chatMode !== 'agent';
+    let fastGemAppend = '';
+    if (this.meta.kind === 'chat' && this.meta.chatMode !== 'agent' && this.meta.gemId) {
+      try { fastGemAppend = gems.composeAppend(gems.byId(this.meta.gemId)) || ''; } catch {}
+    }
+    const fastOv = fastChatOverrides(this.meta, fastGemAppend);
     const options = {
       cwd: this.meta.cwd,
-      // fast 下零工具无需权限流程;显式 bypass 避免 plan/dontAsk 等模式的 CLI 侧行为残留
-      permissionMode: isFastChat ? 'bypassPermissions' : (this.meta.permissionMode || 'default'),
+      permissionMode: fastOv ? 'bypassPermissions' : (this.meta.permissionMode || 'default'),
       includePartialMessages: true,
       env: this.m.buildEnv({ ELECTRON_RUN_AS_NODE: '1' }, this.meta.keyId), // 按会话绑定的 Key 注入凭据(v0.8.2)
-      settingSources: isFastChat ? [] : ['user', 'project', 'local'],
+      settingSources: fastOv ? [] : ['user', 'project', 'local'],
       stderr: (data) => this._emit({ type: 'ui_stderr', text: String(data) }),
       canUseTool: (toolName, input, opts) => this._onPermission(toolName, input, opts),
     };
@@ -220,20 +239,9 @@ class Session {
         if (forkAt) options.resumeSessionAt = forkAt;
       }
     }
-    if (isFastChat) {
-      // 极速问答:自定义极简系统提示(整体替换 preset;Gem 指令/知识仍拼入,Gem 的
-      // 默认工具在此模式下本就不存在,无需处理),零内置工具、零 MCP。
-      let sp = FAST_CHAT_SYSTEM_PROMPT;
-      if (this.meta.gemId) {
-        try {
-          const ga = gems.composeAppend(gems.byId(this.meta.gemId));
-          if (ga) sp += '\n\n' + ga;
-        } catch {}
-      }
-      options.systemPrompt = sp;
-      options.tools = [];
-      options.mcpServers = {};
-      options.strictMcpConfig = true;
+    if (fastOv) {
+      // 极速问答:应用隔离覆盖(systemPrompt(含 Gem append)/tools:[]/mcpServers:{}/strictMcpConfig)
+      Object.assign(options, fastOv);
     } else {
     // project-group context: shared memory + file tags + extra dirs + readonly hook
     let projCtx = null;
@@ -859,4 +867,4 @@ function safeJson(obj) {
   try { return JSON.parse(JSON.stringify(obj)); } catch { return String(obj); }
 }
 
-module.exports = { SessionManager, resolveClaudeExe, encodeCwdForProjects, migrateTranscript };
+module.exports = { SessionManager, resolveClaudeExe, encodeCwdForProjects, migrateTranscript, fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT };

@@ -1,6 +1,6 @@
 # Drafter
 
-Claude Code 的桌面界面(Electron)。基于 `@anthropic-ai/claude-agent-sdk` 与 Claude Code 直接通信,支持多会话并行、项目组管理、权限确认 UI、Git 工作流与内嵌终端,不必再在 PowerShell 里手动启动。
+AI 桌面工作台(Electron):极速问答(零工具+极简提示,响应对齐网页版)、编程 Agent(多会话并行/权限审批/Git 工作流/内嵌终端)、AI 创作(图/视/音/3D)一体化。编程会话基于 `@anthropic-ai/claude-agent-sdk` 驱动,兼容多家模型网关。
 
 ## 启动与打包
 

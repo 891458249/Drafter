@@ -1,7 +1,7 @@
 // Composer: send, @file autocomplete, slash commands, image attachments,
 // append-while-running.
 import { api, state, $, escapeHtml, emit, on, parseModelValue, updateKeyChips, MEDIA_KINDS, sectionOfKind, boardOf, ensureGroups } from './state.js';
-import { addUserMessage, setBusyUI, aigcLocalEcho, aigcBusy, updateAigcSendUI, updateTopbarForSession } from './chat.js';
+import { addUserMessage, setBusyUI, aigcLocalEcho, aigcBusy, updateAigcSendUI, updateTopbarForSession, isFastChat } from './chat.js';
 import { refreshList } from './sessions-ui.js';
 
 const inputEl = () => $('input');
@@ -31,9 +31,22 @@ export async function sendMessage() {
     // 文本附件只按路径引用(v0.9.27):内容不内联、UI 只显示文件卡片;
     // v0.9.29:显式指示 AI 分段读完(Read 默认只读前 2000 行,长文件只读开头
     // 就回答 = 用户感知的「附件被截断」,属严重 BUG 修复)
+    // 极速问答(v0.10.2):零工具会话没有 Read,文本附件改回内联注入(上限 100KB;
+    // 超限/读取失败时在附件块内注明,并提示粘贴片段或切 Agent 模式)
+    const fastChat = isFastChat(sess);
     let fullText = text || '';
     for (const f of files) {
-      if (f.path) {
+      if (f.path && fastChat) {
+        const r = await api.fileRead(state.cwd, f.path);
+        const body = r && r.ok ? r.content : null;
+        if (body == null) {
+          fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}" path="${f.path}">读取失败:${(r && r.error) || '未知错误'}(极速模式无工具能力,可粘贴文本或切 Agent 模式)</附件>`;
+        } else if (body.length > 100 * 1024) {
+          fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}" path="${f.path}">文件过大(${(body.length / 1024).toFixed(0)}KB,极速模式内联上限 100KB),未注入内容。请粘贴关键片段,或切换 Agent 模式由 AI 分段读取。</附件>`;
+        } else {
+          fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}" path="${f.path}">\n${body}\n</附件>`;
+        }
+      } else if (f.path) {
         fullText += `${fullText ? '\n\n' : ''}<附件 name="${f.name}" path="${f.path}">内容未内联,请使用 Read 工具读取该文件。重要:Read 每次默认只返回前 2000 行——若文件较长,必须用 offset/limit 参数分段继续读取,直到覆盖全部内容,禁止只读开头就作答。</附件>`;
       } else {
         // 兜底:无路径的旧形态(理论上 v0.9.27 起不再产生)

@@ -82,6 +82,7 @@ async function boot() {
   try {
     const st = await api.getStore();
     if (st && st.settings && st.settings.instantJump === false) state.instantJump = false;
+    if (st && st.settings && st.settings.sharedPromptCache === false) state.sharedPromptCache = false;
   } catch {}
   populateModelSelects(); // 按活跃 Key 填充模型下拉(v0.7.0)
   const sdk = await api.sdkStatus();
@@ -146,6 +147,35 @@ $('perm-mode').onchange = async () => {
 // 模型下拉(会话级,输入区工具栏)的 change 处理器在 input.js,此处不再绑定
 
 $('view-mode').onchange = () => chat.setViewMode($('view-mode').value);
+
+// 极速问答 ⇄ Agent 模式切换(v0.10.2,仅 chat 会话;按钮为 chat-only,其他板块不可见)
+$('btn-chat-mode').onclick = async () => {
+  const sid = state.activeSid;
+  const s = state.sessions.get(sid);
+  if (!s || s.meta.kind !== 'chat') return;
+  const next = s.meta.chatMode === 'agent' ? 'fast' : 'agent';
+  await api.sessSetChatMode(sid, next);
+  s.meta.chatMode = next; // 乐观回显;主进程按 needRestart 在回合结束后重启 query
+  chat.updateTopbarForSession(sid);
+  if (next === 'agent') {
+    alert('已切换为 Agent 模式:会话重启后生效(上文保留),恢复全部工具能力。\n注意:Agent 模式每轮请求会携带完整系统提示与工具定义,响应明显变慢。');
+  }
+};
+
+// 极速问答首次提示(v0.10.2):存量 chat 会话(chatMode 未落盘即视为 fast)首次激活时
+// 告知模式已切换、如何切回 Agent。全局只提示一次。
+let fastChatHinted = true;
+try {
+  const st = await api.getStore();
+  fastChatHinted = !!(st && st.settings && st.settings.fastChatHinted);
+} catch {}
+on('session-activated', (sid) => {
+  const s = state.sessions.get(sid);
+  if (fastChatHinted || !s || s.meta.kind !== 'chat') return;
+  fastChatHinted = true;
+  api.setSetting('fastChatHinted', true);
+  alert('Chat 已启用「⚡ 极速问答」模式:零工具 + 极简提示,响应速度接近网页版。\n如需让 AI 读取文件/执行命令等工具能力,点输入框上方的「⚡ 极速」按钮切换为 Agent 模式。');
+});
 
 // ---------------------------------------------------------------------------
 // Token 用量 / 上下文窗口弹层(输入框右下角)
@@ -298,12 +328,18 @@ function renderThemeCards() {
 function openSettingsModal() {
   renderThemeCards();
   $('set-instantjump').checked = state.instantJump;
+  $('set-sharedcache').checked = state.sharedPromptCache !== false;
   $('settings-modal').classList.remove('hidden');
 }
 $('settings-close').onclick = () => $('settings-modal').classList.add('hidden');
 $('set-instantjump').onchange = (e) => { // 瞬时 ↔ 平滑(原 v0.9.15 菜单项)
   state.instantJump = !!e.target.checked;
   api.setSetting('instantJump', state.instantJump);
+};
+// 跨会话共享提示缓存(v0.10.2):盖戳进新会话 meta.staticPrompt(sessions.js 创建时读取)
+$('set-sharedcache').onchange = (e) => {
+  state.sharedPromptCache = !!e.target.checked;
+  api.setSetting('sharedPromptCache', state.sharedPromptCache);
 };
 $('settings-modal').onclick = async (e) => {
   const act = e.target.dataset && e.target.dataset.set;
@@ -440,7 +476,7 @@ async function renderKeysList() {
   const { list, activeId } = await api.keysList();
   renderAuxModels(); // 辅助模型候选随 Key/模型缓存刷新(后台渲染,不阻塞)
   if (!list.length) {
-    box.innerHTML = '<div class="mcp-row"><span style="color:var(--text-dim)">(暂无 Key,请在下方添加;未配置时回退 claude CLI 登录态)</span></div>';
+    box.innerHTML = '<div class="mcp-row"><span style="color:var(--text-dim)">(暂无 Key,请在下方添加;未配置时回退命令行登录态)</span></div>';
     return;
   }
   const usageText = (u, quota, label) => {

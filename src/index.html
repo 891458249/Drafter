@@ -128,6 +128,7 @@
             <button id="btn-add-attach" class="btn btn-sm" title="添加附件(图片或文本文件,随下一条消息发送)">＋附件</button>
             <button id="btn-add-folder" class="btn btn-sm code-only" title="为当前项目添加文件夹(常驻共享)">＋文件夹</button>
             <button id="gem-sel-btn" class="btn btn-sm" title="选择 Gem 自定义助手(指令/知识随会话注入)">💎 <span id="gem-sel-name">Gem</span></button>
+            <button id="btn-chat-mode" class="btn btn-sm chat-only chat-mode-on" title="极速问答(零工具+极简提示,响应快 5-10 倍,纯问答)。点击切换 Agent 模式">⚡ 极速</button>
             <button id="btn-compact" class="btn btn-sm sdk-only" title="压缩上下文 (/compact)">压缩</button>
             <label class="ctrl sdk-only">模式
               <select id="perm-mode">
@@ -483,6 +484,9 @@
         <h3>偏好</h3>
         <label class="settings-row" style="cursor:pointer">
           <input type="checkbox" id="set-instantjump" /> ⚡ 瞬时跳转定位(消息导航/回到底部,关闭则平滑滚动)
+        </label>
+        <label class="settings-row" style="cursor:pointer" title="新会话的系统提示把目录/git/记忆等动态段移到首条用户消息,提示前缀跨会话静态,缓存命中率更高、首轮更快。只影响设置后新建的会话。">
+          <input type="checkbox" id="set-sharedcache" /> 🚀 跨会话共享提示缓存(仅影响新建会话,响应更快)
         </label>
       </div>
       <div class="settings-sec">

@@ -126,7 +126,7 @@ export function init() {
     const warn = $('editor-warning');
     if (current.dirty) {
       warn.classList.remove('hidden');
-      warn.textContent = '⚠ 文件已被外部修改(可能是 Claude 编辑了它)。保存时将提示如何处理。';
+      warn.textContent = '⚠ 文件已被外部修改(可能是 AI 会话编辑了它)。保存时将提示如何处理。';
     } else {
       // auto-reload clean buffer
       openFile(current.rel, { mode: current.mode });

@@ -237,6 +237,7 @@ async function sideChat(m) {
     projectId: m.projectId, forkFrom: m.sdkSessionId || null,
     gemId: m.gemId || null, // side chat 继承 Gem 绑定(v0.9.11)
     standalone: m.standalone || undefined, kind: m.kind || undefined, // 独立/非 code 板块会话的 side 不进项目组
+    chatMode: m.chatMode || undefined, // side chat 继承极速/Agent 模式(v0.10.2)
   });
   ensureSession(meta.id, meta);
   setActiveSession(meta.id);
@@ -342,7 +343,15 @@ export function init() {
   api.on('sess:attention', ({ sid }) => {
     if (sid !== state.activeSid) { attention.add(sid); refreshList(); }
   });
-  on('session-status', () => refreshList());
+  // refreshList 防抖(v0.10.2):session-status 在多会话并发时高频触发(每回合
+  // 开始/结束/标题/结果),每次全量重绘侧栏 + 2 次 IPC;合并到 200ms 尾沿一次。
+  // 用户主动操作(点击/新建/重命名)仍走即时 refreshList。
+  let refreshTimer = null;
+  const refreshListSoon = () => {
+    if (refreshTimer) return;
+    refreshTimer = setTimeout(() => { refreshTimer = null; refreshList(); }, 200);
+  };
+  on('session-status', refreshListSoon);
   on('project-files-changed', () => refreshList());
   api.on('cron:fired', () => refreshList());
 }

@@ -53,10 +53,29 @@ export function setActiveSession(sid) {
   emit('session-activated', sid);
 }
 
+// 极速问答判定(v0.10.2):chat 会话且未显式切 Agent;input.js 附件注入也据此分流
+export function isFastChat(s) {
+  return !!s && s.meta.kind === 'chat' && s.meta.chatMode !== 'agent';
+}
+
 export function updateTopbarForSession(sid) {
   const s = state.sessions.get(sid);
   if (!s) return;
   const m = s.meta;
+  // 极速/Agent 模式钮(v0.10.2):跟随会话回显;极速时权限模式/压缩按钮灰掉(零工具无意义)
+  const chatModeBtn = $('btn-chat-mode');
+  if (chatModeBtn) {
+    const fast = isFastChat(s);
+    chatModeBtn.textContent = fast ? '⚡ 极速' : '🛠 Agent';
+    chatModeBtn.classList.toggle('chat-mode-on', fast);
+    chatModeBtn.title = fast
+      ? '当前:极速问答(零工具+极简提示,响应快)。点击切换 Agent 模式(全部工具能力)'
+      : '当前:Agent 模式(全部工具能力)。点击切换极速问答(响应快 5-10 倍,纯问答)';
+  }
+  for (const id of ['perm-mode', 'btn-compact']) {
+    const el = $(id);
+    if (el) el.disabled = isFastChat(s);
+  }
   if (m.permissionMode) $('perm-mode').value = m.permissionMode;
   $('model-sel').value = modelSelValue(m); // keyId|modelId 编码,回显所属 Key 分组
   updateKeyChips(); // 回显模型时同步 Key chip
@@ -926,6 +945,9 @@ export function renderEvent(sid, ev, { replay }) {
       s.ui.turnStart = Date.now();
       s.ui.turnTokens = 0;
       s.ui.curMsgTokens = 0;
+      // TTFT 提示(v0.10.2):首个流事件到达前状态行显示等待语(极速模式仍有几秒
+      // 网关往返,没有这个提示看起来像卡死);handleStreamEvent 首个事件清除。
+      s.ui.curAction = '已发送,等待响应…';
       resetTurnProgress(); // 新回合:预测进度归零
     }
     if (sid === state.activeSid) setBusyUI(s.ui.busy);
@@ -986,6 +1008,7 @@ export function renderEvent(sid, ev, { replay }) {
 
   if (t === 'result') {
     s.ui.busy = false;
+    s.ui.curAction = null; // 回合结束:清除可能的残留等待提示
     finalizeAssistant(s);
     if (ev.cum_cost_usd != null) s.ui.cumCost = ev.cum_cost_usd;
     else if (ev.total_cost_usd != null) s.ui.cumCost += ev.total_cost_usd;
@@ -1022,6 +1045,10 @@ export function renderEvent(sid, ev, { replay }) {
 }
 
 function handleStreamEvent(s, parentId, ev) {
+  if (s.ui.curAction) { // 首个流事件到达:结束「等待响应」阶段(TTFT 提示,v0.10.2)
+    s.ui.curAction = null;
+    if (s.meta.id === state.activeSid) updateTurnStatus();
+  }
   const type = ev.type;
   if (type === 'content_block_start') {
     const block = ev.content_block;
