@@ -1,0 +1,4 @@
+source: https://github.com/deepseek-ai/deepseek-harness
+ref: master (tarball downloaded 2026-08-25)
+version: 0.1.1-rc.2
+note: Developer Preview — pinned, do not auto-upgrade. To upgrade: download new tarball, diff, re-apply Drafter patches under drafter-patches/.
