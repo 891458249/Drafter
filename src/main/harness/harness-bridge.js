@@ -1,12 +1,16 @@
 // harness 桥:Drafter 主进程内 boot deepseek-harness 运行时,经 IPC 向渲染进程提供
-// 官方 fetch 载体(toFetchHandler)与 SSE 事件流(MessagePort)。
+// 官方 fetch 载体(toFetchHandler)与 SSE 事件流(channelId + webContents.send)。
 //
 // 设计依据(.claude-ui/harness-phase1-design.md):
 //  - 不 spawn 子进程:harness 是纯 Node ESM,Electron 主进程即 Node。实测 Electron 33
 //    (Node v20.18.3)可 import app-boot/apiproxy;node:sqlite 缺失但相关包均惰性加载。
-//  - 传输层:禁用 webserver/web-runtime/client-connection/client-hmr,改用 IPC;
-//    另插 drafterWebServerStub 提供「不监听的 webServer 注册表」满足 client-modules inject。
-//  - 渲染进程:preload 注入 window.__DSH_TRANSPORT__ = { createApiClient: () => IpcApiClient }。
+//  - 传输层:禁用 webserver/web-runtime/client-hmr,另插 drafterWebServerStub 提供
+//    「不监听的 webServer 注册表」满足 client-modules inject;connection 保留(client 半读
+//    __DSH_TRANSPORT__),inject 覆盖为空(不走 HTTP 信任围栏)。
+//  - 渲染进程:preload 暴露 __DRAFTER_IPC_RAW__ 纯数据原语;IpcApiClient 在主世界 bundle
+//    (ipc-client-entry.mjs)里继承官方 AbstractApiClient 组装 Response/ReadableStream。
+//  - 数据目录(Phase 6):DSH_HOME 指向 Drafter userData/harness,让 harness 的
+//    sessions/credentials/settings 随 Drafter 数据一起迁移与备份。
 //
 // 本模块只在主进程使用;全部 harness import 都是动态 import(ESM),避免顶层阻塞。
 
@@ -21,7 +25,23 @@ function keysBridgePermissionConfig() {
   return permissionBridge.permissionPresetsConfig()
 }
 
-const HARNESS_ROOT = path.join(__dirname, '..', '..', '..', 'vendor', 'deepseek-harness')
+// asar 打包后,vendor/deepseek-harness 的 lib/(ESM 模块)被 asarUnpack 到
+// app.asar.unpacked。__dirname 在打包态指向 app.asar 内,ESM import 读不到 asar
+// 虚拟文件系统,必须把 HARNESS_ROOT 解析到 unpacked 目录。
+// 开发态:__dirname = <repo>/src/main/harness → <repo>/vendor/deepseek-harness
+// 打包态:__dirname = <resources>/app.asar/src/main/harness → <resources>/app.asar.unpacked/vendor/deepseek-harness
+function resolveHarnessRoot() {
+  const devRoot = path.join(__dirname, '..', '..', '..', 'vendor', 'deepseek-harness')
+  if (!app.isPackaged) return devRoot
+  // __dirname 在 asar 里(…/resources/app.asar/src/main/harness);换成 app.asar.unpacked
+  return path.join(__dirname, '..', '..', '..', 'vendor', 'deepseek-harness').replace('app.asar', 'app.asar.unpacked')
+}
+const HARNESS_ROOT = resolveHarnessRoot()
+
+// Phase 6:harness 的数据目录归拢到 Drafter userData 下(sessions/credentials/settings/
+// attachments 全部随 Drafter 数据迁移与备份)。必须在任何 harness import 之前设置,
+// 因为 resolveDshHome 在模块加载时读 process.env.DSH_HOME。
+const DSH_HOME = () => path.join(app.getPath('userData'), 'harness')
 
 // —— 运行时单例状态 ————————————————————————————————————————————————————————
 let harnessCtx = null          // Cordis 根 Context(boot 结果)
@@ -30,7 +50,25 @@ let bootPromise = null         // 防重入
 const sseBridges = new Map()   // channelId → { cancel() } 活跃 SSE 转发器
 
 function log(...args) { console.log('[harness-bridge]', ...args) }
-function logErr(...args) { console.error('[harness-bridge]', ...args) }
+function logErr(...args) {
+  console.error('[harness-bridge]', ...args)
+  // 打包态调试:写一份到 userData/logs/harness-error.log(aggregate error 的 errors 数组
+  // 经 IPC 序列化会丢,这里递归挖出来)
+  try {
+    const fs = require('node:fs')
+    const dir = path.join(app.getPath('userData'), 'logs')
+    fs.mkdirSync(dir, { recursive: true })
+    const lines = []
+    const walk = (err, depth) => {
+      if (!err || depth > 12) return
+      lines.push('  '.repeat(depth) + '- ' + String(err && err.message || err).split('\n')[0].slice(0, 200))
+      if (err && err.errors) for (const sub of err.errors) walk(sub, depth + 1)
+      if (err && err.cause) walk(err.cause, depth + 1)
+    }
+    for (const a of args) { if (a instanceof Error) walk(a, 0); else lines.push(String(a)) }
+    fs.appendFileSync(path.join(dir, 'harness-error.log'), `[${new Date().toISOString()}]\n` + lines.join('\n') + '\n\n', 'utf8')
+  } catch {}
+}
 
 // —— webServer 存根插件(不监听端口,只保留注册表与 renderIndex)———————————————
 // client-modules inject ['webServer','loader'],frontend-static 调 renderIndex;
@@ -127,6 +165,60 @@ async function bootHarness() {
   if (harnessCtx) return harnessCtx
   if (bootPromise) return bootPromise
   bootPromise = (async () => {
+    // Phase 6:在 import 任何 harness 模块前把 DSH_HOME 钉到 Drafter userData 下。
+    // resolveDshHome 在模块加载/首次调用时读 process.env.DSH_HOME,必须在 boot 之前设好。
+    if (!process.env.DSH_HOME) {
+      process.env.DSH_HOME = DSH_HOME()
+      log('DSH_HOME =', process.env.DSH_HOME)
+    }
+    // Phase 7:注册全局模块解析(ESM resolve hook + CJS require hook),把 @deepseek-ai/*
+    // 和第三方包映射到 vendor 的物理路径(打包态 asar 里没有 pnpm node_modules 符号链接)。
+    // 必须在任何 harness import 之前注册。
+    process.env.__DRAFTER_HARNESS_ROOT__ = HARNESS_ROOT
+    const { register } = await import('node:module')
+    register(pathToFileURL(path.join(__dirname, 'resolve-hook.mjs')).href)
+    // CJS 侧:hook require() 的解析(schemastery 等 CJS 包不走 ESM resolve hook)
+    const Module = require('node:module')
+    const origResolveFilename = Module._resolveFilename
+    const fsCjs = require('node:fs')
+    const pathCjs = require('node:path')
+    // 建一个轻量的 CJS 解析索引(@deepseek-ai/* + vendor-deps/*)
+    const cjsIndex = new Map()
+    function buildCjsIndex() {
+      if (cjsIndex.size) return cjsIndex
+      const roots = [pathCjs.join(HARNESS_ROOT, 'packages'), pathCjs.join(HARNESS_ROOT, 'vendor'), pathCjs.join(HARNESS_ROOT, 'vendor-deps')]
+      const scan = (dir, depth) => {
+        if (depth > 3 || !fsCjs.existsSync(dir)) return
+        let entries
+        try { entries = fsCjs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+        for (const e of entries) {
+          if (!e.isDirectory() || e.name === 'node_modules' || e.name.startsWith('.')) continue
+          const p = pathCjs.join(dir, e.name)
+          const pj = pathCjs.join(p, 'package.json')
+          if (fsCjs.existsSync(pj)) {
+            try {
+              const m = JSON.parse(fsCjs.readFileSync(pj, 'utf8'))
+              const name = m.name
+              if (name && (name.startsWith('@deepseek-ai/') || !name.startsWith('@'))) {
+                const main = m.main || 'index.js'
+                const mp = pathCjs.join(p, main)
+                if (fsCjs.existsSync(mp)) cjsIndex.set(name, mp)
+              }
+            } catch {}
+          }
+          scan(p, depth + 1)
+        }
+      }
+      for (const r of roots) scan(r, 0)
+      return cjsIndex
+    }
+    buildCjsIndex()
+    Module._resolveFilename = function (request, ...args) {
+      const hit = cjsIndex.get(request)
+      if (hit) return hit
+      return origResolveFilename.call(this, request, ...args)
+    }
+    log('ESM+CJS resolve hooks registered, HARNESS_ROOT =', HARNESS_ROOT, 'cjsIndex:', cjsIndex.size)
     const appBootUrl = pathToFileURL(path.join(HARNESS_ROOT, 'packages/boot/app-boot/lib/index.js')).href
     const appBoot = await import(appBootUrl)
     const { boot } = appBoot
@@ -141,14 +233,37 @@ async function bootHarness() {
     // loadProfile 签名:(binName, name, installAnchor, home?)。installAnchor 指向一个能
     // 解析到 @deepseek-ai/dsh-base / dsh-web-app 的 package.json——用 apps/cli 的 package.json
     // (apps/cli 依赖了全部 bundle,与官方 dsh CLI 的 INSTALL_ANCHOR 一致)。
-    const installAnchor = path.join(HARNESS_ROOT, 'apps/cli/package.json')
-    // 关键:官方 CLI 的 prepareProfile 会先 healProfilesModuleFallback,把安装锚点的
-    // 依赖图符号链接进 $DSH_HOME/profiles/node_modules,cordis.yml(位于该 profile 目录)
-    // 里的裸包名(@deepseek-ai/*)才能被 Node 的 node_modules 查找解析到。缺了这步,
-    // loader 会报 Cannot find package(因为 Drafter 自己的 node_modules 里没有这些包)。
-    appBoot.healProfilesModuleFallback(installAnchor)
-    const profile = loadProfile('drafter', 'web', installAnchor)
-    const bundlePatches = profile.layers.flatMap((layer) => layer.patches)
+    // 打包态(asar.unpacked)没有 pnpm 的 node_modules 符号链接,loadProfile 的
+    // resolveBundleDir 用 createRequire 找不到 @deepseek-ai/dsh-base。
+    // 解法:自己直接读两个 bundle 的 cordis.patch.yml(它们就在 vendor 里,路径固定),
+    // 跳过 loadProfile 的 bundle 解析;profile 的其它部分(cordis.yml 根配置)我们自己建。
+    const fs = require('node:fs')
+    const { pathToFileURL: ptfu } = require('node:url')
+
+    // 建一个最小的 profile 目录(只有 cordis.yml 空根)
+    const profileDir = path.join(resolveDshHome(), 'profiles', 'web')
+    fs.mkdirSync(profileDir, { recursive: true })
+    const cordisYml = path.join(profileDir, 'cordis.yml')
+    if (!fs.existsSync(cordisYml)) {
+      fs.writeFileSync(cordisYml, '# dsh profile root — 空 entry 列表,树由 patch 层合成。\n[]\n', 'utf8')
+    }
+
+    // 直接读两个 bundle 的 cordis.patch.yml 作为 patch 层。
+    // 用 js-yaml + entryListSchema(含 !!js 类型,解析成 { __jsExpr } 占位符;
+    // Loader 在条目激活时用 interpolate(ctx, ...) 求值,我们不用自己 evaluate)。
+    const yamlLib = await import(pathToFileURL(path.join(HARNESS_ROOT, 'vendor-deps/js-yaml/dist/js-yaml.mjs')).href)
+    const includePkgUrl = ptfu(path.join(HARNESS_ROOT, 'vendor/include/lib/index.js')).href
+    const includePkg = await import(includePkgUrl)
+    const entryListSchema = includePkg.entryListSchema
+    const bundlePatches = []
+    for (const bundleName of ['base', 'web-app']) {
+      const patchPath = path.join(HARNESS_ROOT, 'packages/bundle', bundleName, 'cordis.patch.yml')
+      if (!fs.existsSync(patchPath)) { logErr('bundle patch missing:', patchPath); continue }
+      const text = fs.readFileSync(patchPath, 'utf8')
+      const parsed = yamlLib.load(text, { schema: entryListSchema })
+      if (Array.isArray(parsed)) bundlePatches.push(...parsed)
+    }
+    log('bundle patches loaded:', bundlePatches.length, 'entries')
     // PatchOptions 是扁平的 { id, disabled, config, insert, ... }(vendor/include/src/index.ts)。
     // 每个 patch 按 id 定位一行并替换/禁用;我们的 overlay 逐行禁用传输层。
     // 注意:session-query-sqlite 不能禁——它即便 openAt:'never' 也提供 ctx.sessionQuery
@@ -181,10 +296,10 @@ async function bootHarness() {
       // Node 20 无 stripTypeScriptTypes;code-runtime 是 run_code 工具(Phase 1 不用),禁用。
       { id: 'code-runtime', disabled: true },
     ]
-    const allPatches = [...bundlePatches, ...profile.patches, ...drafterOverlay]
+    const allPatches = [...bundlePatches, ...drafterOverlay]
 
     // profile 根配置:空 entry 列表(与官方 PROFILE_ROOT_CONFIG 一致),由 patch 合成整棵树。
-    const configPath = path.join(profile.dir, 'cordis.yml')
+    const configPath = path.join(profileDir, 'cordis.yml')
 
     const prepare = async (ctx) => {
       // 关键垫片:Node 20 下 loader.internal 为 undefined(fromInternal 仅支持 Node 22+),
@@ -196,14 +311,64 @@ async function bootHarness() {
       // Node 20:loader.internal 为 undefined,我们直接装多锚点 shim。
       // Node 24:loader.internal 存在但 internal.import 按 baseUrl 单点解析(bareModuleBaseUrl
       //   指向 base 时找不到 web-app 的包,反之亦然)——包一层,失败时回退多锚点。
+      // 打包态(asar):createRequire 锚点在 asar 里,pnpm 符号链接不存在——加一个
+      // 「物理目录直查」锚点:按包名映射到 vendor/deepseek-harness/{packages,vendor}/ 下的
+      // 实际包目录(pnpm workspace 的源码布局,asarUnpack 后以真实文件落地)。
       const { createRequire } = await import('node:module')
       const { register } = await import('node:module')
+      const fs = require('node:fs')
+
+      // 建立 @deepseek-ai/<pkg> → 绝对路径 的索引(开发态走 pnpm 链接,打包态走 asar.unpacked)
+      function buildPackageIndex() {
+        const index = new Map()
+        const roots = [
+          path.join(HARNESS_ROOT, 'packages'),
+          path.join(HARNESS_ROOT, 'vendor'),
+        ]
+        for (const root of roots) {
+          if (!fs.existsSync(root)) continue
+          // packages/<group>/<pkg>/package.json 或 vendor/<pkg>/package.json
+          const walk = (dir, depth) => {
+            if (depth > 2) return
+            let entries
+            try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+            for (const e of entries) {
+              if (!e.isDirectory() || e.name === 'node_modules' || e.name.startsWith('.')) continue
+              const p = path.join(dir, e.name)
+              const pj = path.join(p, 'package.json')
+              if (fs.existsSync(pj)) {
+                try {
+                  const manifest = JSON.parse(fs.readFileSync(pj, 'utf8'))
+                  if (manifest.name && manifest.name.startsWith('@deepseek-ai/')) {
+                    const main = manifest.main || 'lib/index.js'
+                    const mainPath = path.join(p, main)
+                    if (fs.existsSync(mainPath)) index.set(manifest.name, mainPath)
+                    else {
+                      // 有些包的 main 指向 lib/index.js 但物理入口在别处;兜底找 lib/index.js
+                      const fallback = path.join(p, 'lib', 'index.js')
+                      if (fs.existsSync(fallback)) index.set(manifest.name, fallback)
+                    }
+                  }
+                } catch { /* 忽略坏 manifest */ }
+              }
+              walk(p, depth + 1)
+            }
+          }
+          walk(root, 0)
+        }
+        return index
+      }
+      const packageIndex = buildPackageIndex()
+      log(`package index built: ${packageIndex.size} packages`)
+
       const anchors = [
         path.join(HARNESS_ROOT, 'packages/bundle/web-app/package.json'),
         path.join(HARNESS_ROOT, 'packages/bundle/base/package.json'),
         path.join(HARNESS_ROOT, 'apps/cli/package.json'),
       ].map((p) => createRequire(pathToFileURL(p).href))
       const resolveAny = (specifier) => {
+        // 优先查物理索引(打包态 asar.unpacked / 开发态源码目录)
+        if (packageIndex.has(specifier)) return packageIndex.get(specifier)
         for (const req of anchors) {
           try { return req.resolve(specifier) } catch { /* try next anchor */ }
         }
@@ -249,7 +414,7 @@ async function bootHarness() {
       })
     }
 
-    log('booting harness, profile dir:', profile.dir)
+    log('booting harness, profile dir:', profileDir)
     // bareModuleBaseUrl 指向 dsh-base:base 的依赖闭包含全部核心插件(timer/llm/session/
     // typert 等),web-app 只含 web 专属插件;从 base 能解析到全部(含 web-app,因 base 被
     // web-app 依赖、pnpm 在 base 的 node_modules 里也有 web 插件的传递链接)。

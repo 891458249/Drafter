@@ -13,7 +13,7 @@
   "license": "MIT",
   "devDependencies": {
     "@electron/rebuild": "^3.7.1",
-    "electron": "^33.2.0",
+    "electron": "^38.8.6",
     "electron-builder": "^25.1.8"
   },
   "dependencies": {
@@ -36,13 +36,33 @@
       "preload.js",
       "src/**/*",
       "build/icon.png",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "vendor/deepseek-harness/package.json",
+      "vendor/deepseek-harness/pnpm-workspace.yaml",
+      "vendor/deepseek-harness/apps/cli/package.json",
+      "vendor/deepseek-harness/apps/cli/config/**/*",
+      "vendor/deepseek-harness/apps/web/dist/**/*",
+      "vendor/deepseek-harness/packages/**/package.json",
+      "vendor/deepseek-harness/packages/**/lib/**/*",
+      "vendor/deepseek-harness/packages/**/cordis.patch.yml",
+      "vendor/deepseek-harness/vendor/**/package.json",
+      "vendor/deepseek-harness/vendor/**/lib/**/*",
+      "vendor/deepseek-harness/vendor-deps/**/*",
+      "!vendor/**/*.tsbuildinfo",
+      "!vendor/**/*.map"
     ],
     "publish": {
       "provider": "github",
       "owner": "891458249",
       "repo": "Drafter"
     },
+    "asarUnpack": [
+      "vendor/deepseek-harness/**/lib/**",
+      "vendor/deepseek-harness/apps/web/dist/**",
+      "vendor/deepseek-harness/**/cordis.patch.yml",
+      "vendor/deepseek-harness/**/package.json",
+      "vendor/deepseek-harness/vendor-deps/**"
+    ],
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico",

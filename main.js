@@ -53,6 +53,7 @@ const gems = require('./src/main/gems');
 const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
 const migrations = require('./src/main/migrations');
+const harnessBridge = require('./src/main/harness/harness-bridge');
 
 // 创作板块会话(v0.9.38 起 kind 统一为 'media',四大媒体板块合并):不走 Agent SDK,
 // 走 AIGC 生成任务闭环;四类旧 kind 由 migrations 归一,数组保留旧值仅为兼容降级/未迁移存量
@@ -119,7 +120,10 @@ function setupTray() {
 //  c. single-instance lock so two app instances can never fight over the cache
 app.commandLine.appendSwitch('disk-cache-dir', path.join(app.getPath('userData'), 'cache'));
 
-if (!app.requestSingleInstanceLock()) {
+// 冒烟/测试可用 DRAFTER_ALLOW_MULTI_INSTANCE=1 跳过单实例锁(打包态 CDP 驱动验证用,
+// 避免与本机正在运行的 Drafter 抢锁;生产默认仍单实例)。
+const allowMultiInstance = process.env.DRAFTER_ALLOW_MULTI_INSTANCE === '1';
+if (!allowMultiInstance && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {
@@ -208,6 +212,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // harness 桥 IPC(harness:fetch / harness:loadBundle / harness:openSse)
+  try { harnessBridge.registerHarnessIpc(); } catch (e) { console.error('[harness] IPC 注册失败:', e); }
   // 数据迁移与自愈(v0.9.17):版本升级后对全部存量会话统一迭代修复
   // (transcript 迁移/降级、meta 去重等),报告写 userData/logs/migrations.log
   try {
@@ -462,6 +468,7 @@ ipcMain.handle('perms:remove', (_e, { cwd, kind, rule }) => perms.removeRule(cwd
 // auto-update
 ipcMain.handle('update:check', () => { updater.checkNow(getWindow); return true; });
 ipcMain.handle('update:install', () => { updater.installAndRestart(); return true; });
+ipcMain.handle('update:repoVersion', () => updater.checkRepoVersion());
 
 // ---------------------------------------------------------------------------
 // IPC: sessions

@@ -3,8 +3,7 @@ dist/
 *.log
 .DS_Store
 Thumbs.db
-# vendored harness 的依赖与构建产物(源码入库,依赖/产物由 pnpm install && pnpm build 复现)
+# vendored harness:依赖与前端构建产物由 pnpm 复现;包的 lib/ 入库(含我们的 Node 20 兼容补丁)
 vendor/**/node_modules/
-vendor/deepseek-harness/**/lib/
 vendor/deepseek-harness/apps/web/dist/
 vendor/deepseek-harness/**/*.tsbuildinfo
