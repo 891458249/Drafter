@@ -47,6 +47,7 @@ window.addEventListener('unhandledrejection', (e) => {
 // Update status chip (topbar) — fed by the main process via 'update:status'
 // ---------------------------------------------------------------------------
 api.on('update:status', (st) => {
+  try { settingsUpdateProgress(st); } catch {} // 设置面板更新区联动(函数声明提升,定义在下方)
   const chip = $('update-chip');
   if (!chip) return;
   if (!st || st.state === 'idle') { chip.classList.add('hidden'); return; }
@@ -335,16 +336,16 @@ function openSettingsModal() {
 }
 
 // ---------------------------------------------------------------------------
-// 更新区(v0.10.3):检查 GitHub 仓库 latest release 版本号,高于当前则提示更新
+// 更新区(v0.11.2):检查 GitHub 仓库 latest release 版本号;有新版时显式给出
+// 「⬇ 立即更新」(electron-updater 下载→重启安装,仅打包版)与「🔗 Release 页」
+// (浏览器手动下载,dev/下载失败兜底)。electron-updater 的 download-progress /
+// update-downloaded 经顶栏 chip 的 'update:status' 同步驱动本区按钮态。
 // ---------------------------------------------------------------------------
 let _repoVerCache = null; // 缓存一次结果,避免反复打 GitHub API
 async function renderUpdateStatus() {
+  if (_repoVerCache && _repoVerCache.current) { paintUpdateStatus(_repoVerCache); return; }
   const el = $('update-status');
   el.className = 'update-status';
-  if (_repoVerCache && _repoVerCache.current) {
-    paintUpdateStatus(_repoVerCache);
-    return;
-  }
   el.textContent = '当前版本 v—';
   try {
     const res = await api.updateRepoVersion();
@@ -354,6 +355,8 @@ async function renderUpdateStatus() {
 function paintUpdateStatus(res) {
   const el = $('update-status');
   el.className = 'update-status';
+  const dlBtn = $('btn-update-download');
+  const pgBtn = $('btn-update-page');
   if (res.error) {
     el.textContent = `当前版本 v${res.current || '?'} · ${res.error}`;
     el.classList.add('error');
@@ -362,6 +365,10 @@ function paintUpdateStatus(res) {
   if (res.hasUpdate) {
     el.textContent = `当前 v${res.current} → 仓库 v${res.latest} · 发现新版本!`;
     el.classList.add('has-update');
+    // 打包版:显式「立即更新」按钮(electron-updater 自动下载安装);
+    // dev 环境 electron-updater 无法下载(缺 dev-app-update.yml),只给 Release 页手动下载
+    if (res.packaged) { dlBtn.classList.remove('hidden'); dlBtn.dataset.version = res.latest; }
+    else { pgBtn.classList.remove('hidden'); pgBtn.dataset.url = res.url || ''; }
   } else {
     el.textContent = `当前 v${res.current} · 已是最新(仓库 v${res.latest})`;
   }
@@ -372,6 +379,8 @@ $('btn-update-check').onclick = async () => {
   btn.disabled = true;
   el.className = 'update-status';
   el.textContent = '正在检查仓库版本…';
+  $('btn-update-download').classList.add('hidden');
+  $('btn-update-page').classList.add('hidden');
   const res = await api.updateRepoVersion();
   btn.disabled = false;
   if (!res || res.error) {
@@ -382,11 +391,45 @@ $('btn-update-check').onclick = async () => {
   }
   _repoVerCache = res;
   paintUpdateStatus(res);
-  if (res.hasUpdate) {
-    // 有新版:走 electron-updater 下载安装(打包环境);dev 环境静默失败,用户可去 Release 页手动下载
-    api.updateCheck();
-  }
 };
+// 「立即更新」:触发 electron-updater 检查+下载;进度经 update:status 回灌本按钮
+$('btn-update-download').onclick = () => {
+  const btn = $('btn-update-download');
+  if (btn.dataset.stage === 'install') { api.updateInstall(); return; } // 已下载完 → 重启安装
+  btn.disabled = true;
+  btn.textContent = '下载中… 0%';
+  api.updateCheck();
+};
+$('btn-update-page').onclick = () => {
+  const url = $('btn-update-page').dataset.url;
+  if (url) api.openExternal(url);
+};
+// electron-updater 状态 → 更新区按钮(顶栏 chip 是同一事件的被动展示,此处复用)
+function settingsUpdateProgress(st) {
+  const btn = $('btn-update-download');
+  if (!btn || btn.classList.contains('hidden')) return;
+  if (st.state === 'downloading') {
+    btn.disabled = true;
+    btn.dataset.stage = '';
+    btn.textContent = `下载中… ${st.percent || 0}%`;
+  } else if (st.state === 'downloaded') {
+    btn.disabled = false;
+    btn.dataset.stage = 'install';
+    btn.textContent = `🔁 v${st.version || ''} 已就绪 · 重启安装`;
+  } else if (st.state === 'idle') { // 下载出错静默降级:恢复可重试,并给手动下载兜底
+    btn.disabled = false;
+    btn.dataset.stage = '';
+    btn.textContent = '⬇ 立即更新';
+    const el = $('update-status');
+    el.textContent += ' · 自动下载失败,可重试或走 Release 页';
+    el.classList.add('error');
+    if (_repoVerCache && _repoVerCache.url) {
+      const pgBtn = $('btn-update-page');
+      pgBtn.dataset.url = _repoVerCache.url;
+      pgBtn.classList.remove('hidden');
+    }
+  }
+}
 $('settings-close').onclick = () => $('settings-modal').classList.add('hidden');
 $('set-instantjump').onchange = (e) => { // 瞬时 ↔ 平滑(原 v0.9.15 菜单项)
   state.instantJump = !!e.target.checked;

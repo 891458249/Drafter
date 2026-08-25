@@ -92,15 +92,16 @@ function fetchLatestRelease() {
   });
 }
 
-// 返回 { current, latest, hasUpdate, url } 或 { error }
+// 返回 { current, latest, hasUpdate, url, packaged } 或 { current, packaged, error }
 async function checkRepoVersion() {
   try {
     const { app } = require('electron');
     const current = app.getVersion();
+    const packaged = app.isPackaged;
     const rel = await fetchLatestRelease();
-    if (!rel.ok || !rel.tag) return { current, error: '无法获取仓库版本(网络或 API 限制)' };
+    if (!rel.ok || !rel.tag) return { current, packaged, error: '无法获取仓库版本(网络或 API 限制)' };
     const latest = rel.tag.replace(/^v/, '');
-    return { current, latest, hasUpdate: compareSemver(latest, current) > 0, url: rel.url };
+    return { current, latest, hasUpdate: compareSemver(latest, current) > 0, url: rel.url, packaged };
   } catch (e) {
     return { error: e.message || '检查失败' };
   }
