@@ -27,7 +27,15 @@
       "Bash(node -p \"require\\('./package.json'\\).version\")",
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "PowerShell(Get-Process)"
+      "PowerShell(Get-Process)",
+      "Bash(cat /d/ClaudeUI/node_modules/@anthropic-ai/claude-agent-sdk/package.json | head -20; ls /d/ClaudeUI/node_modules/@anthropic-ai/ 2>/dev/null; ls \"/c/Users/dingyongzhen/AppData/Roaming/Drafter/\" 2>/dev/null | head -20)",
+      "Bash(git -C D:/ClaudeUI remote -v)",
+      "Bash(git -C D:/ClaudeUI tag --sort=-v:refname)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://github.com/deepseek-ai/deepseek-harness)",
+      "Bash(break)",
+      "Bash(tasklist)",
+      "Bash(node --check src/main/harness/harness-bridge.js)",
+      "Bash(node /tmp/test-harness-boot2.js)"
     ]
   }
 }

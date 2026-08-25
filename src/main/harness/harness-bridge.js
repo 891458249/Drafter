@@ -358,6 +358,10 @@ async function bootHarness() {
       { id: 'attachment-local', disabled: true },
       { id: 'session-telemetry-otel', disabled: true },
       { id: 'web-startup', disabled: true },
+      // 目录选择器:harness 的 directory-picker-native 走 Windows IFileOpenDialog 子进程
+      // (koffi COM 绑定),在 Electron 主进程里跑不起来。禁掉它,改用我们的 Electron dialog
+      // (在 prepare 里 ctx.provide('directoryPicker', ...) 顶替)。
+      { id: 'directory-picker', disabled: true },
       // Phase 3:权限预设表替换为 Drafter 的 5 档(default/acceptEdits/plan/dontAsk/bypassPermissions),
       // config 整值覆盖,含 presets + defaultPreset。
       { id: 'permission', config: keysBridgePermissionConfig() },
@@ -486,6 +490,20 @@ async function bootHarness() {
         async saveImage() { throw new Error('harness attachments disabled in Drafter (use media section)') },
         async readImage() { throw new Error('harness attachments disabled in Drafter (use media section)') },
         async saveImages() { return [] },
+      })
+      // 目录选择器:harness 的 directory-picker-native 走 Windows IFileOpenDialog 子进程
+      // (koffi COM 绑定),在 Electron 主进程里跑不起来。用 Electron 自己的 dialog 顶替——
+      // 这是 ctx.directoryPicker 的 native capability,api-proxy 的 host.pickDirectory 直接调它。
+      const { dialog, BrowserWindow } = require('electron')
+      ctx.provide('directoryPicker', {
+        capability: () => ({
+          kind: 'native',
+          async pick(_signal) {
+            const win = BrowserWindow.getAllWindows()[0]
+            const result = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
+            return result.canceled || !result.filePaths.length ? null : result.filePaths[0]
+          },
+        }),
       })
       // web-startup 插件 inject cmdlineArgs(解析 web 应用的 --port/--no-open 等)。
       // 我们没有 CLI,提供空参数快照 + 一个 no-op exit(dsh-cmdline 的 provideCmdline)。

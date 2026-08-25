@@ -34,7 +34,7 @@ test('code / media 会话 → null(极速只作用于 chat 板块)', () => {
   assert.strictEqual(fastChatOverrides({ kind: 'media' }, ''), null);
 });
 
-test('覆盖内容:零工具 / 隔离设置 / 零 MCP / bypass 权限 / 自定义系统提示', () => {
+test('覆盖内容:零工具 / 隔离设置 / 零 MCP / bypass 权限 / 自定义系统提示 / 关闭思考', () => {
   const ov = fastChatOverrides({ kind: 'chat' }, '');
   assert.deepStrictEqual(ov.tools, [], '内置工具应全部禁用');
   assert.deepStrictEqual(ov.settingSources, [], '不应加载文件设置(SDK 隔离模式)');
@@ -43,6 +43,8 @@ test('覆盖内容:零工具 / 隔离设置 / 零 MCP / bypass 权限 / 自定�
   assert.strictEqual(ov.permissionMode, 'bypassPermissions');
   assert.strictEqual(ov.systemPrompt, FAST_CHAT_SYSTEM_PROMPT);
   assert.ok(!ov.systemPrompt.includes('claude_code'), '不应再使用 claude_code preset');
+  assert.deepStrictEqual(ov.thinking, { type: 'disabled' },
+    '极速模式应关闭扩展思考(Kimi k3 类混合推理模型默认思考占输出 70%+,是慢于网页版的根源)');
 });
 
 test('Gem append 拼接到极速系统提示末尾', () => {
@@ -51,10 +53,11 @@ test('Gem append 拼接到极速系统提示末尾', () => {
   assert.ok(ov.systemPrompt.endsWith('【Gem 指令】测试'));
 });
 
-test('极速系统提示:Drafter 身份 + 无工具声明 + 简洁要求 + 附件全文约定', () => {
+test('极速系统提示:Drafter 身份 + 无工具声明 + 简洁要求 + 附件全文约定 + 直接作答', () => {
   assert.ok(FAST_CHAT_SYSTEM_PROMPT.includes('Drafter'), '应以 Drafter 身份自我介绍');
   assert.ok(FAST_CHAT_SYSTEM_PROMPT.includes('没有任何工具能力') || FAST_CHAT_SYSTEM_PROMPT.includes('工具能力'),
     '应声明无工具能力,防止模型幻觉调用工具');
   assert.ok(FAST_CHAT_SYSTEM_PROMPT.includes('简洁'), '应要求简洁回答');
   assert.ok(FAST_CHAT_SYSTEM_PROMPT.includes('<附件>'), '应说明附件全文在消息内(input.js 内联注入约定)');
+  assert.ok(FAST_CHAT_SYSTEM_PROMPT.includes('直接作答'), '应要求跳过内部推理直接作答(提示层关思考)');
 });

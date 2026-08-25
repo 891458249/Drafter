@@ -21,9 +21,13 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 // 极速问答的系统提示(v0.10.2):整体替换 claude_code preset——默认提示+全工具 schema
 // 首轮实测要 ~26k tokens 输入,纯问答场景全是浪费;对齐 Codex CLI 思路(极简提示+
 // 强简洁指令、零工具面),压到百字量级,首轮输入降到 ~2-4k,TTFT 与网页版同量级。
+// v0.10.3 追加「不要长思考」:Kimi k3 类混合推理模型在 /v1/messages 下默认开启思考
+// (usage.output_tokens_details.thinking_tokens 实测占输出 70%+),是 App 比网页版
+// 慢 3-5 倍的根源;提示层先约束,传输层再由 fastChatOverrides 的 thinking:'disabled' 兜底。
 const FAST_CHAT_SYSTEM_PROMPT = [
   '你是 Drafter 桌面客户端内置的 AI 助手。Drafter 是一款 AI 工作台软件,当前为纯问答模式。',
   '规则:先给结论再按需展开;默认简洁,不堆砌格式;代码放进代码块并注明语言;',
+  '不要进行长篇的内部推理或逐步思考,基于已有知识直接作答;',
   '你没有文件系统/命令执行/联网等任何工具能力,不要声称读取了文件或运行了命令;',
   '用户消息里的 <附件> 块内容即附件全文(已在消息内给出),直接基于它回答。',
 ].join('\n');
@@ -31,6 +35,11 @@ const FAST_CHAT_SYSTEM_PROMPT = [
 // 极速问答 options 覆盖(v0.10.2,抽成纯函数便于单测):
 // chat 会话且未显式切 Agent → SDK 隔离配置;否则返回 null(走完整 Agent 配置)。
 // 实测依据:默认 preset+全工具 schema 首轮输入 ~26k tokens,极速配置降到 ~2-4k。
+// v0.10.3:thinking:'disabled'(SDK 映射为 CLI --thinking disabled → 请求体
+// thinking:{type:'disabled'})。实测 Kuro 网关 kimi-k3:默认(思考开)~20 tok/s,
+// 关闭思考后 ~50-70 tok/s,与网页版(chat/completions 无思考)同量级。
+// 会话级 effort 选择被跳过(见 start()):effort 只在思考开启时调节深度,
+// 极速模式固定无思考,避免 --effort max 等标志在部分模型上重新放大推理。
 function fastChatOverrides(meta, gemAppend) {
   if (!meta || meta.kind !== 'chat' || meta.chatMode === 'agent') return null;
   return {
@@ -41,6 +50,7 @@ function fastChatOverrides(meta, gemAppend) {
     tools: [],
     mcpServers: {},
     strictMcpConfig: true,
+    thinking: { type: 'disabled' },
   };
 }
 
@@ -211,7 +221,9 @@ class Session {
       canUseTool: (toolName, input, opts) => this._onPermission(toolName, input, opts),
     };
     if (this.meta.model) options.model = this.meta.model;
-    if (this.meta.effort) options.effort = this.meta.effort;
+    // 极速模式跳过会话级 effort(v0.10.3):effort 是思考深度调节,fast 已固定
+    // thinking:'disabled';--effort max 等标志在 Kimi 类模型上会重新放大推理耗时
+    if (this.meta.effort && !fastOv) options.effort = this.meta.effort;
     const exe = resolveClaudeExe();
     if (exe) options.pathToClaudeCodeExecutable = exe; // 打包态指向 app.asar.unpacked(F-001)
     if (resume && this.meta.sdkSessionId) {
