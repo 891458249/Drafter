@@ -598,12 +598,24 @@ class Session {
     return false;
   }
 
-  // keyId(v0.8.2):所选模型归属的 Key,用于额度归账;跨 Key 切换时凭据需新会话才生效
+  // keyId(v0.8.2):所选模型归属的 Key,用于额度归账。
+  // 跨 Key 切换模型时凭据(ANTHROPIC_AUTH_TOKEN/API_KEY/BASE_URL)随会话 env 在
+  // query 启动时注入一次,q.setModel 只改模型名不换凭据 → 旧 Key 的 token 打到
+  // 新 Key 的网关必 403「模型未配置」。故 keyId 变化时复用 setGem/addDir 的
+  // needRestart 模式重启 query(回合中标记,空闲立即 stop+start,resume 保上下文)。
   async setModel(model, keyId) {
+    const prevKeyId = this.meta.keyId;
     this.meta.model = model;
     if (keyId !== undefined) this.meta.keyId = keyId || null;
     store.upsertSession({ id: this.id, model, keyId: this.meta.keyId });
+    const keyChanged = keyId !== undefined && (this.meta.keyId || null) !== (prevKeyId || null);
     if (this.q && this.running) {
+      if (keyChanged) {
+        if (this.busy) { this.needRestart = true; return true; }
+        this.stop();
+        await this.start({ resume: !!this.meta.sdkSessionId });
+        return true;
+      }
       try { await this.q.setModel(model || undefined); return true; } catch {}
     }
     return false;
