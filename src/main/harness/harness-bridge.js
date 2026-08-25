@@ -182,11 +182,37 @@ async function bootHarness() {
     const origResolveFilename = Module._resolveFilename
     const fsCjs = require('node:fs')
     const pathCjs = require('node:path')
-    // 建一个轻量的 CJS 解析索引(@deepseek-ai/* + vendor-deps/*)
+    // 建一个轻量的 CJS 解析索引(@deepseek-ai/* + vendor-deps/* 全部第三方包)
     const cjsIndex = new Map()
     function buildCjsIndex() {
       if (cjsIndex.size) return cjsIndex
-      const roots = [pathCjs.join(HARNESS_ROOT, 'packages'), pathCjs.join(HARNESS_ROOT, 'vendor'), pathCjs.join(HARNESS_ROOT, 'vendor-deps')]
+      // vendor-deps 里是所有第三方包(@scope/name 或 name),它们以真实目录存在
+      const vendorDepsDir = pathCjs.join(HARNESS_ROOT, 'vendor-deps')
+      if (fsCjs.existsSync(vendorDepsDir)) {
+        const scanVendorDeps = (dir) => {
+          let entries
+          try { entries = fsCjs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+          for (const e of entries) {
+            if (!e.isDirectory()) continue
+            const p = pathCjs.join(dir, e.name)
+            if (e.name.startsWith('@')) {
+              // 作用域包:再下一层
+              try {
+                for (const ip of fsCjs.readdirSync(p, { withFileTypes: true })) {
+                  if (ip.isDirectory()) {
+                    registerCjsPackage(e.name + '/' + ip.name, pathCjs.join(p, ip.name))
+                  }
+                }
+              } catch {}
+            } else {
+              registerCjsPackage(e.name, p)
+            }
+          }
+        }
+        scanVendorDeps(vendorDepsDir)
+      }
+      // @deepseek-ai/* 走 packages/ + vendor/ 的物理目录(同 ESM 索引)
+      const roots = [pathCjs.join(HARNESS_ROOT, 'packages'), pathCjs.join(HARNESS_ROOT, 'vendor')]
       const scan = (dir, depth) => {
         if (depth > 3 || !fsCjs.existsSync(dir)) return
         let entries
@@ -199,10 +225,8 @@ async function bootHarness() {
             try {
               const m = JSON.parse(fsCjs.readFileSync(pj, 'utf8'))
               const name = m.name
-              if (name && (name.startsWith('@deepseek-ai/') || !name.startsWith('@'))) {
-                const main = m.main || 'index.js'
-                const mp = pathCjs.join(p, main)
-                if (fsCjs.existsSync(mp)) cjsIndex.set(name, mp)
+              if (name && name.startsWith('@deepseek-ai/')) {
+                registerCjsPackage(name, p)
               }
             } catch {}
           }
@@ -212,10 +236,51 @@ async function bootHarness() {
       for (const r of roots) scan(r, 0)
       return cjsIndex
     }
+    function registerCjsPackage(name, pkgDir) {
+      const pj = pathCjs.join(pkgDir, 'package.json')
+      if (!fsCjs.existsSync(pj)) return
+      try {
+        const m = JSON.parse(fsCjs.readFileSync(pj, 'utf8'))
+        // 优先 main(CJS 入口),再 exports.require,再 index.js
+        let entry = m.main
+        if (!entry && m.exports) {
+          const ex = m.exports['.']
+          if (ex) {
+            if (typeof ex === 'string') entry = ex
+            else if (ex.require) entry = typeof ex.require === 'string' ? ex.require : ex.require.default
+            else if (ex.default) entry = ex.default
+          }
+        }
+        if (!entry) entry = 'index.js'
+        const mp = pathCjs.join(pkgDir, entry)
+        if (fsCjs.existsSync(mp)) cjsIndex.set(name, mp)
+      } catch {}
+    }
     buildCjsIndex()
     Module._resolveFilename = function (request, ...args) {
-      const hit = cjsIndex.get(request)
+      // 先查包根索引
+      let hit = cjsIndex.get(request)
       if (hit) return hit
+      // 子路径 require:@scope/name/sub → 包名 + 子路径;非作用域 name/sub → 包名 + 子路径
+      let pkgName = request
+      let subPath = ''
+      if (request.startsWith('@')) {
+        const parts = request.split('/')
+        pkgName = parts.slice(0, 2).join('/')
+        subPath = parts.slice(2).join('/')
+      } else {
+        const parts = request.split('/')
+        pkgName = parts[0]
+        subPath = parts.slice(1).join('/')
+      }
+      const base = cjsIndex.get(pkgName)
+      if (base && subPath) {
+        const pkgDir = pathCjs.dirname(pathCjs.dirname(base)) // lib/index.cjs → 包根
+        const subFile = pathCjs.join(pkgDir, subPath)
+        for (const cand of [subFile, subFile + '.js', subFile + '.cjs', subFile + '.node', subFile + '/index.js']) {
+          if (fsCjs.existsSync(cand)) return cand
+        }
+      }
       return origResolveFilename.call(this, request, ...args)
     }
     log('ESM+CJS resolve hooks registered, HARNESS_ROOT =', HARNESS_ROOT, 'cjsIndex:', cjsIndex.size)
@@ -285,6 +350,14 @@ async function bootHarness() {
       // (会 404)。禁用其 client 端 UI/runner 行。
       { id: 'cordis-client-runner', disabled: true },
       { id: 'ui-cordis', disabled: true },
+      // Phase 7 打包态:以下三个非核心插件在 asar 里有原生模块/依赖问题,先禁用:
+      //  - attachment-local:依赖 sharp(原生 vips);Drafter 的媒体附件走自己的 aigc 体系,
+      //    harness 的附件(图片输入)第一版先不支持,后续再接。
+      //  - session-telemetry-otel:OpenTelemetry 遥测,桌面单机版不需要。
+      //  - web-startup:解析 web 启动参数(--port/--open),Electron 没有这些参数。
+      { id: 'attachment-local', disabled: true },
+      { id: 'session-telemetry-otel', disabled: true },
+      { id: 'web-startup', disabled: true },
       // Phase 3:权限预设表替换为 Drafter 的 5 档(default/acceptEdits/plan/dontAsk/bypassPermissions),
       // config 整值覆盖,含 presets + defaultPreset。
       { id: 'permission', config: keysBridgePermissionConfig() },
@@ -404,6 +477,16 @@ async function bootHarness() {
       }
       // 存根必须在 client-modules(inject webServer)激活前提供。
       await ctx.plugin(drafterWebServerStubPlugin())
+      // attachments 服务的最小 stub:apiproxy 在 inject 里要它(ctx.attachments),
+      // 但 Drafter 的媒体附件走自己的 aigc 体系,harness 的图片附件第一版不支持。
+      // 提供只读的最小实现(validateImage 拒绝、readImage 抛错、saveImage 抛错)。
+      ctx.provide('attachments', {
+        imageLimits: { maxMessageImageBytes: 0, maxMessageImages: 0, maxImageBytes: 0, allowedTypes: [] },
+        async validateImage() { throw new Error('harness attachments disabled in Drafter (use media section)') },
+        async saveImage() { throw new Error('harness attachments disabled in Drafter (use media section)') },
+        async readImage() { throw new Error('harness attachments disabled in Drafter (use media section)') },
+        async saveImages() { return [] },
+      })
       // web-startup 插件 inject cmdlineArgs(解析 web 应用的 --port/--no-open 等)。
       // 我们没有 CLI,提供空参数快照 + 一个 no-op exit(dsh-cmdline 的 provideCmdline)。
       const cmdlineUrl = pathToFileURL(path.join(HARNESS_ROOT, 'packages/boot/cmdline/lib/index.js')).href

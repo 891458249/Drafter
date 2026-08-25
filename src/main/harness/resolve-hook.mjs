@@ -44,6 +44,8 @@ function buildIndex(root) {
   }
   scan(path.join(root, 'packages'), 0)
   scan(path.join(root, 'vendor'), 0)
+  // native/ 下的 workspace 包(landlock-run 等)也在依赖闭包里
+  scan(path.join(root, 'native'), 0)
   packageIndex = map
   return map
 }
@@ -116,22 +118,98 @@ function registerPnpmPackage(map, name, pkgPath) {
 export async function resolve(specifier, context, nextResolve) {
   const root = process.env.__DRAFTER_HARNESS_ROOT__
   if (!root) return nextResolve(specifier, context)
-  // @deepseek-ai/* 走 harness 包索引
-  if (specifier.startsWith('@deepseek-ai/')) {
-    const index = buildIndex(root)
-    const hit = index.get(specifier)
-    if (hit) return { url: pathToFileURL(hit).href, shortCircuit: true }
+  // 先拆子路径:'@scope/name/sub/path' → 包名 '@scope/name' + 子路径 'sub/path'
+  let pkgName = specifier
+  let subPath = ''
+  if (specifier.startsWith('@')) {
+    const parts = specifier.split('/')
+    pkgName = parts.slice(0, 2).join('/')
+    subPath = parts.slice(2).join('/')
   } else {
-    // 第三方包走 pnpm 索引(仅当默认解析失败时才兜底——开发态 node_modules 已能解析,
-    // 打包态 asar 里没有这些包)
-    try {
-      return await nextResolve(specifier, context)
-    } catch {
-      const pindex = buildPnpmIndex(root)
-      const hit = pindex.get(specifier)
-      if (hit) return { url: pathToFileURL(hit).href, shortCircuit: true }
-      throw new Error(`cannot resolve ${specifier}`)
+    const parts = specifier.split('/')
+    pkgName = parts[0]
+    subPath = parts.slice(1).join('/')
+  }
+  // @deepseek-ai/* 走 harness 包索引
+  if (pkgName.startsWith('@deepseek-ai/')) {
+    const index = buildIndex(root)
+    const hit = index.get(pkgName)
+    if (hit) {
+      // 子路径:先读 package.json 的 exports 映射('./api' → './lib/types/api/index.js'),
+      // 没有再走「拼到包目录下」的兜底。
+      if (subPath) {
+        const pkgDir = path.dirname(path.dirname(hit)) // lib/index.js → 包根
+        const pjPath = path.join(pkgDir, 'package.json')
+        if (existsSync(pjPath)) {
+          try {
+            const m = JSON.parse(readFileSync(pjPath, 'utf8'))
+            const exp = m.exports && m.exports['./' + subPath]
+            if (exp) {
+              const entry = typeof exp === 'string' ? exp : (exp.default || exp.import || exp.require)
+              if (entry) {
+                const mp = path.join(pkgDir, entry)
+                if (existsSync(mp)) return { url: pathToFileURL(mp).href, shortCircuit: true }
+              }
+            }
+          } catch {}
+        }
+        // 兜底:直接拼
+        const subFile = path.join(pkgDir, subPath)
+        for (const cand of [subFile, subFile + '.js', subFile + '/index.js', subFile + '.mjs']) {
+          if (existsSync(cand)) return { url: pathToFileURL(cand).href, shortCircuit: true }
+        }
+      }
+      return { url: pathToFileURL(hit).href, shortCircuit: true }
     }
+  } else {
+    // 第三方包:vendor-deps 索引优先(它才是权威;nextResolve 在打包态可能误中
+    // Drafter 自己的 node_modules 或 harness 的 .pnpm 残留)。
+    const pindex = buildPnpmIndex(root)
+    const hit = pindex.get(pkgName)
+    if (hit) {
+      if (subPath) {
+        // 先读 package.json exports 的子路径映射(支持 './api/*' 通配符)
+        const pkgDir = path.dirname(path.dirname(hit))
+        const pjPath = path.join(pkgDir, 'package.json')
+        if (existsSync(pjPath)) {
+          try {
+            const m = JSON.parse(readFileSync(pjPath, 'utf8'))
+            if (m.exports) {
+              // 精确匹配 './compile'
+              const exact = m.exports['./' + subPath]
+              if (exact) {
+                const entry = typeof exact === 'string' ? exact : (exact.default || exact.import || exact.require)
+                if (entry) {
+                  const mp = path.join(pkgDir, entry)
+                  if (existsSync(mp)) return { url: pathToFileURL(mp).href, shortCircuit: true }
+                }
+              }
+              // 通配符匹配:'./api/*' → './dist/api/*.js',subPath 'anthropic-messages.lazy' → 填进 *
+              for (const [pattern, target] of Object.entries(m.exports)) {
+                if (!pattern.includes('*')) continue
+                const prefix = pattern.slice(2, pattern.indexOf('*')) // './api/'
+                if (!subPath.startsWith(prefix)) continue
+                const suffix = subPath.slice(prefix.length) // 'anthropic-messages.lazy'
+                const resolvedTarget = typeof target === 'string' ? target : (target.default || target.import || target.require)
+                if (!resolvedTarget) continue
+                const mp = path.join(pkgDir, resolvedTarget.replace('*', suffix))
+                if (existsSync(mp)) return { url: pathToFileURL(mp).href, shortCircuit: true }
+                // 再试加 .js
+                if (existsSync(mp + '.js')) return { url: pathToFileURL(mp + '.js').href, shortCircuit: true }
+              }
+            }
+          } catch {}
+        }
+        // 兜底:直接拼
+        const subFile = path.join(pkgDir, subPath)
+        for (const cand of [subFile, subFile + '.js', subFile + '/index.js', subFile + '.mjs', subFile + '.cjs']) {
+          if (existsSync(cand)) return { url: pathToFileURL(cand).href, shortCircuit: true }
+        }
+      }
+      return { url: pathToFileURL(hit).href, shortCircuit: true }
+    }
+    // 索引里没有,交回默认解析
+    return nextResolve(specifier, context)
   }
   return nextResolve(specifier, context)
 }

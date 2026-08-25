@@ -47,6 +47,8 @@
       "vendor/deepseek-harness/packages/**/cordis.patch.yml",
       "vendor/deepseek-harness/vendor/**/package.json",
       "vendor/deepseek-harness/vendor/**/lib/**/*",
+      "vendor/deepseek-harness/native/**/package.json",
+      "vendor/deepseek-harness/native/**/lib/**/*",
       "vendor/deepseek-harness/vendor-deps/**/*",
       "!vendor/**/*.tsbuildinfo",
       "!vendor/**/*.map"
@@ -61,6 +63,7 @@
       "vendor/deepseek-harness/apps/web/dist/**",
       "vendor/deepseek-harness/**/cordis.patch.yml",
       "vendor/deepseek-harness/**/package.json",
+      "vendor/deepseek-harness/native/**/lib/**",
       "vendor/deepseek-harness/vendor-deps/**"
     ],
     "win": {
