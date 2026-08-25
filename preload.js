@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('api', {
   // auto-update
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
+  updateRepoVersion: () => ipcRenderer.invoke('update:repoVersion'),
+
+  // harness 板块(v0.11.0):启动 harness 引擎并返回 index.electron.html 路径
+  harnessBoot: () => ipcRenderer.invoke('harness:boot'),
+  harnessPreloadPath: () => ipcRenderer.invoke('harness:preloadPath'),
 
   // project groups
   projList: () => ipcRenderer.invoke('proj:list'),

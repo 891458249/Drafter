@@ -14,6 +14,12 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { app, ipcMain, BrowserWindow } = require('electron')
 const keysBridge = require('./keys-bridge')
+const permissionBridge = require('./permission-bridge')
+
+// 权限预设配置从 permission-bridge 取(独立模块便于测试与复用)
+function keysBridgePermissionConfig() {
+  return permissionBridge.permissionPresetsConfig()
+}
 
 const HARNESS_ROOT = path.join(__dirname, '..', '..', '..', 'vendor', 'deepseek-harness')
 
@@ -164,6 +170,9 @@ async function bootHarness() {
       // (会 404)。禁用其 client 端 UI/runner 行。
       { id: 'cordis-client-runner', disabled: true },
       { id: 'ui-cordis', disabled: true },
+      // Phase 3:权限预设表替换为 Drafter 的 5 档(default/acceptEdits/plan/dontAsk/bypassPermissions),
+      // config 整值覆盖,含 presets + defaultPreset。
+      { id: 'permission', config: keysBridgePermissionConfig() },
       // Node 20 无 createZstdDecompress(zstd.ts 顶层 import node:zlib 的具名导出);
       // 配 compression:'none' 后 jsonl 走纯文本,不触发 zstd 路径。
       // 注意:patch 的 config 是整值覆盖(vendor/include),root 必填需补回。
@@ -418,6 +427,13 @@ async function renderHarnessIndex() {
 function registerHarnessIpc() {
   ipcMain.handle('harness:fetch', handleHarnessFetch)
   ipcMain.handle('harness:loadBundle', handleHarnessLoadBundle)
+  // 渲染进程 harness 板块入口:boot + 渲染 index,返回 file:// 可加载的路径
+  ipcMain.handle('harness:boot', async () => {
+    const p = await renderHarnessIndex()
+    return p.replace(/\\/g, '/')
+  })
+  // harness 板块 webview 的 preload 路径(注入 __DRAFTER_IPC_RAW__ 的那个)
+  ipcMain.handle('harness:preloadPath', () => path.join(__dirname, '..', '..', 'harness', 'preload.js').replace(/\\/g, '/'))
   // preload 沙箱取不到 __dirname,经此拿 harness 根路径与打包后的 IPC client bundle 路径
   ipcMain.handle('harness:paths', () => ({
     harnessRoot: HARNESS_ROOT.replace(/\\/g, '/'),
@@ -432,7 +448,7 @@ function registerHarnessIpc() {
   })
   ipcMain.on('harness:openSse', handleHarnessOpenSse)
   ipcMain.on('harness:closeSse', handleHarnessCloseSse)
-  log('IPC registered (harness:fetch, harness:loadBundle, harness:paths, harness:openSse, harness:closeSse)')
+  log('IPC registered (harness:fetch, harness:loadBundle, harness:paths, harness:boot, harness:openSse, harness:closeSse)')
 }
 
 async function shutdownHarness() {

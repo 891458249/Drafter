@@ -24,6 +24,7 @@
           <button data-sec="media" title="创作板块:图像/视频/音频/3D 一体化生成(v0.9.38 四大媒体板块合并)">创作</button>
           <button data-sec="canvas" title="画布板块:无限画布节点工作流,多模型 fan-out 对比(v0.10.0)">画布</button>
           <button data-sec="assets" title="素材板块:全部生成产物归档浏览与复用(v0.10.0)">素材</button>
+          <button data-sec="harness" title="Harness 板块:DeepSeek Harness 引擎驱动的新会话(v0.11.0 合并)">Harness</button>
         </div>
         <span id="branch-label" class="branch-label code-only"></span>
       </div>
@@ -106,8 +107,7 @@
         </div>
         <!-- 素材板块(v0.10.0):全部生成产物的归档网格(会话 + 画布两源) -->
         <div id="assets-root" class="assets-root">
-          <div class="assets-toolbar">
-            <div id="assets-filter" class="shop-filter assets-chips">
+          <div class="assets-toolbar">            <div id="assets-filter" class="shop-filter assets-chips">
               <button data-shop="all" class="active">全部</button>
               <button data-shop="image">图片</button>
               <button data-shop="video">视频</button>
@@ -119,6 +119,14 @@
           </div>
           <div id="assets-grid" class="assets-grid"></div>
           <div id="assets-empty" class="assets-empty hidden">还没有生成产物——先去「创作」或「画布」生成内容</div>
+        </div>
+        <!-- Harness 板块(v0.11.0):DeepSeek Harness 引擎驱动的新会话,经 file://+IPC 桥加载 -->
+        <div id="harness-root" class="harness-root">
+          <div id="harness-status" class="harness-status">
+            <div class="harness-status-text">正在启动 Harness 引擎…</div>
+          </div>
+          <!-- webview 而非 iframe:它才能挂 harness 专属 preload(注入 __DRAFTER_IPC_RAW__) -->
+          <webview id="harness-frame" class="harness-frame" title="DeepSeek Harness"></webview>
         </div>
         <div class="composer">
           <div id="attachments" class="attachments hidden"></div>
@@ -494,6 +502,13 @@
         <div class="settings-grid">
           <button class="btn btn-sm" data-set="switch">📂 打开目录(新项目组)…</button>
           <button class="btn btn-sm" data-set="logs">📄 打开日志目录</button>
+        </div>
+      </div>
+      <div class="settings-sec">
+        <h3>更新</h3>
+        <div class="settings-row">
+          <button id="btn-update-check" class="btn btn-sm">🔄 检查更新</button>
+          <span id="update-status" class="update-status">当前版本 v—</span>
         </div>
       </div>
       <div class="modal-actions"><button id="settings-close" class="btn">关闭</button></div>

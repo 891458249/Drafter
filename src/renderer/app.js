@@ -14,6 +14,7 @@ import * as gems from './gems.js';
 import * as codeblock from './codeblock.js';
 import * as canvas from './canvas.js';
 import * as assets from './assets.js';
+import * as harness from './harness.js';
 import { THEMES, applyTheme, currentTheme, bootTheme } from './themes.js';
 
 // ---------------------------------------------------------------------------
@@ -329,8 +330,63 @@ function openSettingsModal() {
   renderThemeCards();
   $('set-instantjump').checked = state.instantJump;
   $('set-sharedcache').checked = state.sharedPromptCache !== false;
+  renderUpdateStatus(); // 更新区:显示当前版本,不自动请求网络
   $('settings-modal').classList.remove('hidden');
 }
+
+// ---------------------------------------------------------------------------
+// 更新区(v0.10.3):检查 GitHub 仓库 latest release 版本号,高于当前则提示更新
+// ---------------------------------------------------------------------------
+let _repoVerCache = null; // 缓存一次结果,避免反复打 GitHub API
+async function renderUpdateStatus() {
+  const el = $('update-status');
+  el.className = 'update-status';
+  if (_repoVerCache && _repoVerCache.current) {
+    paintUpdateStatus(_repoVerCache);
+    return;
+  }
+  el.textContent = '当前版本 v—';
+  try {
+    const res = await api.updateRepoVersion();
+    if (res && res.current) { _repoVerCache = res; paintUpdateStatus(res); }
+  } catch {}
+}
+function paintUpdateStatus(res) {
+  const el = $('update-status');
+  el.className = 'update-status';
+  if (res.error) {
+    el.textContent = `当前版本 v${res.current || '?'} · ${res.error}`;
+    el.classList.add('error');
+    return;
+  }
+  if (res.hasUpdate) {
+    el.textContent = `当前 v${res.current} → 仓库 v${res.latest} · 发现新版本!`;
+    el.classList.add('has-update');
+  } else {
+    el.textContent = `当前 v${res.current} · 已是最新(仓库 v${res.latest})`;
+  }
+}
+$('btn-update-check').onclick = async () => {
+  const btn = $('btn-update-check');
+  const el = $('update-status');
+  btn.disabled = true;
+  el.className = 'update-status';
+  el.textContent = '正在检查仓库版本…';
+  const res = await api.updateRepoVersion();
+  btn.disabled = false;
+  if (!res || res.error) {
+    _repoVerCache = res || { error: '检查失败' };
+    el.textContent = (res && res.current) ? `当前版本 v${res.current} · ${(res && res.error) || '检查失败'}` : ((res && res.error) || '检查失败');
+    el.classList.add('error');
+    return;
+  }
+  _repoVerCache = res;
+  paintUpdateStatus(res);
+  if (res.hasUpdate) {
+    // 有新版:走 electron-updater 下载安装(打包环境);dev 环境静默失败,用户可去 Release 页手动下载
+    api.updateCheck();
+  }
+};
 $('settings-close').onclick = () => $('settings-modal').classList.add('hidden');
 $('set-instantjump').onchange = (e) => { // 瞬时 ↔ 平滑(原 v0.9.15 菜单项)
   state.instantJump = !!e.target.checked;
@@ -945,9 +1001,10 @@ on('session-activated', async (sid) => {
 // ---------------------------------------------------------------------------
 // 板块切换:Code(项目工作区)/ Chat(纯对话)/ 创作(图·视·音·3D 一体化,v0.9.38 四大媒体板块合并)
 // ---------------------------------------------------------------------------
-const SECTIONS = ['code', 'chat', 'media', 'canvas', 'assets'];
-// 画布/素材板块(v0.10.0)不走会话挑选流程(画布列表/素材网格各有数据源)
-const NON_SESSION_SECTIONS = ['canvas', 'assets'];
+const SECTIONS = ['code', 'chat', 'media', 'canvas', 'assets', 'harness'];
+// 画布/素材板块(v0.10.0)不走会话挑选流程(画布列表/素材网格各有数据源);
+// harness 板块(v0.11.0)由 harness 引擎自管会话,也不走 SDK 会话挑选
+const NON_SESSION_SECTIONS = ['canvas', 'assets', 'harness'];
 function setSection(sec, { skipSessionPick } = {}) {
   if (state.section === sec) return;
   state.section = sec;
@@ -958,14 +1015,17 @@ function setSection(sec, { skipSessionPick } = {}) {
   $('sidebar-head-label').textContent = sec === 'code' ? '项目 / 会话'
     : sec === 'media' ? '创作会话'
     : sec === 'canvas' ? '画布'
-    : sec === 'assets' ? '素材' : '会话';
+    : sec === 'assets' ? '素材'
+    : sec === 'harness' ? 'Harness' : '会话';
   $('btn-new-session').textContent = sec === 'canvas' ? '＋ 新画布' : '＋ 新会话';
   // 面板对 code+chat 开放(v0.9.33):Chat 也处理代码任务,需要编辑器/预览/终端;
   // 其余板块(创作/画布/素材)隐藏。
   if (sec !== 'code' && sec !== 'chat') $('right-panel').classList.add('hidden');
   if (NON_SESSION_SECTIONS.includes(sec)) {
-    // 各板块自行填充侧栏与主区:画布渲染画布列表,素材重扫网格
-    if (sec === 'canvas') canvas.enterSection(); else assets.enterSection();
+    // 各板块自行填充侧栏与主区:画布渲染画布列表,素材重扫网格,harness 启动引擎
+    if (sec === 'canvas') canvas.enterSection();
+    else if (sec === 'assets') assets.enterSection();
+    else if (sec === 'harness') harness.enterSection();
     populateModelSelects();
     return;
   }

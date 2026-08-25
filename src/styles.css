@@ -548,6 +548,9 @@ kbd {
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .settings-grid .btn { text-align: left; }
 .settings-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.update-status { font-size: 12px; color: var(--text-dim); }
+.update-status.has-update { color: var(--green); font-weight: 600; }
+.update-status.error { color: var(--red, #e5534b); }
 /* 皮肤卡片:三色色板 + 名称,点击即时预览并持久化 */
 .theme-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .theme-card {
@@ -1045,6 +1048,22 @@ body.sec-canvas .sdk-only, body.sec-assets .sdk-only { display: none !important;
 body.sec-assets #sidebar { display: none; }
 /* 画布板块侧栏给画布列表用,隐藏会话筛选项 */
 body.sec-canvas .sidebar-filter { display: none; }
+
+/* ================= Harness 板块(v0.11.0) ================= */
+/* Harness 板块:全宽 iframe 承载 harness 前端,隐藏 Drafter 的消息流/输入区/侧栏 */
+#harness-root { display: none; }
+body.sec-harness #harness-root { display: flex; }
+body.sec-harness .messages-wrap, body.sec-harness .composer,
+body.sec-harness #sidebar, body.sec-harness .sidebar-filter { display: none !important; }
+body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !important; }
+#harness-root { flex: 1; min-height: 0; flex-direction: column; position: relative; }
+.harness-frame { flex: 1; min-height: 0; width: 100%; border: 0; background: #0f0e0c; }
+.harness-status {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--bg, #1a1815); z-index: 1; transition: opacity .3s;
+}
+.harness-status.hidden { opacity: 0; pointer-events: none; }
+.harness-status-text { color: var(--fg-dim, #8a8577); font-size: 14px; }
 
 /* ---------------- 画布工具栏与根容器 ---------------- */
 #canvas-root { flex: 1; min-height: 0; flex-direction: column; }
