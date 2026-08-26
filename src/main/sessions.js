@@ -216,7 +216,11 @@ class Session {
       permissionMode: fastOv ? 'bypassPermissions' : (this.meta.permissionMode || 'default'),
       includePartialMessages: true,
       env: this.m.buildEnv({ ELECTRON_RUN_AS_NODE: '1' }, this.meta.keyId), // 按会话绑定的 Key 注入凭据(v0.8.2)
-      settingSources: fastOv ? [] : ['user', 'project', 'local'],
+      // 不读 user 级 settings(v0.11.6):~/.claude/settings.json 的 env(ANTHROPIC_AUTH_TOKEN/
+      // BASE_URL 等)优先级高于 buildEnv 按会话 Key 注入的进程凭据——用户用 CLI 配置过网关时,
+      // 所有会话都会被钉到那个网关(切 Key 无效,报 403 模型未配置)。app 凭据一律按 Key 注入,
+      // 只保留 project/local(项目级权限规则 settings.local.json 照常生效)。
+      settingSources: fastOv ? [] : ['project', 'local'],
       stderr: (data) => this._emit({ type: 'ui_stderr', text: String(data) }),
       canUseTool: (toolName, input, opts) => this._onPermission(toolName, input, opts),
     };
