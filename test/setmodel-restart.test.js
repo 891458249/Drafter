@@ -10,7 +10,11 @@ const { installElectronStub } = require('./helpers/electron-stub');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-setmodel-test-'));
 installElectronStub(tmp);
-const { SessionManager } = require('../src/main/sessions');
+const { SessionManager, Session } = require('../src/main/sessions');
+// SessionManager.create() 会 fire-and-forget 调 Session.start() 真起 query(spawn claude.exe):
+// 子进程占住事件循环,文件测试全过也无法退出,全套件随之卡死(v0.11.4 起既有)。
+// 本文件只测 setModel 的重启决策,一律把原型 start stub 掉,不真起 query。
+Session.prototype.start = async () => {};
 
 after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
 

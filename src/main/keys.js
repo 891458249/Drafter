@@ -296,4 +296,4 @@ function setModelsEnabled(id, enabled) {
   return { ok: true };
 }
 
-module.exports = { list, save, remove, setActive, setEnabled, activeKey, byId, activeModels, enabledModels, refreshModels, setModelsEnabled, queryBalance, balanceProvider, modelType };
+module.exports = { list, save, remove, setActive, setEnabled, activeKey, byId, activeModels, enabledModels, refreshModels, setModelsEnabled, queryBalance, balanceProvider, modelType, apiRoot };

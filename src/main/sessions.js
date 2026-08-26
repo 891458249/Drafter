@@ -891,4 +891,4 @@ function safeJson(obj) {
   try { return JSON.parse(JSON.stringify(obj)); } catch { return String(obj); }
 }
 
-module.exports = { SessionManager, resolveClaudeExe, encodeCwdForProjects, migrateTranscript, fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT };
+module.exports = { SessionManager, Session, resolveClaudeExe, encodeCwdForProjects, migrateTranscript, fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT };

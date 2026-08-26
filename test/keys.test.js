@@ -185,6 +185,16 @@ test('baseUrl 自带 /v1 时端点不重复拼接(模型 + 余额)', async () =>
   }
 });
 
+test('apiRoot: 归一到不含 /v1 的根(buildEnv 的 ANTHROPIC_BASE_URL 同用此规则)', () => {
+  // claude.exe 会在 ANTHROPIC_BASE_URL 后再拼 /v1/messages:baseUrl 带 /v1 会变 /v1/v1 → 404
+  assert.strictEqual(keys.apiRoot('https://api.kimi.com/coding/v1'), 'https://api.kimi.com/coding');
+  assert.strictEqual(keys.apiRoot('https://api.kimi.com/coding/v1/'), 'https://api.kimi.com/coding');
+  assert.strictEqual(keys.apiRoot('https://gw.example.com/'), 'https://gw.example.com');
+  assert.strictEqual(keys.apiRoot('https://api.deepseek.com/anthropic'), 'https://api.deepseek.com/anthropic', '无 /v1 后缀应保持不变');
+  assert.strictEqual(keys.apiRoot(''), 'https://api.anthropic.com', '缺省归位官方');
+  assert.strictEqual(keys.apiRoot(undefined), 'https://api.anthropic.com');
+});
+
 test('多选激活:默认启用,setEnabled 控制 enabledModels 聚合', () => {
   // 现有 key 默认全部启用
   for (const k of keys.list()) assert.strictEqual(k.enabled, true, `${k.name} 应默认启用`);

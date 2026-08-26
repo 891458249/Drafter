@@ -156,7 +156,9 @@ function buildEnv(extra = {}, keyId = null) {
       env.ANTHROPIC_API_KEY = k.key;
       env.ANTHROPIC_AUTH_TOKEN = '';
     }
-    env.ANTHROPIC_BASE_URL = k.baseUrl || 'https://api.anthropic.com';
+    // claude.exe 会在 BASE_URL 后再拼 /v1/messages,这里必须归一到不含 /v1 的根
+    // (与 keys.js fetchModels 同一规则),否则 Kimi 预设的 …/coding/v1 会变成 /v1/v1 → 404
+    env.ANTHROPIC_BASE_URL = keys.apiRoot(k.baseUrl);
   }
   return env;
 }
