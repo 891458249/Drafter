@@ -1,15 +1,27 @@
-// v0.11.7 冒烟:验证 Typert 桥 + 目录选择器 browse 双面板。
-// 用法:env -u ELECTRON_RUN_AS_NODE DRAFTER_USERDATA=<隔离目录> node_modules/.bin/electron .claude-ui/smoke-harness-typert.js
+// v0.11.7/0.11.8 冒烟:验证 Typert 桥 + 目录选择器 browse 双面板 + 插件启停。
+// 用法:env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron .claude-ui/smoke-harness-typert.js
 //
 // 断言:
 //  1. Typert RPC:POST /api/pluginInventory/list(无参 Remote endpoint)经复合 handler 拿到 entries
 //  2. browse capability:POST /api/host.listDirectory(apiproxy 回落 + directoryPicker browse)
 //  3. loader 树里有两行 browse 面板;clientModules 能解析 client 表面包
 //  4. 未认领的 /api 路径仍 404(复合 handler 回落语义没破)
+//  5. 插件启停 pluginControl/setEnabled:双向切换 + 补丁层落盘 + 重启保持
+//  6. 根载体(include)开关被拒绝;补丁层里的 include 行被剔除修复
+
+// DSH_HOME 必须在 require bridge 之前钉到临时目录:bridge 在 boot 时读它,
+// 且 userData 派生路径会污染真实环境。
+process.env.DSH_HOME = require('node:path').join(
+  require('node:os').tmpdir(), 'dsh-smoke-' + process.pid, 'harness')
 
 const { app } = require('electron')
+const fs = require('node:fs')
+const path = require('node:path')
 
 const bridge = require('../src/main/harness/harness-bridge.js')
+
+const PROFILE_DIR = path.join(process.env.DSH_HOME, 'profiles', 'web')
+const PATCH_FILE = path.join(PROFILE_DIR, 'cordis.patch.yml')
 
 function rpc(handler, path, method, payload) {
   return bridge._internal.fetch({
@@ -22,8 +34,13 @@ function rpc(handler, path, method, payload) {
 
 async function main() {
   await app.whenReady()
+
+  // 预置补丁层:一条 include 载体行(应被剔除修复)+ 一条真实停用行(应生效)
+  fs.mkdirSync(PROFILE_DIR, { recursive: true })
+  fs.writeFileSync(PATCH_FILE, '- id: include\n  disabled: true\n- id: session-stats\n  disabled: true\n', 'utf8')
+
   const ctx = await bridge.bootHarness()
-  console.log('SMOKE: harness booted')
+  console.log('SMOKE: harness booted (DSH_HOME=' + process.env.DSH_HOME + ')')
 
   let failures = 0
   const check = (name, ok, detail) => {
@@ -82,16 +99,28 @@ async function main() {
     const entry = (body.result.value.entries || []).find((e) => e.entryId === entryId)
     return entry && entry.enabled === enabled
   }
-  const fs = require('node:fs')
-  const path = require('node:path')
-  // DSH_HOME 由 bridge 在 boot 前钉好,与真实环境同目录
-  const patchFile = path.join(process.env.DSH_HOME, 'profiles', 'web', 'cordis.patch.yml')
+  // 补丁层修复断言(预置文件在 boot 前写好):include 载体行被剔除,session-stats 停用生效
+  const bootPatchText = fs.readFileSync(PATCH_FILE, 'utf8')
+  check('boot repaired include carrier row out of patch layer', !/^- id: include$/m.test(bootPatchText), bootPatchText.slice(0, 200))
+  check('pre-seeded disabled row took effect (session-stats disabled at boot)', await inventoryHas(TOGGLE_ENTRY, false), '')
 
   const off = await toggle(false)
   check('setEnabled(false) succeeds', off.ok, off.body)
   check('inventory shows entry disabled after toggle', await inventoryHas(TOGGLE_ENTRY, false), '')
-  const patchText = fs.existsSync(patchFile) ? fs.readFileSync(patchFile, 'utf8') : ''
+  const patchText = fs.existsSync(PATCH_FILE) ? fs.readFileSync(PATCH_FILE, 'utf8') : ''
   check('user patch layer persisted disabled row', patchText.includes(TOGGLE_ROW) && /disabled:\s*true/.test(patchText), patchText.slice(0, 200))
+
+  // 5b. 根载体 include 的开关必须被拒绝(停用它会拆掉整棵插件树,v0.11.8 实测踩中)
+  const includeToggle = await rpc(null, '/api/pluginControl/setEnabled', 'pluginControl/setEnabled', { args: { entryId: 'include', enabled: false } })
+  let includeRejected = false
+  try {
+    const body = JSON.parse(includeToggle.body)
+    includeRejected = includeToggle.status === 200 && body.result && body.result.ok === false
+  } catch { /* 非 JSON 也算拒绝(拦截器 500 等) */ includeRejected = !includeToggle.ok || includeToggle.status >= 400 }
+  check('toggling root include carrier is rejected', includeRejected, `status=${includeToggle.status} body=${String(includeToggle.body).slice(0, 200)}`)
+  // 拒绝后核心链路仍健康(树没被拆)
+  const afterReject = await rpc(null, '/api/llm.providers', 'llm.providers', {})
+  check('apiproxy still healthy after rejected include toggle', afterReject.status === 200 && afterReject.body.includes('"ok":true'), `status=${afterReject.status}`)
 
   // 6. 重启(boot 新 ctx)后补丁层生效:条目保持停用
   await bridge.shutdownHarness()
@@ -102,16 +131,15 @@ async function main() {
   const on = await toggle(true)
   check('setEnabled(true) succeeds', on.ok, on.body)
   check('inventory shows entry enabled after toggle', await inventoryHas(TOGGLE_ENTRY, true), '')
-  const patchText2 = fs.readFileSync(patchFile, 'utf8')
+  const patchText2 = fs.readFileSync(PATCH_FILE, 'utf8')
   check('user patch layer row flipped to enabled', /disabled:\s*false/.test(patchText2), patchText2.slice(0, 200))
   await bridge.shutdownHarness()
   await bridge.bootHarness()
   check('entry stays enabled across reboot', await inventoryHas(TOGGLE_ENTRY, true), '')
 
-  // 清理:删掉冒烟产生的补丁层文件,避免污染真实环境
-  try { fs.unlinkSync(patchFile) } catch {}
-
+  // 清理:整个临时 DSH_HOME 根删掉(DSH_HOME=<tmp>/dsh-smoke-<pid>/harness,删 <pid> 层)
   await bridge.shutdownHarness()
+  try { fs.rmSync(path.dirname(process.env.DSH_HOME), { recursive: true, force: true }) } catch {}
   console.log(failures === 0 ? 'SMOKE: ALL PASS' : `SMOKE: ${failures} FAILURES`)
   app.exit(failures === 0 ? 0 : 1)
 }

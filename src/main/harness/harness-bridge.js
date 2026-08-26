@@ -388,7 +388,7 @@ async function bootHarness() {
     // 写的就是它(plugin-control.js),用户手改也生效。
     let userPatches = []
     try {
-      userPatches = await pluginControl.loadUserPatches(profileDir, yamlLib)
+      userPatches = await pluginControl.loadUserPatches(profileDir, yamlLib, log)
       if (userPatches.length) log('user plugin patches loaded:', userPatches.length)
     } catch (err) {
       // 补丁层损坏不阻断 boot:按无补丁启动,错误写日志

@@ -90,8 +90,7 @@ async function togglePluginEnabled(entryId: string, enabled: boolean): Promise<v
 }
 
 /** Render the read-only current Loader inventory. */
-export function PluginInventorySettingsTab({ list, t }: PluginInventorySettingsTabProps): ReactNode {
-  const catalogId = useId()
+export function PluginInventorySettingsTab({ list, t }: PluginInventorySettingsTabProps): ReactNode {  const catalogId = useId()
   const [request, setRequest] = useState(0)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<PluginInventoryEntry['entryId'] | null>(null)
@@ -227,14 +226,19 @@ export function PluginInventorySettingsTab({ list, t }: PluginInventorySettingsT
                             </div>
                           ) : null}
                         </dl>
-                        <button
-                          type="button"
-                          className={css.toggleAction}
-                          disabled={toggling !== null}
-                          onClick={() => { toggleEntry(entry) }}
-                        >
-                          {toggling === entry.entryId ? t('toggling') : entry.enabled ? t('disableAction') : t('enableAction')}
-                        </button>
+                        {/* The root include carrier (entry id has no tree prefix)
+                            and groups hold the whole tree — the host refuses those
+                            toggles, so the button is not offered. */}
+                        {entry.entryId.includes(':') && entry.moduleName !== 'cordis:include' ? (
+                          <button
+                            type="button"
+                            className={css.toggleAction}
+                            disabled={toggling !== null}
+                            onClick={() => { toggleEntry(entry) }}
+                          >
+                            {toggling === entry.entryId ? t('toggling') : entry.enabled ? t('disableAction') : t('enableAction')}
+                          </button>
+                        ) : null}
                         {toggleError !== null ? (
                           <p className={css.toggleError} role="alert">{t('toggleFailed')}{toggleError}</p>
                         ) : null}

@@ -22,19 +22,34 @@ const fs = require('node:fs')
 
 // —— 持久化:用户补丁层文件 ————————————————————————————————————————————————————
 
+// 补丁层里的根载体行 id:运行态条目 id 为 'include'(无树路径前缀)的 cordis:include
+// 根条目承载整棵插件树——停用它会在运行态拆掉所有插件(apiproxy 随之 dispose,
+// /api 全 404;v0.11.8 用户实测踩中)。boot 时该行虽不生效(根 include 的数据行
+// 不参与补丁匹配),但留在文件里会造成「文件说停用、实际启用」的状态漂移,
+// 读取时直接剔除并回写修复。
+const CARRIER_ROW_IDS = new Set(['include'])
+
 function togglesFile(profileDir) {
   return path.join(profileDir, 'cordis.patch.yml')
 }
 
-// 读取用户补丁层(不存在返回 [])。yamlLib 是 vendor 的 js-yaml(ESM,动态 import 传入)。
-async function loadUserPatches(profileDir, yamlLib) {
+// 读取用户补丁层(不存在返回 []),并剔除根载体行(有剔除则回写修复文件)。
+// yamlLib 是 vendor 的 js-yaml(ESM,动态 import 传入)。
+async function loadUserPatches(profileDir, yamlLib, log) {
   const file = togglesFile(profileDir)
   if (!fs.existsSync(file)) return []
   const text = fs.readFileSync(file, 'utf8')
   const parsed = yamlLib.load(text)
   if (parsed === undefined || parsed === null) return []
   if (!Array.isArray(parsed)) throw new Error(`插件启停补丁层格式错误(应为数组): ${file}`)
-  return parsed
+  const rows = parsed.filter((row) => !(row && typeof row.id === 'string' && CARRIER_ROW_IDS.has(row.id)))
+  if (rows.length !== parsed.length) {
+    if (log) log(`用户补丁层剔除了 ${parsed.length - rows.length} 条根载体行(include),回写修复`)
+    const tmp = file + '.tmp'
+    fs.writeFileSync(tmp, '# Drafter 插件启停补丁层(由设置→插件列表的开关维护,勿手改)\n' + yamlLib.dump(rows), 'utf8')
+    fs.renameSync(tmp, file)
+  }
+  return rows
 }
 
 // upsert 一条 { id, disabled } 并写回(先读合再写,保留其他行)。
@@ -84,6 +99,13 @@ async function mountPluginControl(ctx, typertProtocol, yamlLib, profileDir, log)
       // 必须遍历 entries() 匹配;补丁层按 YAML 行 id(options.id,无前缀)定位。
       const entry = [...loader.entries()].find((e) => e.id === entryId)
       if (!entry) throw new Error(`unknown plugin entry: ${entryId}`)
+      // 根载体/插件组不可开关:停用 include 根会在运行态拆掉整棵插件树
+      // (apiproxy 随之 dispose,/api 全 404;v0.11.8 实测踩中)
+      if (entry.options && entry.options.group) throw new Error(`插件组不支持单独启停: ${entryId}`)
+      const moduleName = entry.options && entry.options.name
+      if (moduleName === 'cordis:include' || !String(entry.id).includes(':')) {
+        throw new Error('根插件载体(include)承载整棵插件树,不能停用')
+      }
       const rowId = entry.options && entry.options.id
       if (!rowId) throw new Error(`plugin entry ${entryId} 没有稳定的行 id,无法持久化启停`)
       await entry.update({ disabled: !enabled })
