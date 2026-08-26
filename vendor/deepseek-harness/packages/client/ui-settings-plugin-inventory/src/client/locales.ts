@@ -20,6 +20,10 @@ export const zh = {
   active: '已挂载',
   failed: '挂载失败',
   unloading: '卸载中',
+  enableAction: '启用',
+  disableAction: '停用',
+  toggling: '切换中…',
+  toggleFailed: '切换失败：',
 } satisfies Record<string, string>
 
 /** Plugin inventory locale key union. */
@@ -45,4 +49,8 @@ export const en = {
   active: 'Mounted',
   failed: 'Mount failed',
   unloading: 'Unloading',
+  enableAction: 'Enable',
+  disableAction: 'Disable',
+  toggling: 'Switching…',
+  toggleFailed: 'Toggle failed: ',
 } satisfies Record<PluginInventoryLocaleKey, string>

@@ -19,6 +19,7 @@ const { pathToFileURL } = require('node:url')
 const { app, ipcMain } = require('electron')
 const keysBridge = require('./keys-bridge')
 const permissionBridge = require('./permission-bridge')
+const pluginControl = require('./plugin-control')
 
 // 权限预设配置从 permission-bridge 取(独立模块便于测试与复用)
 function keysBridgePermissionConfig() {
@@ -382,7 +383,18 @@ async function bootHarness() {
       // Node 20 无 stripTypeScriptTypes;code-runtime 是 run_code 工具(Phase 1 不用),禁用。
       { id: 'code-runtime', disabled: true },
     ]
-    const allPatches = [...bundlePatches, ...drafterOverlay]
+    // 用户补丁层(v0.11.8):$DSH_HOME/profiles/web/cordis.patch.yml,官方补丁层语义
+    // (按 id 定位、整键覆盖、后层优先)——作为最后一层,设置→插件列表的启停开关
+    // 写的就是它(plugin-control.js),用户手改也生效。
+    let userPatches = []
+    try {
+      userPatches = await pluginControl.loadUserPatches(profileDir, yamlLib)
+      if (userPatches.length) log('user plugin patches loaded:', userPatches.length)
+    } catch (err) {
+      // 补丁层损坏不阻断 boot:按无补丁启动,错误写日志
+      logErr('用户补丁层读取失败(按无补丁启动):', err)
+    }
+    const allPatches = [...bundlePatches, ...drafterOverlay, ...userPatches]
 
     // profile 根配置:空 entry 列表(与官方 PROFILE_ROOT_CONFIG 一致),由 patch 合成整棵树。
     const configPath = path.join(profileDir, 'cordis.yml')
@@ -503,6 +515,16 @@ async function bootHarness() {
       // 目录选择器:v0.11.7 起由 overlay insert 行挂载官方 browse 双面板
       // (dsh-host-directory-picker-browse + dsh-client-ui-directory-picker-browse),
       // 见 drafterOverlay。browse 后端自带 ctx.directoryPicker 注册。
+      // 插件启停(v0.11.8):SRC 模式 Typert Remote 服务 pluginControl/setEnabled,
+      // 走已桥接的 /api 复合通道;运行态切换经 loader entry.update,持久化写
+      // 用户补丁层(上面 allPatches 的最后一层)。挂载失败不阻断 boot。
+      try {
+        const typertProtocolUrl = pathToFileURL(path.join(HARNESS_ROOT, 'packages/typert/protocol/lib/index.js')).href
+        const typertProtocol = await import(typertProtocolUrl)
+        await pluginControl.mountPluginControl(ctx, typertProtocol, yamlLib, profileDir, log)
+      } catch (err) {
+        logErr('pluginControl mount failed(插件启停开关将不可用):', err)
+      }
       // web-startup 插件 inject cmdlineArgs(解析 web 应用的 --port/--no-open 等)。
       // 我们没有 CLI,提供空参数快照 + 一个 no-op exit(dsh-cmdline 的 provideCmdline)。
       const cmdlineUrl = pathToFileURL(path.join(HARNESS_ROOT, 'packages/boot/cmdline/lib/index.js')).href

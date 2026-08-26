@@ -60,6 +60,35 @@ function matches(entry: PluginInventoryEntry, normalizedQuery: string): boolean 
     .some(value => value.toLocaleLowerCase().includes(normalizedQuery))
 }
 
+/**
+ * Drafter host bridge: flip one Loader entry through the pluginControl Remote
+ * (SRC descriptor over the shared /api channel; the transport global is the
+ * shell-installed carrier, absent only in non-Drafter compositions).
+ */
+async function togglePluginEnabled(entryId: string, enabled: boolean): Promise<void> {
+  const transport = (globalThis as {
+    __DSH_TRANSPORT__?: { fetch?: (input: URL, init: RequestInit) => Promise<Response> }
+  }).__DSH_TRANSPORT__
+  if (transport?.fetch === undefined) throw new Error('plugin toggle transport unavailable')
+  const rpcId = crypto.randomUUID()
+  const response = await transport.fetch(new URL('/api/pluginControl/setEnabled', 'http://dsh.internal'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      type: 'client-request',
+      rpcId,
+      method: 'pluginControl/setEnabled',
+      payload: { args: { entryId, enabled } },
+    }),
+  })
+  const body = await response.json() as {
+    result?: { ok?: boolean; error?: { message?: string } }
+  }
+  if (!response.ok || body.result?.ok !== true) {
+    throw new Error(body.result?.error?.message ?? `HTTP ${response.status}`)
+  }
+}
+
 /** Render the read-only current Loader inventory. */
 export function PluginInventorySettingsTab({ list, t }: PluginInventorySettingsTabProps): ReactNode {
   const catalogId = useId()
@@ -67,6 +96,9 @@ export function PluginInventorySettingsTab({ list, t }: PluginInventorySettingsT
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<PluginInventoryEntry['entryId'] | null>(null)
   const [state, setState] = useState<ViewState>({ status: 'loading' })
+  /** Entry currently being toggled (button disable), plus the last toggle failure. */
+  const [toggling, setToggling] = useState<PluginInventoryEntry['entryId'] | null>(null)
+  const [toggleError, setToggleError] = useState<string | null>(null)
 
   useEffect(() => {
     let current = true
@@ -94,6 +126,18 @@ export function PluginInventorySettingsTab({ list, t }: PluginInventorySettingsT
   const retry = (): void => {
     setState({ status: 'loading' })
     setRequest(value => value + 1)
+  }
+
+  /** Flip one entry's enablement on the Host, then re-pull the inventory snapshot. */
+  const toggleEntry = (entry: PluginInventoryEntry): void => {
+    setToggleError(null)
+    setToggling(entry.entryId)
+    void togglePluginEnabled(entry.entryId, !entry.enabled).then(
+      () => { retry() },
+      (reason: unknown) => {
+        setToggleError(reason instanceof Error ? reason.message : String(reason))
+      },
+    ).finally(() => { setToggling(null) })
   }
 
   return (
@@ -183,6 +227,17 @@ export function PluginInventorySettingsTab({ list, t }: PluginInventorySettingsT
                             </div>
                           ) : null}
                         </dl>
+                        <button
+                          type="button"
+                          className={css.toggleAction}
+                          disabled={toggling !== null}
+                          onClick={() => { toggleEntry(entry) }}
+                        >
+                          {toggling === entry.entryId ? t('toggling') : entry.enabled ? t('disableAction') : t('enableAction')}
+                        </button>
+                        {toggleError !== null ? (
+                          <p className={css.toggleError} role="alert">{t('toggleFailed')}{toggleError}</p>
+                        ) : null}
                       </div>
                     ) : null}
                   </li>
