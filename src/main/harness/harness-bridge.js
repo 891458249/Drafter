@@ -490,6 +490,14 @@ async function bootHarness() {
         if (specifier.startsWith('.') || specifier.startsWith('file:') || path.isAbsolute(specifier)) {
           return import(specifier)
         }
+        // @deepseek-ai/*(尤其带子路径,如 dsh-tool-subagent-control/list-agents)交给
+        // 已注册的全局 ESM resolve hook(resolve-hook.mjs):它有 exports 子路径/通配
+        // 映射。resolveAny 的包索引只认精确包名——开发态子路径靠 pnpm 符号链接锚点
+        // 兜底,打包态没有符号链接,遇子路径必炸(v0.11.12 修打包态 preset 挂载失败:
+        // standard 的 delegation 组 import list-agents 子路径,新会话/选工作区全挂)。
+        if (specifier.startsWith('@deepseek-ai/')) {
+          try { return await import(specifier) } catch { /* 回退多锚点 */ }
+        }
         return import(pathToFileURL(resolveAny(specifier)).href)
       }
       if (!ctx.loader.internal) {
@@ -519,8 +527,21 @@ async function bootHarness() {
       // attachments 服务的最小 stub:apiproxy 在 inject 里要它(ctx.attachments),
       // 但 Drafter 的媒体附件走自己的 aigc 体系,harness 的图片附件第一版不支持。
       // 提供只读的最小实现(validateImage 拒绝、readImage 抛错、saveImage 抛错)。
+      // imageLimits 必须是合法值(v0.11.12):apiproxy 把它注册成 imageLimits 投影,
+      // 经 imageLimitsProjectionSchema(sessions.schema.ts)校验——全部正整数 +
+      // mediaTypes 字符串数组。之前这里填 0/错键(maxMessageImages/allowedTypes),
+      // 投影 view 校验失败 → session.history 报错 → 前端 open 流程中断,
+      // 「选择工作区/新会话」点击后静默停在 hero(v0.11.12 修)。
+      // mediaTypes: [] 即「不允许任何图片」,上传入口不展示、admission 必拒。
       ctx.provide('attachments', {
-        imageLimits: { maxMessageImageBytes: 0, maxMessageImages: 0, maxImageBytes: 0, allowedTypes: [] },
+        imageLimits: {
+          maxImageBytes: 20 * 1024 * 1024,
+          maxImagesPerMessage: 20,
+          maxMessageImageBytes: 200 * 1024 * 1024,
+          maxImagePixels: 64_000_000,
+          maxImageDimension: 8192,
+          mediaTypes: [],
+        },
         async validateImage() { throw new Error('harness attachments disabled in Drafter (use media section)') },
         async saveImage() { throw new Error('harness attachments disabled in Drafter (use media section)') },
         async readImage() { throw new Error('harness attachments disabled in Drafter (use media section)') },
