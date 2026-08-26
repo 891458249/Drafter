@@ -223,6 +223,33 @@ export default class BrowseDirectoryPicker extends DirectoryPicker {
       throw new DirectoryPickerError('directory-unreadable', path, `cannot list "${path}": not a fully qualified path`)
     }
     const target = resolve(path ?? home)
+    // Windows drive switching (Drafter patch): a drive root has no parent
+    // directory, so a bare ancestry chain strands the operator on one drive.
+    // At a drive root the crumb chain becomes the mounted drive letters
+    // (existence-probed; absent/removable letters are skipped) while the
+    // level's own children list normally, so typing/navigating to `D:\`
+    // still shows D's folders instead of an empty pane.
+    const win32DriveRoot = (() => {
+      if (process.platform !== 'win32') return undefined
+      const rootMatch = /^([A-Za-z]:[\\/])/.exec(target)
+      if (rootMatch === null || rootMatch[1] === undefined) return undefined
+      const normalized = win32.normalize(target).replace(/\//g, '\\')
+      if (normalized !== rootMatch[1].toUpperCase().replace(/\//g, '\\')) return undefined
+      return rootMatch[1].toUpperCase().replace(/\//g, '\\')
+    })()
+    const driveCrumbs = async (): Promise<DirectoryEntry[]> => {
+      const drives: DirectoryEntry[] = []
+      for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') {
+        const driveRoot = `${letter}:\\`
+        try {
+          // Existence probe only; a denied or unreadable drive stays listed
+          // (the user may elevate into it), matching Explorer's behavior.
+          await stat(driveRoot)
+          drives.push({ name: `${letter}:`, path: driveRoot, hidden: false })
+        } catch { /* drive not mounted — skip the letter */ }
+      }
+      return drives
+    }
     // Stream the level (opendir, one dirent at a time) into a name-sorted
     // window of maxEntries + 1 candidates: memory stays bounded no matter how
     // many children the directory holds, the window keeps the name-sorted
@@ -293,7 +320,13 @@ export default class BrowseDirectoryPicker extends DirectoryPicker {
       }
       entries.push(row)
     }
-    return { path: target, home, crumbs: ancestryCrumbs(target), entries, truncated }
+    return {
+      path: target,
+      home,
+      crumbs: win32DriveRoot === undefined ? ancestryCrumbs(target) : await driveCrumbs(),
+      entries,
+      truncated,
+    }
   }
 
   private async createDirectory(path: string, name: string): Promise<string> {

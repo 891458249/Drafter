@@ -100,12 +100,22 @@ const DRAFT_PREVIEW_DEBOUNCE_MS = 250
  * Breadcrumb rows for display: inside the home subtree the chain starts at a
  * localized Home crumb; outside it the full ancestry shows, the root labeled
  * by its own path.
+ *
+ * Drafter patch (win32): home sits one drive below the filesystem root
+ * (`C:\Users\<me>`), and the collapsed chain starting at Home strands the
+ * operator on C: — no crumb reaches the drive root where the host now serves
+ * the drive-letter switcher. Keep the drive-root crumb visible ahead of Home.
  */
 function displayCrumbs(listing: DirectoryListing, homeLabel: string): DirectoryEntry[] {
   const homeIndex = listing.crumbs.findIndex(crumb => crumb.path === listing.home)
   if (homeIndex === -1) return listing.crumbs
   const tail = listing.crumbs.slice(homeIndex + 1)
-  return [{ name: homeLabel, path: listing.home, hidden: false }, ...tail]
+  const homeCrumb: DirectoryEntry = { name: homeLabel, path: listing.home, hidden: false }
+  if (homeIndex > 0 && listing.home.includes('\\')) {
+    // Windows: keep every ancestor above home (the drive root `C:\`) ahead of Home.
+    return [...listing.crumbs.slice(0, homeIndex), homeCrumb, ...tail]
+  }
+  return [homeCrumb, ...tail]
 }
 
 /**
