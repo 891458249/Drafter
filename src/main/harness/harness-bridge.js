@@ -253,8 +253,14 @@ async function bootHarness() {
           }
         }
         if (!entry) entry = 'index.js'
-        const mp = pathCjs.join(pkgDir, entry)
-        if (fsCjs.existsSync(mp)) cjsIndex.set(name, mp)
+        let mp = pathCjs.join(pkgDir, entry)
+        // main 指向目录(如 @mixmark-io/domino 的 "./lib")时落到其 index 文件,
+        // 否则 _resolveFilename 返回目录、require 读目录炸 EISDIR(v0.11.10)。
+        if (fsCjs.existsSync(mp) && fsCjs.statSync(mp).isDirectory()) {
+          const dirEntry = ['index.js', 'index.cjs', 'index.mjs'].find((f) => fsCjs.existsSync(pathCjs.join(mp, f)))
+          if (dirEntry) mp = pathCjs.join(mp, dirEntry)
+        }
+        if (fsCjs.existsSync(mp) && !fsCjs.statSync(mp).isDirectory()) cjsIndex.set(name, mp)
       } catch {}
     }
     buildCjsIndex()
@@ -382,6 +388,14 @@ async function bootHarness() {
       { id: 'session-persistence-jsonl', config: { root: path.join(resolveDshHome(), 'sessions'), compression: 'none' } },
       // Node 20 无 stripTypeScriptTypes;code-runtime 是 run_code 工具(Phase 1 不用),禁用。
       { id: 'code-runtime', disabled: true },
+      // Agent 预设花名册(v0.11.10):官方 apps/cli 的 composeProfile 会把「随部署发布」的
+      // preset 根(apps/cli/config/agent-presets,含 standard/minimal/cordis/code 四套)
+      // 以 system 信任补进 agent-presets 行(profile-boot.ts SHIPPED_PRESET_ROOT);我们手工
+      // 组装补丁层时漏了它,花名册只剩空的用户根 → 设置→Agent 预设整页空白(空 roster =
+      // unavailable 渲染 null),且默认 preset 'standard' 解析不到、新会话创建直接失败。
+      // patch 的 config 是整值覆盖,web-app 层的 default:'standard' 必须一并补回;
+      // includeUserRoot 默认 true,用户可写根($DSH_HOME/.agent-presets)不受影响。
+      { id: 'agent-presets', config: { default: 'standard', roots: [{ path: path.join(HARNESS_ROOT, 'apps', 'cli', 'config', 'agent-presets'), trust: 'system' }] } },
     ]
     // 用户补丁层(v0.11.8):$DSH_HOME/profiles/web/cordis.patch.yml,官方补丁层语义
     // (按 id 定位、整键覆盖、后层优先)——作为最后一层,设置→插件列表的启停开关

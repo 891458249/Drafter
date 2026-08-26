@@ -1,6 +1,6 @@
 {
   "name": "drafter",
-  "version": "0.11.9",
+  "version": "0.11.10",
   "description": "Drafter — AI desktop workbench: fast chat, coding agent and media creation",
   "main": "main.js",
   "scripts": {
@@ -61,6 +61,7 @@
     "asarUnpack": [
       "vendor/deepseek-harness/**/lib/**",
       "vendor/deepseek-harness/apps/web/dist/**",
+      "vendor/deepseek-harness/apps/cli/config/**",
       "vendor/deepseek-harness/**/cordis.patch.yml",
       "vendor/deepseek-harness/**/package.json",
       "vendor/deepseek-harness/native/**/lib/**",
