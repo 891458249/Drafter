@@ -16,7 +16,7 @@
 
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { app, ipcMain, BrowserWindow } = require('electron')
+const { app, ipcMain } = require('electron')
 const keysBridge = require('./keys-bridge')
 const permissionBridge = require('./permission-bridge')
 
@@ -358,10 +358,19 @@ async function bootHarness() {
       { id: 'attachment-local', disabled: true },
       { id: 'session-telemetry-otel', disabled: true },
       { id: 'web-startup', disabled: true },
-      // 目录选择器:harness 的 directory-picker-native 走 Windows IFileOpenDialog 子进程
-      // (koffi COM 绑定),在 Electron 主进程里跑不起来。禁掉它,改用我们的 Electron dialog
-      // (在 prepare 里 ctx.provide('directoryPicker', ...) 顶替)。
+      // 目录选择器:-auto 选择器会按平台挂载 native(koffi COM,Electron 主进程跑不起来)
+      // 或 browse 双面板。整体禁用,改为下面的 insert 直接挂载 browse 双面板。
       { id: 'directory-picker', disabled: true },
+      // browse 双面板:host 后端(ctx.directoryPicker 的 browse capability,api-proxy
+      // 在 boot 期间就 inject directoryPicker,所以必须进树,不能 boot 后再挂)+
+      // client 界面(占用 ui-workspace 的 directoryFlow 槽,作为普通 loader 行被
+      // client-modules 反应式发现,进 __DSH_BOOT__ 与 /plugins/<id>/client.js)。
+      // 缺了 client 半,「选择工作区」popover 因槽位空缺而点击无任何反应
+      // (v0.11.0-v0.11.6 的 bug)。
+      { insert: [
+        { id: 'directory-picker-browse', name: '@deepseek-ai/dsh-host-directory-picker-browse' },
+        { id: 'ui-directory-picker-browse', name: '@deepseek-ai/dsh-client-ui-directory-picker-browse' },
+      ] },
       // Phase 3:权限预设表替换为 Drafter 的 5 档(default/acceptEdits/plan/dontAsk/bypassPermissions),
       // config 整值覆盖,含 presets + defaultPreset。
       { id: 'permission', config: keysBridgePermissionConfig() },
@@ -491,20 +500,9 @@ async function bootHarness() {
         async readImage() { throw new Error('harness attachments disabled in Drafter (use media section)') },
         async saveImages() { return [] },
       })
-      // 目录选择器:harness 的 directory-picker-native 走 Windows IFileOpenDialog 子进程
-      // (koffi COM 绑定),在 Electron 主进程里跑不起来。用 Electron 自己的 dialog 顶替——
-      // 这是 ctx.directoryPicker 的 native capability,api-proxy 的 host.pickDirectory 直接调它。
-      const { dialog, BrowserWindow } = require('electron')
-      ctx.provide('directoryPicker', {
-        capability: () => ({
-          kind: 'native',
-          async pick(_signal) {
-            const win = BrowserWindow.getAllWindows()[0]
-            const result = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
-            return result.canceled || !result.filePaths.length ? null : result.filePaths[0]
-          },
-        }),
-      })
+      // 目录选择器:v0.11.7 起由 overlay insert 行挂载官方 browse 双面板
+      // (dsh-host-directory-picker-browse + dsh-client-ui-directory-picker-browse),
+      // 见 drafterOverlay。browse 后端自带 ctx.directoryPicker 注册。
       // web-startup 插件 inject cmdlineArgs(解析 web 应用的 --port/--no-open 等)。
       // 我们没有 CLI,提供空参数快照 + 一个 no-op exit(dsh-cmdline 的 provideCmdline)。
       const cmdlineUrl = pathToFileURL(path.join(HARNESS_ROOT, 'packages/boot/cmdline/lib/index.js')).href
@@ -524,7 +522,30 @@ async function bootHarness() {
     harnessCtx = ctx
 
     if (!ctx.apiProxy) throw new Error('harness boot 完成但 ctx.apiProxy 缺失(api-gateway 未挂载?)')
-    apiFetchHandler = toFetchHandler(ctx.apiProxy).fetch
+    // Typert 桥(v0.11.7):/api 请求改走 connection 的复合 FetchHandler——
+    // Typert gateway 的 interceptor 认领 Remote endpoint(goals/pluginInventory/
+    // messageFeedback/commands/...),未认领的回落到 apiproxy(含 SSE 的
+    // GET /api/events.mux|host,官方前端走 WebSocket,我们的 IpcApiClient 走 SSE fetch,
+    // 所以回落分支必须直接透传,不能照抄官方 connection 插件的 426 upgrade-required)。
+    // 此前直接 toFetchHandler(apiProxy),Typert 调用全部 404:
+    // 设置→插件清单读不出、所有经 ctx.remote.* 的交互静默失败。
+    // createSharedFetchHandler 读的是 connection 服务的活 interceptor 表,
+    // gateway 在 boot 期间注册,请求时按当前状态解析,顺序无关。
+    const connection = ctx.get('connection')
+    if (connection && typeof connection.createSharedFetchHandler === 'function') {
+      const composite = connection.createSharedFetchHandler('/api', {
+        fetch(request) {
+          const apiProxy = ctx.get('apiProxy')
+          if (!apiProxy) return Promise.resolve(new Response('not found', { status: 404 }))
+          return toFetchHandler(apiProxy).fetch(request)
+        },
+      })
+      apiFetchHandler = (request) => composite.fetch(request)
+      log('Typert bridge active: /api composite handler (gateway interceptor + apiproxy fallback)')
+    } else {
+      apiFetchHandler = toFetchHandler(ctx.apiProxy).fetch
+      logErr('connection service 缺失,Typert RPC 不可用,回落纯 apiproxy')
+    }
     log('harness booted, apiProxy ready')
     // Phase 2:把 Drafter 的多 Key 同步进 harness(credentials + llm-pi-ai providers + 默认模型)
     try {
@@ -534,6 +555,8 @@ async function bootHarness() {
       // Key 同步失败不阻断 boot——用户可能还没配 Key;在 UI 层提示即可
       logErr('keys sync failed(可能还没配 Key):', err.message)
     }
+    // 目录选择器(v0.11.7):browse 双面板已作为 overlay insert 行进树
+    // (见 drafterOverlay),apiproxy boot 时 inject 的 directoryPicker 由它提供。
     return ctx
   })().catch((err) => {
     bootPromise = null
@@ -737,5 +760,10 @@ module.exports = {
   // Key 变更后重同步(Phase 2)
   resyncKeys: async () => { const ctx = await bootHarness(); return keysBridge.syncKeysToHarness(ctx) },
   // 测试探针
-  _internal: { HARNESS_ROOT, drafterWebServerStubPlugin },
+  _internal: {
+    HARNESS_ROOT,
+    drafterWebServerStubPlugin,
+    // 冒烟/测试用:走与 harness:fetch 完全相同的通道(unary + Typert 复合 handler)
+    fetch: (reqDesc) => handleHarnessFetch(null, reqDesc),
+  },
 }
