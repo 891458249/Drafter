@@ -424,3 +424,5 @@ Git 工作流:
 - **双击画布空白搜索加节点**(litegraph 惯例:模糊匹配,Enter 选第一个)
 - 新主进程模块 canvasGraph.js(纯逻辑:fromDrawflow/toDrawflow/validate/nodeSignature/topoOrder/executionTargets);测试 163/163(canvas-graph 5 例 + canvas-jobs 5 例);CDP 冒烟 20/20(整图运行校验拦截+搜索加节点)
 - 坑:①prompt 槽是「必需槽」,空槽不落 null 占位(可选 ref 槽才占位)——否则连线类型语义被空槽吃掉;②连线判断必须区分 [id,socket] 与 models:['k|m'] 值数组(isLink);③prompt 解析沿 prompt 槽递归向上(生成节点也可作上游文本源)
+
+> 版本注:v0.12.0 的 tag 与 GitHub Release 被并行会话用于 Harness 修复(be722d49),画布升级的实际发布版本号是 **v0.12.1**(内容同上)。
