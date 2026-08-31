@@ -161,11 +161,12 @@ export function InputBar({
   // but its independent Stop below stays available while it runs.
   const continuable = subagent?.address.mode === 'continuable'
   const parentOffline = continuable && !subagent.parentAvailable
-  // Running input stays free; locked = session removed, the
-  // inert no-workspace state, the machine faces absent (no session), or a
-  // parent-offline continuable child. An owner block also disables input;
-  // adjudicating and submitting render read-only so the draft stays visible.
-  const disabled = removed || inert || !live || blocked !== undefined || parentOffline
+  // A model-routing block prevents submission but must preserve the draft: users
+  // can prepare their message while selecting a replacement model. The reasons
+  // below have no usable input machine or no viable delivery owner, so they
+  // remain fully locked.
+  const inputLocked = removed || inert || !live || parentOffline
+  const disabled = inputLocked || blocked !== undefined
   const locked = disabled
   // The model seat is the ONE control a block leaves live: every block this
   // contract has is cleared by choosing a model, so locking it too would leave
@@ -178,7 +179,7 @@ export function InputBar({
   // exists; the trigger itself is read-only rather than disabled so pointer
   // and keyboard users can reach the recovery action.
   const workspaceTrigger = inert && !removed && onRequestWorkspace !== undefined
-  const textareaDisabled = removed || (locked && !workspaceTrigger)
+  const textareaDisabled = removed || (inputLocked && !workspaceTrigger)
   const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && subagent === null
     && input.queue.some(row => row.placement === 'queued')
 
@@ -436,7 +437,7 @@ export function InputBar({
   }
 
   const onChange = (e: ChangeEvent<HTMLTextAreaElement>): void => {
-    if (keyboard === undefined || locked) return // disabled/read-only states cannot edit the draft
+    if (keyboard === undefined || inputLocked) return // absent input machine and unavailable sessions cannot edit the draft
     if (machineBusy) return // submitting is the read-only span; adjudicating holds the pending lock
     const next = e.target.value
     const pending = pendingEditRef.current

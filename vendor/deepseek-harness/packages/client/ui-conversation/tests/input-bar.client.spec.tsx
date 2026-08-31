@@ -73,6 +73,7 @@ interface BenchOptions {
   subagent?: Exclude<ConversationSnapshot['subagent'], null>
   disabled?: boolean
   inert?: boolean
+  blocked?: boolean
   workspacePickerOpen?: boolean
   onRequestWorkspace?: () => void
   promptError?: ConversationSnapshot['promptError']
@@ -192,6 +193,7 @@ function bench(over?: BenchOptions) {
     renderSlot,
     variant: over?.variant ?? 'composer',
     ...(over?.inert === true ? { disabled: true } : {}),
+    ...(over?.blocked === true ? { blocked: { reason: '当前模型不可用，请先选择模型' } } : {}),
     ...(over?.workspacePickerOpen !== undefined ? { workspacePickerOpen: over.workspacePickerOpen } : {}),
     ...(over?.onRequestWorkspace !== undefined ? { onRequestWorkspace: over.onRequestWorkspace } : {}),
     ...(over?.placeholder !== undefined ? { placeholder: over.placeholder } : {}),
@@ -718,6 +720,16 @@ describe('running and lock semantics', () => {
     const accelerated = bench({ running: true, draft: 'accelerated', subagent })
     fireEvent.keyDown(accelerated.textarea, { key: 'Enter', metaKey: true })
     expect(accelerated.sink).toHaveBeenCalledWith('accelerated', [], 'queue', expect.any(AbortSignal))
+  })
+
+  it('a model block keeps the draft writable but prevents submission', () => {
+    const { textarea, shell, button, sink } = bench({ blocked: true })
+    expect(textarea.disabled).toBe(false)
+    expect(button.disabled).toBe(true)
+    fireEvent.change(textarea, { target: { value: '先写好提示词' } })
+    expect(shell.state.getSnapshot().draft).toBe('先写好提示词')
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(sink).not.toHaveBeenCalled()
   })
 
   it('disabled (session removed) locks the textarea and chrome', () => {
