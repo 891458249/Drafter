@@ -101,6 +101,8 @@ contextBridge.exposeInMainWorld('api', {
   canvasLoad: (id) => ipcRenderer.invoke('canvas:load', { id }),
   canvasSave: (id, payload) => ipcRenderer.invoke('canvas:save', { id, ...payload }),
   canvasDelete: (id) => ipcRenderer.invoke('canvas:delete', { id }),
+  canvasToDrawflow: (graph) => ipcRenderer.invoke('canvas:toDrawflow', { graph }),
+  canvasValidate: (graph) => ipcRenderer.invoke('canvas:validate', { graph }),
   canvasSaveUpload: (id, name, data) => ipcRenderer.invoke('canvas:saveUpload', { id, name, data }),
   canvasListTemplates: () => ipcRenderer.invoke('canvas:templates:list'),
   canvasSaveTemplate: (name, graph) => ipcRenderer.invoke('canvas:templates:save', { name, graph }),
@@ -108,6 +110,9 @@ contextBridge.exposeInMainWorld('api', {
   canvasRemoveTemplate: (id) => ipcRenderer.invoke('canvas:templates:remove', { id }),
   canvasExportFile: (id) => ipcRenderer.invoke('canvas:exportFile', { id }),
   canvasImportFile: () => ipcRenderer.invoke('canvas:importFile'),
+  canvasRun: (canvasId) => ipcRenderer.invoke('canvas:run', { canvasId }), // 整图运行(v0.12.0)
+  canvasJobList: (canvasId) => ipcRenderer.invoke('canvas:job:list', { canvasId }),
+  canvasJobCancel: (jobId) => ipcRenderer.invoke('canvas:job:cancel', { jobId }),
   llmComplete: (p) => ipcRenderer.invoke('llm:complete', p), // 画布文本生成节点(v0.10.1)
   assetsList: () => ipcRenderer.invoke('assets:list'),
 
@@ -151,7 +156,7 @@ contextBridge.exposeInMainWorld('api', {
     const allowed = [
       'sess:event', 'sess:attention', 'sess:activate', 'cron:fired',
       'term:data', 'term:exit',
-      'file:changed', 'update:status', 'aigc:status', 'aigc:exec-status',
+      'file:changed', 'update:status', 'aigc:status', 'aigc:exec-status', 'canvas:job-status',
     ];
     if (!allowed.includes(channel)) return () => {};
     const listener = (_e, payload) => cb(payload);

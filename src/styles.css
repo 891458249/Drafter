@@ -1243,3 +1243,32 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
   white-space: pre-wrap; word-break: break-word;
   background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
 }
+
+/* ---------------- 画布 v0.12.0:整图运行/状态环/节点错误/搜索加节点 ---------------- */
+/* 节点状态环(ComfyUI 语义):灰=未运行 黄=执行中 绿=完成 红=失败 紫=跳过 蓝=缓存命中 */
+#drawflow .drawflow-node.cv-st-running { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); }
+#drawflow .drawflow-node.cv-st-done { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+#drawflow .drawflow-node.cv-st-cached { border-color: #5b9bd5; box-shadow: 0 0 0 1px #5b9bd5; }
+#drawflow .drawflow-node.cv-st-fail, #drawflow .drawflow-node.cv-err { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+#drawflow .drawflow-node.cv-st-skipped { border-color: #8a5bd6; opacity: .72; }
+.cv-node-err {
+  font-size: 11px; color: var(--red); background: rgba(214,125,106,.12);
+  border: 1px solid rgba(214,125,106,.35); border-radius: 6px; padding: 4px 7px;
+  line-height: 1.45; word-break: break-all;
+}
+/* 双击搜索加节点(litegraph 惯例) */
+.cv-search {
+  position: fixed; z-index: 300; width: 240px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
+  padding: 6px; box-shadow: 0 12px 36px rgba(0,0,0,.5);
+}
+.cv-search .input-sm { width: 100%; margin-bottom: 6px; }
+.cv-search-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.cv-search-list button {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: none; border: none; color: var(--text); font-size: 12.5px;
+  padding: 6px 9px; border-radius: 6px; cursor: pointer;
+}
+.cv-search-list button:hover { background: var(--bg-hover); }
+/* 整图运行按钮运行中态 */
+#btn-cv-run:disabled { opacity: .6; cursor: default; }

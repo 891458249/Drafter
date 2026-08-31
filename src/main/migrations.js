@@ -16,6 +16,7 @@ const path = require('path');
 const store = require('./store');
 const { migrateTranscript } = require('./sessions');
 const keys = require('./keys');
+const canvasGraph = require('./canvasGraph');
 
 // --- semver 比较(只取前三段数字,够本项目的 x.y.z 用) -----------------------
 function compareVersions(a, b) {
@@ -110,6 +111,39 @@ const MIGRATIONS = [
       for (const m of store.listSessions()) {
         if (m && LEGACY.includes(m.kind)) store.upsertSession({ id: m.id, kind: 'media', board: m.kind });
       }
+    },
+  },
+  // v0.12.0:画布格式对齐 ComfyUI API 格式({id:{class_type,inputs,...}} 平铺)。
+  // 存量 drawflow 形画布一次性转换(fromDrawflow);原文件留 .bak(铁律:只修不删);
+  // 模板目录同样转换。转换后 toDrawflow 在渲染端重建编辑器,位置/连线全保留。
+  {
+    version: '0.12.0',
+    desc: '画布 JSON 转 ComfyUI API 格式(留 .bak)',
+    run() {
+      const fs = require('fs');
+      const path = require('path');
+      const { app } = require('electron');
+      const dir = path.join(app.getPath('userData'), 'canvases');
+      const convertDir = (d) => {
+        let names = [];
+        try { names = fs.readdirSync(d); } catch { return; }
+        for (const n of names) {
+          if (!n.endsWith('.json')) continue;
+          const fp = path.join(d, n);
+          try {
+            const j = JSON.parse(fs.readFileSync(fp, 'utf8'));
+            const g = j.graph;
+            if (!g || !g.drawflow) continue; // 已是 API 格式或空画布
+            fs.copyFileSync(fp, fp + '.bak');
+            j.graph = canvasGraph.fromDrawflow(g);
+            fs.writeFileSync(fp, JSON.stringify(j, null, 2), 'utf8');
+          } catch (e) {
+            console.error('[migrations] canvas convert failed:', n, e.message);
+          }
+        }
+      };
+      convertDir(dir);
+      convertDir(path.join(dir, 'templates'));
     },
   },
 ];

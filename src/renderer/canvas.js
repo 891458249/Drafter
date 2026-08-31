@@ -307,7 +307,7 @@ function onExecStatus(p) {
 }
 
 // ---------------------------------------------------------------------------
-// 持久化(防抖自动保存;graph=Drawflow export,节点 data 由 nodeData 覆盖)
+// 持久化(防抖自动保存;v0.12.0 起画布存 ComfyUI API 格式:export 后经主进程转换)
 // ---------------------------------------------------------------------------
 function scheduleSave() {
   if (importing || !cvId) return;
@@ -323,6 +323,7 @@ async function saveNow() {
   const out = editor.export();
   const nodes = out && out.drawflow && out.drawflow.Home && out.drawflow.Home.data;
   if (nodes) for (const [id, node] of Object.entries(nodes)) node.data = nodeData.get(String(id)) || {};
+  // 主进程转 API 格式落盘(graph 参数语义不变:传编辑器 export,主进程负责转换)
   const r = await api.canvasSave(cvId, { graph: out });
   $('canvas-save-hint').textContent = (r && r.error)
     ? '保存失败:' + r.error
@@ -346,8 +347,10 @@ async function openCanvas(id) {
   nodeData.clear();
   editor.clear();
   if (cv.graph) {
-    try { editor.import(cv.graph); } catch (e) { console.error('[canvas] import failed:', e); }
-    const nodes = (cv.graph.drawflow && cv.graph.drawflow.Home && cv.graph.drawflow.Home.data) || {};
+    // v0.12.0:画布存 ComfyUI API 格式;渲染端经主进程转 drawflow 形再 import
+    const dfGraph = cv.graph.drawflow ? cv.graph : await api.canvasToDrawflow(cv.graph);
+    try { editor.import(dfGraph); } catch (e) { console.error('[canvas] import failed:', e); }
+    const nodes = (dfGraph.drawflow && dfGraph.drawflow.Home && dfGraph.drawflow.Home.data) || {};
     for (const [nid, node] of Object.entries(nodes)) {
       const data = node.data && node.data.type ? node.data
         : defaultData(String(node.class || '').replace('cv-nt-', ''));
@@ -494,6 +497,43 @@ function buildAddMenu() {
     `<button data-nt="${k}">${t.ico} ${t.label}</button>`).join('');
 }
 
+// 双击画布空白 → 搜索框快速加节点(模糊匹配节点名,Enter 选第一个)
+function openSearchMenu(x, y) {
+  let box = document.querySelector('.cv-search');
+  if (box) box.remove();
+  box = document.createElement('div');
+  box.className = 'cv-search';
+  box.innerHTML = `<input class="input-sm" placeholder="搜索节点…(Enter 添加)" />`;
+  const list = document.createElement('div');
+  list.className = 'cv-search-list';
+  box.appendChild(list);
+  box.style.left = Math.min(x, window.innerWidth - 260) + 'px';
+  box.style.top = Math.min(y, window.innerHeight - 260) + 'px';
+  document.body.appendChild(box);
+  const input = box.querySelector('input');
+  const render = (q) => {
+    const items = Object.entries(NODE_TYPES).filter(([, t]) =>
+      !q || t.label.toLowerCase().includes(q.toLowerCase()));
+    list.innerHTML = items.map(([k, t]) => `<button data-nt="${k}">${t.ico} ${t.label}</button>`).join('');
+    list.querySelectorAll('button').forEach((b) => {
+      b.onclick = async () => { await loadModelOptions(); addNodeAt(b.dataset.nt); box.remove(); };
+    });
+    return items;
+  };
+  input.oninput = () => render(input.value.trim());
+  input.onkeydown = async (e) => {
+    if (e.key === 'Escape') box.remove();
+    if (e.key === 'Enter') {
+      const items = render(input.value.trim());
+      if (items.length) { await loadModelOptions(); addNodeAt(items[0][0]); box.remove(); }
+    }
+  };
+  render('');
+  input.focus();
+  const closer = (e) => { if (!box.contains(e.target)) { box.remove(); document.removeEventListener('mousedown', closer); } };
+  document.addEventListener('mousedown', closer);
+}
+
 // ---------------------------------------------------------------------------
 // 画布模板(md 1.2:保存/复用整套节点布局) + fork/导入导出(只读分享与复制项目)
 // ---------------------------------------------------------------------------
@@ -593,9 +633,104 @@ function bindTemplateMenu() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// 整图运行(v0.12.0,对齐 ComfyUI):保存→校验→主进程执行器;节点状态环随
+// canvas:job-status 流转;校验失败逐节点高亮错误
+// ---------------------------------------------------------------------------
+let currentJobId = null;
+const nodeJobState = new Map(); // nodeId → 'queued'|'running'|'done'|'fail'|'skipped'|'cached'
+
+async function runCanvas() {
+  if (!cvId) return;
+  await flushSave();
+  const cv = await api.canvasLoad(cvId);
+  if (!cv || !cv.graph) return;
+  const v = await api.canvasValidate(cv.graph);
+  clearNodeErrors();
+  if (!v.ok) {
+    for (const [nid, errs] of Object.entries(v.nodeErrors || {})) {
+      if (nid === '_global') { alert(errs.map((e) => e.message).join('\n')); continue; }
+      markNodeError(nid, errs.map((e) => e.message).join('\n'));
+    }
+    return;
+  }
+  const r = await api.canvasRun(cvId);
+  if (!r || !r.ok) {
+    if (r && r.nodeErrors) {
+      for (const [nid, errs] of Object.entries(r.nodeErrors)) markNodeError(nid, errs.map((e) => e.message).join('\n'));
+    } else {
+      alert('运行失败:' + ((r && r.error) || '未知错误'));
+    }
+    return;
+  }
+  currentJobId = r.jobId;
+  nodeJobState.clear();
+  setRunBtn(true);
+}
+
+function setRunBtn(running) {
+  const btn = $('btn-cv-run');
+  if (!btn) return;
+  btn.disabled = running;
+  btn.textContent = running ? '◐ 运行中…' : '▶ 运行';
+}
+
+function clearNodeErrors() {
+  for (const el of $('drawflow').querySelectorAll('.cv-node-err')) el.remove();
+  for (const el of $('drawflow').querySelectorAll('.drawflow-node.cv-err')) el.classList.remove('cv-err');
+}
+
+function markNodeError(nid, msg) {
+  const nodeEl = $(('drawflow')) && document.querySelector(`#node-${nid}`);
+  if (!nodeEl) return;
+  nodeEl.classList.add('cv-err');
+  const body = nodeEl.querySelector('.cv-body');
+  if (body) body.insertAdjacentHTML('afterbegin', `<div class="cv-node-err">⚠ ${escapeHtml(msg)}</div>`);
+}
+
+function applyNodeState(nid, status) {
+  const el = document.querySelector(`#node-${nid}`);
+  if (!el) return;
+  for (const s of ['queued', 'running', 'done', 'fail', 'skipped', 'cached']) el.classList.remove('cv-st-' + s);
+  if (status) el.classList.add('cv-st-' + status);
+  nodeJobState.set(String(nid), status);
+}
+
+function onJobStatus(p) {
+  if (!p || p.canvasId !== cvId) return;
+  if (p.nodeId) applyNodeState(p.nodeId, p.status === 'done' && p.cached ? 'cached' : p.status);
+  if (p.status === 'completed' || p.status === 'completed_with_errors' || p.status === 'failed' || p.status === 'cancelled') {
+    setRunBtn(false);
+    currentJobId = null;
+    // 终态:重开画布数据(canvasJobs 已把任务产物/_v 写回画布 JSON),节点内容与产物刷新
+    reopenCurrent();
+  }
+  if (p.status === 'failed' && p.error) alert('整图运行失败:' + p.error);
+}
+
+// 整图运行终态后重载画布内容(节点任务历史/产物由主进程写回,UI 重新挂)
+async function reopenCurrent() {
+  if (!cvId) return;
+  const cv = await api.canvasLoad(cvId);
+  if (!cv || !cv.graph) return;
+  importing = true;
+  nodeData.clear();
+  const dfGraph = cv.graph.drawflow ? cv.graph : await api.canvasToDrawflow(cv.graph);
+  try { editor.import(dfGraph); } catch {}
+  const nodes = (dfGraph.drawflow && dfGraph.drawflow.Home && dfGraph.drawflow.Home.data) || {};
+  for (const [nid, node] of Object.entries(nodes)) {
+    const data = node.data && node.data.type ? node.data : defaultData(String(node.class || '').replace('cv-nt-', ''));
+    nodeData.set(String(nid), data);
+    renderNodeBody(String(nid));
+  }
+  importing = false;
+  // 状态环保留(直到下次运行前清除)
+}
+
 function bindToolbar() {
   buildAddMenu();
   bindTemplateMenu();
+  $('btn-cv-run').onclick = runCanvas; // 整图运行(v0.12.0)
   $('btn-cv-add').onclick = (e) => {
     e.stopPropagation();
     $('cv-add-menu').classList.toggle('hidden');
@@ -616,6 +751,12 @@ function bindToolbar() {
   $('btn-cv-zoom-in').onclick = () => editor && editor.zoom_in();
   $('btn-cv-zoom-out').onclick = () => editor && editor.zoom_out();
   $('btn-cv-zoom-reset').onclick = () => editor && editor.zoom_reset();
+  // 双击画布空白 → 搜索框快速加节点(ComfyUI litegraph 惯例)
+  $('drawflow').addEventListener('dblclick', (e) => {
+    if (e.target.closest('.drawflow-node') || e.target.closest('.cv-add-menu') || e.target.closest('.cv-search')) return;
+    if (!cvId) return;
+    openSearchMenu(e.clientX, e.clientY);
+  });
 }
 
 function nodeIdOf(target) {
@@ -723,4 +864,5 @@ export function init() {
   bindToolbar();
   bindDelegation();
   api.on('aigc:exec-status', onExecStatus);
+  api.on('canvas:job-status', onJobStatus); // 整图运行状态流(v0.12.0)
 }

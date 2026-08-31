@@ -29,16 +29,16 @@ function touchFile(rel) {
   return fp;
 }
 
-test('create/list/load/save/delete:画布单文件生命周期', () => {
+test('create/list/load/save/delete:画布单文件生命周期(v0.12.0 起存 API 格式)', () => {
   const cv = canvases.create('测试画布');
   assert.match(cv.id, /^cv_/);
   assert.deepStrictEqual(canvases.list().map((x) => x.id), [cv.id]);
   assert.strictEqual(canvases.load(cv.id).name, '测试画布');
 
-  const graph = { drawflow: { Home: { data: { '1': { id: 1, name: 'gen', data: { prompt: '猫' } } } } } };
+  const graph = { '1': { id: '1', class_type: 'drafter/text', pos: [10, 20], inputs: { text: '猫' } } };
   const s1 = canvases.save(cv.id, { graph });
   assert.ok(s1.updatedAt >= cv.updatedAt);
-  assert.strictEqual(canvases.load(cv.id).graph.drawflow.Home.data['1'].data.prompt, '猫');
+  assert.strictEqual(canvases.load(cv.id).graph['1'].inputs.text, '猫');
   // 部分更新:只改名,graph 保留
   canvases.save(cv.id, { name: '改名画布' });
   const loaded = canvases.load(cv.id);
@@ -67,18 +67,18 @@ test('saveUpload:参考图落画布 assets 目录,文件名安全化', () => {
   assert.throws(() => canvases.saveUpload(cv.id, { name: 'a.png' }), /缺少文件数据/);
 });
 
-test('patchTask:终态写回画布 JSON(用户切走后任务完成历史仍完整)', () => {
+test('patchTask:终态写回画布 JSON(API 格式,v0.12.0)', () => {
   const cv = canvases.create('补丁画布');
   canvases.save(cv.id, {
-    graph: { drawflow: { Home: { data: {
-      '3': { id: 3, name: 'gen', data: { tasks: [
+    graph: {
+      '3': { id: '3', class_type: 'drafter/image', inputs: { prompt: 'x', tasks: [
         { traceId: 'ok-1', status: 'pending', ts: 1 },
         { traceId: 'ok-2', status: 'processing', ts: 2 },
       ] } },
-    } } } },
+    },
   });
   assert.strictEqual(canvases.patchTask(cv.id, '3', 'ok-2', { status: 'done', files: [{ path: '/x.png', name: 'x.png' }] }), true);
-  const tasks = canvases.load(cv.id).graph.drawflow.Home.data['3'].data.tasks;
+  const tasks = canvases.load(cv.id).graph['3'].inputs.tasks;
   assert.strictEqual(tasks[1].status, 'done');
   assert.deepStrictEqual(tasks[1].files, [{ path: '/x.png', name: 'x.png' }]);
   assert.strictEqual(tasks[0].status, 'pending', '只改目标任务');
@@ -110,19 +110,19 @@ test('模板(v0.10.1):保存/列表/加载/删除 + sanitize 剥离任务历史�
   assert.strictEqual(canvases.listTemplates().length, 0);
 });
 
-test('导出/导入载荷(v0.10.1 fork):导出剥离历史,导入严格校验并加副本名', () => {
+test('导出/导入载荷(v0.10.1 fork;v0.12.0 API 格式):导出剥离历史,导入严格校验并加副本名', () => {
   const cv = canvases.create('原画布');
-  canvases.save(cv.id, { graph: { drawflow: { Home: { data: {
-    '1': { id: 1, name: 'gen', data: { type: 'image', prompt: '狗', tasks: [{ traceId: 'x' }], active: 0, view: 0 } },
-  } } } } });
+  canvases.save(cv.id, { graph: {
+    '1': { id: '1', class_type: 'drafter/image', pos: [0, 0], inputs: { prompt: '狗', models: ['k|m'], tasks: [{ traceId: 'x' }], active: 0, view: 0 } },
+  } });
   const payload = canvases.exportPayload(cv.id);
   assert.strictEqual(payload.app, 'drafter-canvas');
   assert.strictEqual(payload.name, '原画布');
-  assert.deepStrictEqual(payload.graph.drawflow.Home.data['1'].data.tasks, [], '导出不带任务历史');
-  assert.strictEqual(payload.graph.drawflow.Home.data['1'].data.prompt, '狗');
+  assert.deepStrictEqual(payload.graph['1'].inputs.tasks, [], '导出不带任务历史');
+  assert.strictEqual(payload.graph['1'].inputs.prompt, '狗');
   const imp = canvases.importPayload(payload);
   assert.strictEqual(imp.name, '原画布(副本)');
-  assert.ok(imp.graph.drawflow.Home.data['1']);
+  assert.ok(imp.graph['1']);
   assert.throws(() => canvases.importPayload({ foo: 1 }), /不是本应用导出的画布 JSON/);
   assert.throws(() => canvases.importPayload({ app: 'drafter-canvas' }), /不是本应用导出的画布 JSON/);
 });
@@ -143,13 +143,13 @@ test('listAssets:会话 JSONL 与画布节点双源聚合,剔除磁盘缺失,时
   fs.unlinkSync(fCvGone); // 磁盘缺失,应剔除
   const cv = canvases.create('素材画布');
   canvases.save(cv.id, {
-    graph: { drawflow: { Home: { data: {
-      '7': { id: 7, name: 'gen', data: { tasks: [
+    graph: {
+      '7': { id: '7', class_type: 'drafter/image', inputs: { tasks: [
         { traceId: 't2', model: 'Kling-3.0', prompt: '狗跑', status: 'done', ts: 200, files: [{ path: fCv1, name: 'dog.mp4' }] },
         { traceId: 't3', status: 'done', ts: 300, files: [{ path: fCvGone, name: 'gone.png' }] },
         { traceId: 't4', status: 'processing', ts: 400 }, // 未完成,不收
       ] } },
-    } } } },
+    },
   });
 
   const items = canvases.listAssets();

@@ -54,14 +54,17 @@ function load(id) {
 }
 
 // name/graph 为可选部分更新;graph 传 null 也视为合法值(空画布)
+// v0.12.0:graph 入参兼容两种形态——Drawflow export(渲染端 save,转 API 格式落盘)
+// 或已是 API 格式(canvasJobs 执行器 patch 后回写,直接落盘)
 function save(id, { name, graph } = {}) {
   const cur = load(id);
   if (!cur) return null;
   const next = { ...cur, updatedAt: Date.now() };
   if (typeof name === 'string' && name.trim()) next.name = name.trim();
   if (graph !== undefined) {
-    if (graph && JSON.stringify(graph).length > MAX_GRAPH_BYTES) return { error: '画布数据过大(>32MB)' };
-    next.graph = graph;
+    const normalized = graph && graph.drawflow ? require('./canvasGraph').fromDrawflow(graph) : graph;
+    if (normalized && JSON.stringify(normalized).length > MAX_GRAPH_BYTES) return { error: '画布数据过大(>32MB)' };
+    next.graph = normalized;
   }
   fs.writeFileSync(canvasPath(id), JSON.stringify(next, null, 2), 'utf8');
   return { id: next.id, name: next.name, updatedAt: next.updatedAt };
@@ -92,15 +95,16 @@ const templatePath = (id) => path.join(TEMPLATES_DIR(), id + '.json');
 const TID_RE = /^t_[a-zA-Z0-9_-]+$/;
 
 // 模板只复用布局+配置:任务历史/版本索引/上传文件等个人数据剥离
+// (v0.12.0 起 graph 为 API 格式:{ id: { class_type, inputs:{...} } };兼容存量 drawflow 形)
 function sanitizeGraph(graph) {
   const g = JSON.parse(JSON.stringify(graph || {}));
-  const nodes = g && g.drawflow && g.drawflow.Home && g.drawflow.Home.data;
+  const nodes = g.drawflow ? (g.drawflow.Home && g.drawflow.Home.data) : g;
   for (const n of Object.values(nodes || {})) {
-    const d = n && n.data;
-    if (!d) continue;
+    const d = (n && n.data) || (n && n.inputs) || {};
     if (Array.isArray(d.tasks)) { d.tasks = []; d.active = -1; d.view = 0; }
     if (Array.isArray(d.results)) { d.results = []; d.active = -1; d.view = 0; }
     if ('file' in d) d.file = null;
+    delete d._v;
   }
   return g;
 }
@@ -198,10 +202,13 @@ function* canvasAssets() {
     if (!n.endsWith('.json')) continue;
     let cv = null;
     try { cv = JSON.parse(fs.readFileSync(path.join(ROOT(), n), 'utf8')); } catch { continue; }
-    const nodes = cv && cv.graph && cv.graph.drawflow && cv.graph.drawflow.Home && cv.graph.drawflow.Home.data;
+    const nodes = cv && cv.graph
+      ? (cv.graph.drawflow ? (cv.graph.drawflow.Home && cv.graph.drawflow.Home.data) : cv.graph) // 兼容存量
+      : null;
     if (!nodes || typeof nodes !== 'object') continue;
     for (const [nodeId, node] of Object.entries(nodes)) {
-      const tasks = node && node.data && Array.isArray(node.data.tasks) ? node.data.tasks : [];
+      const box = node.inputs || node.data || {}; // v0.12.0 API 格式在 inputs;存量在 data
+      const tasks = Array.isArray(box.tasks) ? box.tasks : [];
       for (const t of tasks) {
         if (!t || t.status !== 'done' || !Array.isArray(t.files)) continue;
         for (const f of t.files) {
@@ -229,14 +236,13 @@ function listAssets() {
   return out.sort((a, b) => b.ts - a.ts);
 }
 
-// 终态补丁(v0.10.0):画布节点的执行任务在终态时把 status/files 写回画布 JSON——
-// 用户切走/关窗后任务跑完,画布历史仍完整(渲染端只负责当前打开画布的实时 UI)
+// 终态补丁(v0.10.0;v0.12.0 起画布存 API 格式):画布节点的执行任务在终态时把
+// status/files 写回画布 JSON——用户切走/关窗后任务跑完,画布历史仍完整
 function patchTask(canvasId, nodeId, traceId, patch) {
   const cv = load(canvasId);
   if (!cv || !cv.graph) return false;
-  const nodes = cv.graph.drawflow && cv.graph.drawflow.Home && cv.graph.drawflow.Home.data;
-  const node = nodes && nodes[String(nodeId)];
-  const tasks = node && node.data && node.data.tasks;
+  const node = cv.graph[String(nodeId)];
+  const tasks = node && node.inputs && node.inputs.tasks;
   if (!Array.isArray(tasks)) return false;
   const t = tasks.find((x) => x && x.traceId === traceId);
   if (!t) return false;
@@ -245,7 +251,19 @@ function patchTask(canvasId, nodeId, traceId, patch) {
   return true;
 }
 
+// 通用画布节点补丁(v0.12.0):canvasJobs 执行器落状态/产物/_v 签名用;fn 收到 node.inputs
+function patchNode(canvasId, nodeId, fn) {
+  const cv = load(canvasId);
+  if (!cv || !cv.graph) return false;
+  const node = cv.graph[String(nodeId)];
+  if (!node || !node.inputs) return false;
+  const r = fn(node.inputs, node);
+  if (r === false) return false;
+  save(canvasId, { graph: cv.graph });
+  return true;
+}
+
 module.exports = {
-  list, create, load, save, remove, saveUpload, listAssets, patchTask, extKind, ROOT, assetsDir,
+  list, create, load, save, remove, saveUpload, listAssets, patchTask, patchNode, extKind, ROOT, assetsDir,
   sanitizeGraph, listTemplates, saveTemplate, loadTemplate, removeTemplate, exportPayload, importPayload,
 };

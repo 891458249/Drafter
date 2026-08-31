@@ -46,6 +46,8 @@ const updater = require('./src/main/updater');
 const keys = require('./src/main/keys');
 const aigc = require('./src/main/aigc');
 const canvases = require('./src/main/canvases');
+const canvasJobs = require('./src/main/canvasJobs');
+const canvasGraph = require('./src/main/canvasGraph');
 const llmtext = require('./src/main/llmtext');
 const aux = require('./src/main/aux-models');
 const title = require('./src/main/title');
@@ -740,6 +742,9 @@ ipcMain.handle('canvas:create', (_e, { name } = {}) => canvases.create(name));
 ipcMain.handle('canvas:load', (_e, { id } = {}) => canvases.load(id));
 ipcMain.handle('canvas:save', (_e, { id, name, graph } = {}) => canvases.save(id, { name, graph }));
 ipcMain.handle('canvas:delete', (_e, { id } = {}) => canvases.remove(id));
+// v0.12.0:画布已存 ComfyUI API 格式,渲染端 Drawflow 需要 drawflow 形 → 主进程转
+ipcMain.handle('canvas:toDrawflow', (_e, { graph } = {}) => canvasGraph.toDrawflow(graph));
+ipcMain.handle('canvas:validate', (_e, { graph } = {}) => canvasGraph.validate(graph));
 ipcMain.handle('canvas:saveUpload', (_e, { id, name, data } = {}) => {
   try { return { ok: true, ...canvases.saveUpload(id, { name, data }) }; }
   catch (e) { return { ok: false, error: e.message }; }
@@ -747,6 +752,41 @@ ipcMain.handle('canvas:saveUpload', (_e, { id, name, data } = {}) => {
 
 // 素材库:媒体会话产物 + 画布节点产物聚合(时间倒序)
 ipcMain.handle('assets:list', () => canvases.listAssets());
+
+// ---------------------------------------------------------------------------
+// IPC: 画布整图运行(v0.12.0,对齐 ComfyUI PromptQueue/jobs 语义)
+// ---------------------------------------------------------------------------
+// traceId → { jobId, nodeId }:job 取消时按 traceId 停掉在跑的远程任务
+const traceJobIndex = new Map();
+ipcMain.handle('canvas:run', (_e, { canvasId } = {}) => {
+  return canvasJobs.startJob(canvasId, {
+    canvasLoad: (id) => canvases.load(id),
+    patchNode: (cid, nid, fn) => canvases.patchNode(cid, nid, fn),
+    keysById: (kid) => keys.byId(kid),
+    modelTypeOf: (kid, mdl) => keys.modelType(kid, mdl),
+    createTask: (keyEntry, board, opts) => aigc.createTask(keyEntry, board, opts),
+    pollTask: (keyEntry, traceId, onStatus) => aigc.pollTask(keyEntry, traceId, onStatus),
+    downloadResults: (keyEntry, traceId) => aigc.downloadResults(keyEntry, traceId, path.join(AIGC_DIR(), traceId)),
+    llmComplete: (keyEntry, opts) => llmtext.complete(keyEntry, opts),
+    registerTrace: (traceId, jobId, nodeId) => traceJobIndex.set(traceId, { jobId, nodeId }),
+    emit: (payload) => {
+      const win = getWindow();
+      if (win && !win.isDestroyed()) win.webContents.send('canvas:job-status', payload);
+    },
+  });
+});
+ipcMain.handle('canvas:job:list', (_e, { canvasId } = {}) => canvasJobs.listJobs(canvasId));
+ipcMain.handle('canvas:job:cancel', (_e, { jobId } = {}) => {
+  // 先停 job 循环,再停它在跑的远程任务
+  const ok = canvasJobs.cancelJob(jobId);
+  for (const [traceId, ref] of traceJobIndex) {
+    if (ref.jobId === jobId) {
+      const h = aigcTasks.get(traceId);
+      if (h) h.cancel();
+    }
+  }
+  return ok;
+});
 
 // LLM 文本补全(v0.10.1,画布「文本生成」节点,md 1.1):/v1/chat/completions 单次
 ipcMain.handle('llm:complete', async (_e, { keyId, model, prompt, system } = {}) => {

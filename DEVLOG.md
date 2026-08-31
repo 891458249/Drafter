@@ -415,3 +415,12 @@ Git 工作流:
 - **画布模板(md 1.2)**:工具栏「▦ 模板」菜单——当前画布存为模板(主进程 sanitize 剥离任务历史/上传文件),从模板一键新建画布;首次进入播种两个预置(文生图→图生视频 / LLM 提示词→图片生成);模板存 userData/canvases/templates/
 - **画布 fork/导入导出(md 1.2 只读分享与「复制项目」)**:导出当前画布副本为 .drafter-canvas.json(剥离任务历史,布局+模型/提示词配置随文件走);导入严格校验结构(非本应用导出拒绝)后以「(副本)」后缀新建画布
 - npm test 136/136(新增 llmtext.test.js 5 例、canvases 模板/导出用例 2 例);CDP 冒烟 17/17(llmtext 节点/模板菜单/从模板建画布 3 节点 2 连线)
+
+### v0.12.0(2026-08-31):画布执行内核 ComfyUI 化——API 格式 + 整图运行队列 + 增量缓存
+- **画布持久化格式换 ComfyUI API 格式**(通读 Comfy-Org/ComfyUI master 源码后对齐):{nodeId:{class_type,inputs:{...}}} 平铺对象,与 ComfyUI 工作流 JSON 天然互通;存量画布 migrations 0.12.0 一次性转换(原文件留 .bak,真实数据已验证);渲染端加载时主进程 toDrawflow 重建 Drawflow 编辑器
+- **整图运行**(对齐 execution.py PromptQueue + comfy_execution/graph.py ExecutionList):工具栏「▶ 运行」——提交前校验(validate:缺 prompt/循环依赖带 A→B→A 可读路径/不支持节点类型)→ 拓扑就绪集推进,上游完成才跑下游;**单点失败不炸整图**(失败节点下游 skipped,其他分支照常);新主进程模块 canvasJobs.js(Job 五态 + outputs 归属 + 每画布 20 job 容量挤出)
+- **增量缓存**(对齐 caching.py CacheKeySetInputSignature):节点缓存键=递归祖先签名(link 输入记祖先序位而非 id——祖先等价重写不破坏缓存;tasks/results/active/view 等版本字段剔除);签名一致且有完成产物 → 整图运行时跳过远程调用直接复用产物,改上游只重跑变更子树
+- **节点状态环**(ComfyUI 标志性交互):节点边框色随 job 状态流转(黄=执行中/绿=完成/蓝=缓存命中/红=失败/紫=跳过);校验失败节点红框+行内错误提示
+- **双击画布空白搜索加节点**(litegraph 惯例:模糊匹配,Enter 选第一个)
+- 新主进程模块 canvasGraph.js(纯逻辑:fromDrawflow/toDrawflow/validate/nodeSignature/topoOrder/executionTargets);测试 163/163(canvas-graph 5 例 + canvas-jobs 5 例);CDP 冒烟 20/20(整图运行校验拦截+搜索加节点)
+- 坑:①prompt 槽是「必需槽」,空槽不落 null 占位(可选 ref 槽才占位)——否则连线类型语义被空槽吃掉;②连线判断必须区分 [id,socket] 与 models:['k|m'] 值数组(isLink);③prompt 解析沿 prompt 槽递归向上(生成节点也可作上游文本源)

@@ -87,8 +87,9 @@
         <!-- 无限画布板块(v0.10.0):节点工作流(Drawflow),多模型 fan-out / 节点生成历史 -->
         <div id="canvas-root" class="canvas-root">
           <div class="canvas-toolbar">
+            <button id="btn-cv-run" class="btn btn-sm btn-primary" title="整图运行:校验后按拓扑序执行全部生成节点;未变更节点命中缓存直接复用(ComfyUI 语义)">▶ 运行</button>
             <div class="cv-add-wrap">
-              <button id="btn-cv-add" class="btn btn-sm" title="添加节点">＋ 节点</button>
+              <button id="btn-cv-add" class="btn btn-sm" title="添加节点(或双击画布空白搜索)">＋ 节点</button>
               <div id="cv-add-menu" class="cv-add-menu hidden"></div>
             </div>
             <div class="cv-add-wrap">

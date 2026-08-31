@@ -131,6 +131,46 @@ async function step(name, fn) {
     })`);
   });
 
+  await step('v0.12.0 整图运行(校验拦截:空 prompt)', async () => {
+    // 当前画布(从模板新建,节点未填 prompt)→ 整图运行应被校验拦下并标红
+    await evalJs(`document.getElementById('btn-cv-run').click();'r'`);
+    await sleep(900);
+    return evalJs(`JSON.stringify({
+      errNodes: document.querySelectorAll('#drawflow .drawflow-node.cv-err').length,
+      errTips: document.querySelectorAll('#drawflow .cv-node-err').length,
+      runBtn: document.getElementById('btn-cv-run').textContent.trim(),
+    })`);
+  });
+  await step('v0.12.0 整图运行(填 prompt 后进入执行流)', async () => {
+    // 填第一个文本节点 → 校验通过 → 运行中(不扣费断言:只到 running/pending,不等远程完成)
+    await evalJs(`(() => {
+      const ta = document.querySelector('#drawflow .cv-txt');
+      if (ta) { ta.value = '一只猫'; ta.dispatchEvent(new Event('input', { bubbles: true })); }
+    })()`);
+    await sleep(200);
+    await evalJs(`document.getElementById('btn-cv-run').click();'r'`);
+    await sleep(1200);
+    return evalJs(`JSON.stringify({
+      runBtn: document.getElementById('btn-cv-run').textContent.trim(),
+      anyStateRing: document.querySelectorAll('#drawflow .drawflow-node[class*="cv-st-"]').length,
+    })`);
+  });
+  await step('v0.12.0 双击画布空白 → 搜索加节点', async () => {
+    await evalJs(`(() => {
+      const host = document.getElementById('drawflow');
+      host.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: 500, clientY: 400 }));
+    })()`);
+    await sleep(250);
+    const open = await evalJs(`!!document.querySelector('.cv-search')`);
+    await evalJs(`(() => { const i = document.querySelector('.cv-search input'); if (i) { i.value = '视频'; i.dispatchEvent(new Event('input', { bubbles: true })); } })()`);
+    await sleep(250);
+    const hits = await evalJs(`document.querySelectorAll('.cv-search-list button').length`);
+    await evalJs(`(() => { const i = document.querySelector('.cv-search input'); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    await sleep(400);
+    const nodes = await evalJs(`document.querySelectorAll('#drawflow .drawflow-node').length`);
+    return JSON.stringify({ opened: open, hits, nodesAfter: nodes });
+  });
+
   await step('切到素材板块', async () => {
     await evalJs(`document.querySelector('#section-switch button[data-sec="assets"]').click();'clicked'`);
     await sleep(1500);
