@@ -416,7 +416,15 @@ Git 工作流:
 - **画布 fork/导入导出(md 1.2 只读分享与「复制项目」)**:导出当前画布副本为 .drafter-canvas.json(剥离任务历史,布局+模型/提示词配置随文件走);导入严格校验结构(非本应用导出拒绝)后以「(副本)」后缀新建画布
 - npm test 136/136(新增 llmtext.test.js 5 例、canvases 模板/导出用例 2 例);CDP 冒烟 17/17(llmtext 节点/模板菜单/从模板建画布 3 节点 2 连线)
 
-### v0.12.0(2026-08-31):画布执行内核 ComfyUI 化——API 格式 + 整图运行队列 + 增量缓存
+
+### v0.12.2(2026-09-01):画布双后端——接入外部 ComfyUI 服务
+- **ComfyUI 连接管理**:画布工具栏新增「⚙ ComfyUI」，可配置本机/LAN/云端/反向代理地址与 Bearer、API Key 或自定义头认证；连接条目脱敏，远程 HTTP 与不受信任 TLS 必须显式确认。
+- **节点目录与工作流互通**:读取 `/object_info` 并安全清洗后驱动外部节点选择/基础 widget 编辑；支持 ComfyUI prompt/workflow JSON 导入导出，原始 `class_type`、连接与布局保留。
+- **远程运行闭环**:纯 ComfyUI 画布通过 `/prompt` 提交，WebSocket 和 `/history` 回传队列进度；`/view` 产物安全落入本地素材目录，复用既有画廊与素材库。跨后端或跨连接混合图会明确拒绝，避免错误传递张量。
+- **可靠性**:修复 API 格式画布重开时 Drawflow 节点空壳；恢复会话遇到损坏 JSONL 或 provider `message.uuid` 恢复错误时，清理 SDK 锚点并保留本地历史。
+- 验证:npm test 179/179；隔离 Electron/CDP 冒烟 6/6；`electron-builder --dir` 与 asar 包含检查通过。真实 ComfyUI 服务的模型提交待用户配置可用服务后验证。
+
+
 - **画布持久化格式换 ComfyUI API 格式**(通读 Comfy-Org/ComfyUI master 源码后对齐):{nodeId:{class_type,inputs:{...}}} 平铺对象,与 ComfyUI 工作流 JSON 天然互通;存量画布 migrations 0.12.0 一次性转换(原文件留 .bak,真实数据已验证);渲染端加载时主进程 toDrawflow 重建 Drawflow 编辑器
 - **整图运行**(对齐 execution.py PromptQueue + comfy_execution/graph.py ExecutionList):工具栏「▶ 运行」——提交前校验(validate:缺 prompt/循环依赖带 A→B→A 可读路径/不支持节点类型)→ 拓扑就绪集推进,上游完成才跑下游;**单点失败不炸整图**(失败节点下游 skipped,其他分支照常);新主进程模块 canvasJobs.js(Job 五态 + outputs 归属 + 每画布 20 job 容量挤出)
 - **增量缓存**(对齐 caching.py CacheKeySetInputSignature):节点缓存键=递归祖先签名(link 输入记祖先序位而非 id——祖先等价重写不破坏缓存;tasks/results/active/view 等版本字段剔除);签名一致且有完成产物 → 整图运行时跳过远程调用直接复用产物,改上游只重跑变更子树
