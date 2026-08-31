@@ -52,11 +52,14 @@ function buildIndex(root) {
 
 // pnpm 第三方包索引:包名 → 入口文件绝对路径(从 vendor-deps/<name>/ 解析,
 // vendor-deps 是打包前从 .pnpm 复制出来的非隐藏目录,避免 electron-builder 排除 dotdir)。
+// dirs 索引(包名 → 包目录)与入口索引并列:像 @babel/runtime 这种无根入口、
+// 纯子路径导出的包,入口索引收不到,但子路径解析要以包目录为基(v0.11.13)。
 function buildPnpmIndex(root) {
   if (pnpmIndex) return pnpmIndex
   const map = new Map()
+  const dirs = new Map()
   const depsDir = path.join(root, 'vendor-deps')
-  if (!existsSync(depsDir)) { pnpmIndex = map; return map }
+  if (!existsSync(depsDir)) { pnpmIndex = { map, dirs }; return pnpmIndex }
   const scan = (dir) => {
     let entries
     try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
@@ -65,29 +68,30 @@ function buildPnpmIndex(root) {
       const p = path.join(dir, e.name)
       if (e.name.startsWith('@')) {
         // 作用域包:再下一层
-        scanScope(map, p, e.name)
+        scanScope(map, dirs, p, e.name)
       } else {
-        registerPnpmPackage(map, e.name, p)
+        registerPnpmPackage(map, dirs, e.name, p)
       }
     }
   }
   scan(depsDir)
-  pnpmIndex = map
-  return map
+  pnpmIndex = { map, dirs }
+  return pnpmIndex
 }
 
-function scanScope(map, scopeDir, scopeName) {
+function scanScope(map, dirs, scopeDir, scopeName) {
   let entries
   try { entries = readdirSync(scopeDir, { withFileTypes: true }) } catch { return }
   for (const e of entries) {
     if (!e.isDirectory()) continue
-    registerPnpmPackage(map, scopeName + '/' + e.name, path.join(scopeDir, e.name))
+    registerPnpmPackage(map, dirs, scopeName + '/' + e.name, path.join(scopeDir, e.name))
   }
 }
 
-function registerPnpmPackage(map, name, pkgPath) {
+function registerPnpmPackage(map, dirs, name, pkgPath) {
   const pj = path.join(pkgPath, 'package.json')
   if (!existsSync(pj)) return
+  dirs.set(name, pkgPath)
   try {
     const m = JSON.parse(readFileSync(pj, 'utf8'))
     let entry = null
@@ -164,12 +168,13 @@ export async function resolve(specifier, context, nextResolve) {
   } else {
     // 第三方包:vendor-deps 索引优先(它才是权威;nextResolve 在打包态可能误中
     // Drafter 自己的 node_modules 或 harness 的 .pnpm 残留)。
-    const pindex = buildPnpmIndex(root)
+    const { map: pindex, dirs: pdirs } = buildPnpmIndex(root)
     const hit = pindex.get(pkgName)
-    if (hit) {
+    const pkgDirFromDirs = pdirs.get(pkgName)
+    if (hit || (subPath && pkgDirFromDirs)) {
       if (subPath) {
         // 先读 package.json exports 的子路径映射(支持 './api/*' 通配符)
-        const pkgDir = path.dirname(path.dirname(hit))
+        const pkgDir = hit ? path.dirname(path.dirname(hit)) : pkgDirFromDirs
         const pjPath = path.join(pkgDir, 'package.json')
         if (existsSync(pjPath)) {
           try {
@@ -205,6 +210,7 @@ export async function resolve(specifier, context, nextResolve) {
         for (const cand of [subFile, subFile + '.js', subFile + '/index.js', subFile + '.mjs', subFile + '.cjs']) {
           if (existsSync(cand)) return { url: pathToFileURL(cand).href, shortCircuit: true }
         }
+        return nextResolve(specifier, context)
       }
       return { url: pathToFileURL(hit).href, shortCircuit: true }
     }

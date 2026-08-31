@@ -22,7 +22,11 @@ const store = require('../store')
 /** 判定一个 Drafter Key 的 wire 协议(给 harness 的 api 字段)。 */
 function apiOf(key) {
   const url = (key.baseUrl || '').toLowerCase()
-  // Kuro 网关与 Anthropic 官方/兼容端点都说 Anthropic Messages 协议
+  // apiKey/authToken 表示 Anthropic Messages 兼容鉴权;不过 Kimi Coding 的
+  // baseURL 已经是 /coding/v1,而 Anthropic SDK 会固定追加 /v1/messages,
+  // 得到错误的 /coding/v1/v1/messages(404)。Kimi Coding 是 OpenAI
+  // chat-completions 兼容端点,应走 pi-ai 的 openai-completions 路由。
+  if (/api\.kimi\.com\/coding\/v1\/?$/.test(url)) return 'openai-completions'
   if (key.kind === 'apiKey' || /anthropic|kuro/.test(url) || key.kind === 'authToken') return 'anthropic-messages'
   return 'openai-completions'
 }

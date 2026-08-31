@@ -10,9 +10,18 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-keys-test-'));
 installElectronStub(tmp);
 const store = require('../src/main/store');
 const keys = require('../src/main/keys');
+const keysBridge = require('../src/main/harness/keys-bridge');
 
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
+test('Kimi Coding 路由到 OpenAI completions,避免 Anthropic SDK 追加第二个 /v1', () => {
+  const kimi = { id: 'kimi', name: 'Kimi', kind: 'authToken', baseUrl: 'https://api.kimi.com/coding/v1', models: ['kimi-for-coding'] };
+  const provider = keysBridge.keyToProvider(kimi);
+  assert.strictEqual(provider.api, 'openai-completions');
+  assert.strictEqual(provider.baseURL, 'https://api.kimi.com/coding/v1');
+  assert.strictEqual(keysBridge.apiOf({ ...kimi, baseUrl: 'https://api.kimi.com/coding/v1/' }), 'openai-completions');
+  assert.strictEqual(keysBridge.apiOf({ ...kimi, baseUrl: 'https://ai-gateway.kurogames.com' }), 'anthropic-messages');
+});
 test('旧单 apiKey 自动迁移为多 key 列表并设为默认', () => {
   store.setSetting('apiKey', 'sk-ant-legacy1234');
   const list = keys.list();

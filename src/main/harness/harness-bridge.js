@@ -185,6 +185,9 @@ async function bootHarness() {
     const pathCjs = require('node:path')
     // 建一个轻量的 CJS 解析索引(@deepseek-ai/* + vendor-deps/* 全部第三方包)
     const cjsIndex = new Map()
+    // 包名 → 包目录:子路径 require 的解析基。独立于入口索引——无根入口的包
+    // (如 @babel/runtime,纯 ./helpers/* 子路径导出)入口索引收不到(v0.11.13)。
+    const cjsDirIndex = new Map()
     function buildCjsIndex() {
       if (cjsIndex.size) return cjsIndex
       // vendor-deps 里是所有第三方包(@scope/name 或 name),它们以真实目录存在
@@ -240,6 +243,7 @@ async function bootHarness() {
     function registerCjsPackage(name, pkgDir) {
       const pj = pathCjs.join(pkgDir, 'package.json')
       if (!fsCjs.existsSync(pj)) return
+      cjsDirIndex.set(name, pkgDir)
       try {
         const m = JSON.parse(fsCjs.readFileSync(pj, 'utf8'))
         // 优先 main(CJS 入口),再 exports.require,再 index.js
@@ -281,9 +285,9 @@ async function bootHarness() {
         subPath = parts.slice(1).join('/')
       }
       const base = cjsIndex.get(pkgName)
-      if (base && subPath) {
-        const pkgDir = pathCjs.dirname(pathCjs.dirname(base)) // lib/index.cjs → 包根
-        const subFile = pathCjs.join(pkgDir, subPath)
+      const pkgDirBase = base ? pathCjs.dirname(pathCjs.dirname(base)) : cjsDirIndex.get(pkgName) // lib/index.cjs → 包根
+      if (pkgDirBase && subPath) {
+        const subFile = pathCjs.join(pkgDirBase, subPath)
         for (const cand of [subFile, subFile + '.js', subFile + '.cjs', subFile + '.node', subFile + '/index.js']) {
           if (fsCjs.existsSync(cand)) return cand
         }
