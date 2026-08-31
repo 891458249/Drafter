@@ -97,6 +97,10 @@
               <div id="cv-tpl-menu" class="cv-add-menu cv-tpl-menu hidden"></div>
             </div>
             <button id="btn-cv-import" class="btn btn-sm" title="导入别人分享的画布 JSON(fork)">⇪ 导入</button>
+            <button id="btn-cv-comfy-import" class="btn btn-sm" title="导入 ComfyUI workflow 或 prompt JSON">⇪ Comfy</button>
+            <button id="btn-cv-comfy" class="btn btn-sm" title="配置并管理 ComfyUI 服务连接">⚙ ComfyUI</button>
+            <button id="btn-cv-queue" class="btn btn-sm" title="查看本地与 ComfyUI 队列历史">☷ 队列</button>
+            <div id="cv-queue-panel" class="cv-queue-panel hidden"></div>
             <span id="canvas-save-hint" class="canvas-save-hint" title="画布自动保存"></span>
             <span class="grow"></span>
             <button id="btn-cv-zoom-out" class="icon-btn" title="缩小">－</button>
@@ -311,6 +315,22 @@
         <button id="apikey-cancel" class="btn">关闭</button>
         <button id="apikey-save" class="btn btn-primary">保存</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ComfyUI connections -->
+  <div id="comfy-modal" class="modal-mask hidden">
+    <div class="modal modal-wide">
+      <h2>ComfyUI 连接</h2>
+      <p class="modal-hint">连接本机、局域网、云端或反向代理的 ComfyUI。令牌仅保存在本机，导出工作流不会包含它。</p>
+      <div id="comfy-list" class="mcp-list"></div>
+      <h3 id="comfy-form-title">添加 ComfyUI 连接</h3>
+      <div class="form-row"><input id="comfy-name" class="input-sm" placeholder="名称(如 本地 ComfyUI)" /><input id="comfy-url" class="input-sm grow" placeholder="http://127.0.0.1:8188" /></div>
+      <div class="form-row"><select id="comfy-auth" class="input-sm"><option value="none">无需认证</option><option value="bearer">Bearer Token</option><option value="apiKey">API Key (X-API-Key)</option><option value="header">自定义请求头</option></select><input id="comfy-header" class="input-sm" placeholder="自定义头名称" /><input id="comfy-secret" class="input-sm grow" type="password" placeholder="令牌/密钥(编辑时留空保持不变)" autocomplete="off" /></div>
+      <label class="settings-row"><input id="comfy-http-confirm" type="checkbox" /> 我理解远程 HTTP 未加密，仅在可信网络使用</label>
+      <label class="settings-row"><input id="comfy-tls-confirm" type="checkbox" /> 我理解允许不受信任 TLS 证书存在安全风险</label>
+      <div id="comfy-status" class="modal-status"></div>
+      <div class="modal-actions"><button id="comfy-close" class="btn">关闭</button><button id="comfy-save" class="btn btn-primary">保存连接</button></div>
     </div>
   </div>
 

@@ -7,3 +7,7 @@ Thumbs.db
 vendor/**/node_modules/
 vendor/deepseek-harness/apps/web/dist/
 vendor/deepseek-harness/**/*.tsbuildinfo
+# Local Claude worktrees and isolated Electron/CDP smoke artifacts
+.claude/worktrees/
+.claude-ui/smoke-*-userdata/
+.claude-ui/smoke-*.png

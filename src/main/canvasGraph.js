@@ -71,9 +71,24 @@ function fromDrawflow(exportJson) {
       if (k in inputs) continue; // 槽位(连线/null)权威,标量不覆盖
       inputs[k] = v;
     }
+    const rawClass = d.comfyClassType || (type in NODE_TYPES ? classOf(type) : classOf('unknown'));
+    const comfyInputs = d.comfyClassType && d.comfyInputs && typeof d.comfyInputs === 'object' ? d.comfyInputs : null;
+    if (comfyInputs) {
+      for (const [key, value] of Object.entries(comfyInputs)) {
+        inputs[key] = value;
+        if (Array.isArray(value) && value.length === 2 && (typeof value[0] === 'string' || typeof value[0] === 'number') && Number.isInteger(value[1])) inputs[key] = [String(value[0]), value[1]];
+      }
+      for (const [slotName, slot] of Object.entries(node.inputs || {})) {
+        const slotIdx = Number(String(slotName).replace('input_', '')) || 1;
+        const inputName = (d.slotNames && d.slotNames[slotIdx - 1]) || slotName;
+        const conn = slot && slot.connections && slot.connections[0];
+        if (conn) inputs[inputName] = [String(conn.node), Math.max(0, (Number(String(conn.input).replace('output_', '')) || 1) - 1)];
+      }
+      if (d.comfyConnectionId) inputs._comfyConnectionId = d.comfyConnectionId;
+    }
     out[String(id)] = {
       id: String(id),
-      class_type: classOf(type in NODE_TYPES ? type : 'unknown'),
+      class_type: rawClass,
       title: d.title || (NODE_TYPES[type] ? undefined : String(node.class || node.name || '未知节点')),
       pos: [Math.round(node.pos_x || 0), Math.round(node.pos_y || 0)],
       inputs,
@@ -90,18 +105,31 @@ function toDrawflow(apiGraph) {
   const data = {};
   let maxId = 0;
   for (const [id, node] of Object.entries(apiGraph || {})) {
-    const type = typeOfClass(node.class_type) || 'unknown';
-    const t = NODE_TYPES[type];
+    const nativeType = typeOfClass(node.class_type);
+    const type = nativeType || 'external';
+    const t = NODE_TYPES[nativeType] || NODE_TYPES.unknown;
+    const external = nativeType === null;
+    const inputNames = external ? Object.keys(node.inputs || {}).filter((key) => !key.startsWith('_') && !['tasks', 'results', 'active', 'view', '_v', 'file'].includes(key)) : null;
     const numericId = Number(id);
     if (!Number.isNaN(numericId)) maxId = Math.max(maxId, numericId);
     const inputs = {};
-    for (let i = 1; i <= t.inputs; i++) {
-      const inputName = INPUT_NAME[i] || 'input_' + i;
+    const slotCount = external ? inputNames.length : t.inputs;
+    for (let i = 1; i <= slotCount; i++) {
+      const inputName = external ? inputNames[i - 1] : (INPUT_NAME[i] || 'input_' + i);
       const v = node.inputs && node.inputs[inputName];
       if (isLink(v)) inputs['input_' + i] = { connections: [{ node: String(v[0]), input: 'output_' + ((v[1] || 0) + 1) }] };
     }
-    const nodeDataObj = { type };
-    for (const [k, v] of Object.entries(node.inputs || {})) {
+    const nodeDataObj = external
+      ? {
+          type: 'external', comfyClassType: node.class_type,
+          comfyConnectionId: node.inputs && node.inputs._comfyConnectionId || '',
+          comfyDisplayName: node.title || node.class_type,
+          comfyInputs: Object.fromEntries(Object.entries(node.inputs || {}).filter(([key, value]) => !isLink(value) && !key.startsWith('_') && !['tasks', 'results', 'active', 'view', '_v', 'file'].includes(key))),
+          slotNames: inputNames,
+          tasks: node.inputs && node.inputs.tasks || [], active: node.inputs && node.inputs.active || -1, view: node.inputs && node.inputs.view || 0,
+        }
+      : { type };
+    if (!external) for (const [k, v] of Object.entries(node.inputs || {})) {
       if (isLink(v)) continue; // 连线不落 data
       if (v === null && (k === 'prompt' || k === 'ref')) continue; // 空槽占位不落 data
       nodeDataObj[k] = v; // prompt/ref 的标量值(未连线的自有 prompt)也要带上
@@ -126,7 +154,7 @@ function toDrawflow(apiGraph) {
       for (const conn of slot.connections) {
         const src = data[conn.node];
         if (!src) continue;
-        const outSlot = 'output_1';
+        const outSlot = conn.input || 'output_1';
         if (!src.outputs[outSlot]) src.outputs[outSlot] = { connections: [] };
         src.outputs[outSlot].connections.push({ node: String(id), output: slotName });
       }
@@ -148,8 +176,8 @@ function validate(graph) {
   for (const [id, node] of Object.entries(nodes)) {
     const type = typeOfClass(node.class_type);
     if (type === null) {
-      // ComfyUI 工作流导入的未知类型(class_type 无 drafter/ 前缀):标记不支持,整图运行拒绝
-      addErr(id, 'unsupported_node', `不支持的节点类型:${node.class_type}`);
+      // 外部 ComfyUI 节点由连接戳识别;服务端 /prompt 会做最终 schema 校验。
+      if (!(node.inputs && node.inputs._comfyConnectionId)) addErr(id, 'unsupported_node', `不支持的节点类型:${node.class_type}`);
       continue;
     }
     const t = NODE_TYPES[type];
@@ -186,7 +214,10 @@ function validate(graph) {
   };
   for (const id of Object.keys(nodes)) if (!state[id]) dfs(id);
   // 3) 至少要有一个输出节点(整图运行的终点集合)
-  const hasOut = Object.values(nodes).some((n) => { const t = NODE_TYPES[typeOfClass(n.class_type)]; return t && t.outNode && !t.unsupported; });
+  const hasOut = Object.values(nodes).some((n) => {
+    const t = NODE_TYPES[typeOfClass(n.class_type)];
+    return (t && t.outNode && !t.unsupported) || (typeOfClass(n.class_type) === null && n.inputs && n.inputs._comfyConnectionId);
+  });
   if (Object.keys(nodes).length && !hasOut) addErr('_global', 'prompt_no_outputs', '画布里没有可运行的生成节点');
   return { ok: !Object.keys(nodeErrors).length, nodeErrors };
 }

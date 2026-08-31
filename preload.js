@@ -57,6 +57,20 @@ contextBridge.exposeInMainWorld('api', {
   keysSetEnabled: (id, enabled) => ipcRenderer.invoke('keys:setEnabled', { id, enabled }),
   keysEnabledModels: () => ipcRenderer.invoke('keys:enabledModels'),
 
+  // ComfyUI 连接(凭据始终留在主进程;列表为脱敏数据)
+  comfyListConnections: () => ipcRenderer.invoke('comfy:listConnections'),
+  comfySaveConnection: (entry) => ipcRenderer.invoke('comfy:saveConnection', entry),
+  comfyDeleteConnection: (id) => ipcRenderer.invoke('comfy:deleteConnection', id),
+  comfyTestConnection: (id) => ipcRenderer.invoke('comfy:testConnection', id),
+  comfyCatalog: (id, opts) => ipcRenderer.invoke('comfy:catalog', id, opts),
+  comfyImportGraph: (graph, schema) => ipcRenderer.invoke('comfy:importGraph', graph, schema),
+  comfyExportPrompt: (graph) => ipcRenderer.invoke('comfy:exportPrompt', graph),
+  comfyExportWorkflow: (payload) => ipcRenderer.invoke('comfy:exportWorkflow', payload),
+  comfySubmit: (payload) => ipcRenderer.invoke('comfy:submit', payload),
+  comfyJobs: (canvasId) => ipcRenderer.invoke('comfy:jobs', { canvasId }),
+  comfyCancel: (jobId) => ipcRenderer.invoke('comfy:cancel', jobId),
+  comfyImportFile: (connectionId) => ipcRenderer.invoke('comfy:importFile', { connectionId }),
+
   // 辅助模型配置(Code/Chat 分析媒体附件,v0.9.1)
   auxModelsGet: () => ipcRenderer.invoke('settings:getAuxModels'),
   auxModelsSet: (m) => ipcRenderer.invoke('settings:setAuxModels', m),

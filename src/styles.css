@@ -1088,6 +1088,21 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
   color: var(--text); font-size: 12.5px; padding: 6px 10px; border-radius: 6px; cursor: pointer; text-align: left;
 }
 .cv-add-menu button:hover { background: var(--bg-hover); }
+.cv-queue-panel {
+  position: absolute; top: 48px; right: 10px; z-index: 65; width: min(440px, calc(100vw - 32px));
+  max-height: min(55vh, 460px); overflow: auto; background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 9px; box-shadow: 0 10px 28px rgba(0,0,0,.45); padding: 8px;
+}
+.cv-queue-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 12px; color: var(--text-dim); }
+.cv-queue-item { display: grid; grid-template-columns: 1fr auto; gap: 5px 8px; padding: 7px; border-top: 1px solid var(--border); font-size: 12px; }
+.cv-queue-item:first-of-type { border-top: 0; }
+.cv-queue-meta { color: var(--text-dim); font-size: 11px; }
+.cv-queue-status { font-weight: 600; }
+.cv-queue-status.running, .cv-queue-status.queued { color: #e0b84d; }
+.cv-queue-status.completed { color: var(--green); }
+.cv-queue-status.failed, .cv-queue-status.completed_with_errors { color: var(--red); }
+.cv-queue-status.cancelled { color: var(--text-dim); }
+.cv-queue-empty { padding: 14px; text-align: center; color: var(--text-dim); font-size: 12px; }
 
 /* ---------------- Drawflow 主题化(深色) ---------------- */
 #drawflow { background: var(--bg); }

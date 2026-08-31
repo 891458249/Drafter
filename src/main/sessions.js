@@ -71,6 +71,28 @@ function encodeCwdForProjects(cwd) {
   for (let i = 0; i < t.length; i++) h = ((h << 5) - h + t.charCodeAt(i)) | 0;
   return `${t.slice(0, 200)}-${Math.abs(h).toString(36)}`;
 }
+function transcriptPath(sessionId, cwd) {
+  if (!sessionId || !cwd) return null;
+  return path.join(CLAUDE_PROJECTS_DIR, encodeCwdForProjects(cwd), sessionId + '.jsonl');
+}
+
+// Resume records are JSONL. A process interrupted during its final write can
+// leave a file that exists but cannot be resumed; checking only existsSync
+// would retry that broken SDK context forever.
+function isTranscriptResumable(sessionId, cwd) {
+  const rec = transcriptPath(sessionId, cwd);
+  if (!rec) return false;
+  try {
+    const lines = fs.readFileSync(rec, 'utf8').split(/\r?\n/);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].trim()) continue;
+      JSON.parse(lines[i]);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
 // 把旧 cwd 目录下的会话记录复制到新 cwd 目录(已存在则跳过,留底不移动)。
 // 旧目录找不到时兜底扫描所有记录目录(如连续两次 adopt,记录还停在更早的 cwd)。
 // 返回 true 表示记录已就位(或本来就在),resume 可以命中旧上下文。
@@ -181,6 +203,16 @@ class Session {
     this.slashCommands = [];
     this.lastUsage = null;
     this.cumCostUsd = 0;
+    this._resumeQuery = null; // query started with SDK resume; used for targeted recovery
+  }
+
+  _resetBrokenResume(message) {
+    if (!this.meta.sdkSessionId) return;
+    this.meta.sdkSessionId = null;
+    this.meta.resumeLostAt = Date.now();
+    store.upsertSession({ id: this.id, sdkSessionId: null, resumeLostAt: this.meta.resumeLostAt });
+    // Persist independently from the provider transcript: visible history remains replayable.
+    this._emit({ type: 'ui_error', message }, true);
   }
 
   async start({ resume = false, fork = false, forkAt = null } = {}) {
@@ -241,13 +273,10 @@ class Session {
         this.meta.prevCwd = null;
         store.upsertSession({ id: this.id, prevCwd: null });
       }
-      // 迁移后新目录仍无记录 → resume 必失败("No conversation found"),
-      // 清掉 sdkSessionId 走全新会话,避免每次 send 都失败把会话卡死
-      const rec = path.join(CLAUDE_PROJECTS_DIR, encodeCwdForProjects(this.meta.cwd), this.meta.sdkSessionId + '.jsonl');
-      if (!fs.existsSync(rec)) {
-        this.meta.sdkSessionId = null;
-        store.upsertSession({ id: this.id, sdkSessionId: null });
-        this._emit({ type: 'ui_error', message: '旧会话记录缺失,已切换为新会话(上文仅保留界面可见部分)' });
+      // 迁移后记录缺失或末行损坏 → resume 必失败。清掉 SDK 锚点走全新
+      // 会话，避免每次 send 都重试同一个坏上下文把会话卡死。
+      if (!isTranscriptResumable(this.meta.sdkSessionId, this.meta.cwd)) {
+        this._resetBrokenResume('旧会话记录缺失或损坏,已切换为新会话(上文仅保留界面可见部分)');
       } else {
         options.resume = this.meta.sdkSessionId;
         if (fork) options.forkSession = true;
@@ -320,6 +349,7 @@ class Session {
     }
     try {
       this.q = sdk.query({ prompt: this.queue, options });
+      this._resumeQuery = options.resume ? this.q : null;
     } catch (e) {
       this.starting = false;
       this._emit({ type: 'ui_error', message: 'query() 启动失败:' + e.message });
@@ -337,11 +367,20 @@ class Session {
         this._handleMessage(msg);
       }
     } catch (e) {
-      this._emit({ type: 'ui_error', message: '会话异常终止:' + (e && e.message || e) });
+      const text = String(e && e.message || e);
+      // Claude Code can reject a transcript that is syntactically valid but has
+      // a dangling message UUID after an interrupted turn. Recover only a query
+      // that was actually launched with --resume; provider errors stay visible.
+      if (this.q === q && this._resumeQuery === q && /no message found with message\.uuid|no conversation found|cannot resume/i.test(text)) {
+        this._resetBrokenResume('旧会话记录无法恢复,已切换为新会话(上文仅保留界面可见部分)');
+      } else {
+        this._emit({ type: 'ui_error', message: '会话异常终止:' + text });
+      }
     } finally {
       if (this.q === q) {
         this.running = false;
         this.busy = false;
+        if (this._resumeQuery === q) this._resumeQuery = null;
         this._emit({ type: 'ui_status', running: false, busy: false });
       }
       // fail any pending permission prompts(无论是否同一 query,旧权限卡都要了结)
@@ -895,4 +934,4 @@ function safeJson(obj) {
   try { return JSON.parse(JSON.stringify(obj)); } catch { return String(obj); }
 }
 
-module.exports = { SessionManager, Session, resolveClaudeExe, encodeCwdForProjects, migrateTranscript, fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT };
+module.exports = { SessionManager, Session, resolveClaudeExe, encodeCwdForProjects, transcriptPath, isTranscriptResumable, migrateTranscript, fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT };

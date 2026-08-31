@@ -49,6 +49,11 @@ const canvases = require('./src/main/canvases');
 const canvasJobs = require('./src/main/canvasJobs');
 const canvasGraph = require('./src/main/canvasGraph');
 const llmtext = require('./src/main/llmtext');
+const comfyConnections = require('./src/main/comfy/connection-store');
+const comfyClient = require('./src/main/comfy/client');
+const comfySchema = require('./src/main/comfy/schema');
+const comfyFormat = require('./src/main/comfy/format');
+const { ComfyJobs } = require('./src/main/comfy/jobs');
 const aux = require('./src/main/aux-models');
 const title = require('./src/main/title');
 const gems = require('./src/main/gems');
@@ -72,6 +77,32 @@ let mainWindow = null;
 let tray = null;
 let trayHintShown = false; // 首次最小化到托盘时提示一次
 const getWindow = () => mainWindow;
+const comfyJobs = new ComfyJobs({
+  client: comfyClient,
+  connections: comfyConnections,
+  outputDir: AIGC_DIR(),
+  emit: (payload) => {
+    // ComfyUI 的最终输出按 nodeId 回写到画布，复用既有任务画廊/素材库数据形状。
+    if (payload.canvasId && Array.isArray(payload.files) && payload.files.length) {
+      const byNode = new Map();
+      for (const file of payload.files) {
+        const list = byNode.get(String(file.nodeId)) || [];
+        list.push(file); byNode.set(String(file.nodeId), list);
+      }
+      for (const [nodeId, files] of byNode) {
+        try {
+          canvases.patchNode(payload.canvasId, nodeId, (inputs) => {
+            const tasks = Array.isArray(inputs.tasks) ? inputs.tasks : [];
+            tasks.push({ traceId: payload.promptId || payload.jobId, model: 'ComfyUI', status: 'done', files, ts: Date.now() });
+            return { ...inputs, tasks, active: tasks.length - 1, view: tasks.length - 1 };
+          });
+        } catch {}
+      }
+    }
+    const win = getWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('canvas:job-status', payload);
+  },
+});
 
 // 退出前清理(幂等):停会话/终端/调度
 let cleanedUp = false;
@@ -389,6 +420,89 @@ ipcMain.handle('keys:activeModels', () => keys.activeModels());
 ipcMain.handle('keys:setModelsEnabled', (_e, { id, enabled }) => keys.setModelsEnabled(id, enabled));
 ipcMain.handle('keys:queryBalance', (_e, id) => keys.queryBalance(id)); // v0.8.1 自动余额查询
 ipcMain.handle('keys:setEnabled', (_e, { id, enabled }) => keys.setEnabled(id, enabled)); // v0.8.2 多选激活
+
+// ComfyUI connections:网络与凭据均留在主进程;渲染端只得到脱敏条目/目录。
+const comfyCatalogs = new Map(); // connectionId -> normalized renderer-safe catalog;仅内存缓存,避免把大型 object_info 写进 settings
+async function getComfyCatalog(id, refresh = false) {
+  if (!refresh && comfyCatalogs.has(id)) return comfyCatalogs.get(id);
+  const connection = comfyConnections.byId(id);
+  if (!connection) throw new Error('ComfyUI 连接不存在');
+  if (connection.enabled === false) throw new Error('ComfyUI 连接已停用');
+  const catalog = comfySchema.normalizeCatalog(await comfyClient.objectInfo(connection));
+  comfyCatalogs.set(id, catalog);
+  return catalog;
+}
+ipcMain.handle('comfy:listConnections', () => comfyConnections.list());
+ipcMain.handle('comfy:saveConnection', (_e, entry) => {
+  const result = comfyConnections.save(entry);
+  if (result && result.ok && result.connection) comfyCatalogs.delete(result.connection.id);
+  return result;
+});
+ipcMain.handle('comfy:deleteConnection', (_e, id) => {
+  comfyCatalogs.delete(id);
+  return comfyConnections.remove(id);
+});
+ipcMain.handle('comfy:testConnection', async (_e, id) => {
+  const connection = comfyConnections.byId(id);
+  if (!connection) return { ok: false, error: 'ComfyUI 连接不存在' };
+  try {
+    const health = await comfyClient.health(connection);
+    comfyConnections.saveHealth(id, { ok: true, version: health.version });
+    return { ok: true, version: health.version, system: health.system };
+  } catch (error) {
+    comfyConnections.saveHealth(id, { ok: false, error: error.message });
+    return { ok: false, error: error.message };
+  }
+});
+ipcMain.handle('comfy:catalog', async (_e, id, { refresh = false } = {}) => {
+  try {
+    const catalog = await getComfyCatalog(id, refresh);
+    return { ok: true, catalog, refreshed: !!refresh };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+ipcMain.handle('comfy:importGraph', (_e, graph, schema = {}) => {
+  try { return { ok: true, ...comfyFormat.importAny(graph, schema) }; }
+  catch (error) { return { ok: false, error: error.message }; }
+});
+ipcMain.handle('comfy:exportPrompt', (_e, graph) => ({ ok: true, prompt: comfyFormat.cleanPrompt(graph) }));
+ipcMain.handle('comfy:exportWorkflow', (_e, { graph, schema, layout } = {}) => {
+  try { return { ok: true, workflow: comfyFormat.promptToWorkflow(graph, schema, layout) }; }
+  catch (error) { return { ok: false, error: error.message }; }
+});
+ipcMain.handle('comfy:submit', async (_e, payload = {}) => {
+  try { return await comfyJobs.submit(payload); }
+  catch (error) { return { ok: false, error: error.message }; }
+});
+ipcMain.handle('comfy:jobs', (_e, { canvasId } = {}) => comfyJobs.list(canvasId));
+ipcMain.handle('comfy:cancel', (_e, jobId) => comfyJobs.cancel(jobId));
+ipcMain.handle('comfy:importFile', async (_e, { connectionId } = {}) => {
+  const win = getWindow();
+  const selected = await dialog.showOpenDialog(win, {
+    title: '导入 ComfyUI Workflow / Prompt JSON', properties: ['openFile'],
+    filters: [{ name: 'ComfyUI 工作流', extensions: ['json'] }],
+  });
+  if (selected.canceled || !selected.filePaths || !selected.filePaths.length) return { ok: false, canceled: true };
+  try {
+    const source = JSON.parse(fs.readFileSync(selected.filePaths[0], 'utf8'));
+    let schema = {};
+    const connection = connectionId && comfyConnections.byId(connectionId);
+    if (connection) schema = await comfyClient.objectInfo(connection);
+    const imported = comfyFormat.importAny(source, schema);
+    for (const [id, node] of Object.entries(imported.prompt)) {
+      const meta = imported.layout[id];
+      if (meta) { if (meta.pos) node.pos = meta.pos; if (meta.title) node.title = meta.title; }
+      if (connection) node.inputs._comfyConnectionId = connection.id;
+    }
+    const name = path.basename(selected.filePaths[0], '.json') || 'ComfyUI 工作流';
+    const canvas = canvases.create(name);
+    canvases.save(canvas.id, { graph: imported.prompt });
+    return { ok: true, canvas, format: imported.format, connectionMissing: !!connectionId && !connection };
+  } catch (error) {
+    return { ok: false, error: '导入 ComfyUI 工作流失败: ' + error.message };
+  }
+});
 ipcMain.handle('keys:enabledModels', () => keys.enabledModels()); // v0.8.2 启用 Key 的模型聚合
 
 // 辅助模型配置(v0.9.1):settings.auxModels = { image, audio, video, model },值 'keyId|modelId' 或空
@@ -758,7 +872,24 @@ ipcMain.handle('assets:list', () => canvases.listAssets());
 // ---------------------------------------------------------------------------
 // traceId → { jobId, nodeId }:job 取消时按 traceId 停掉在跑的远程任务
 const traceJobIndex = new Map();
-ipcMain.handle('canvas:run', (_e, { canvasId } = {}) => {
+ipcMain.handle('canvas:run', async (_e, { canvasId } = {}) => {
+  const canvas = canvases.load(canvasId);
+  const graph = canvas && canvas.graph;
+  const external = Object.entries(graph || {}).filter(([, node]) => node && node.inputs && node.inputs._comfyConnectionId);
+  // 一组同连接的 Comfy 节点必须作为一个 prompt 提交；混合图暂由校验明确拦住，避免错误地把张量跨后端传递。
+  if (external.length) {
+    if (external.length !== Object.keys(graph || {}).length) return { ok: false, error: '原生节点与 ComfyUI 节点不能在同一次运行中混合，请拆分为独立画布。' };
+    const connectionIds = [...new Set(external.map(([, node]) => node.inputs._comfyConnectionId))];
+    if (connectionIds.length !== 1) return { ok: false, error: '一个画布的 ComfyUI 节点必须使用同一连接。' };
+    const connectionId = connectionIds[0];
+    try {
+      const catalog = await getComfyCatalog(connectionId);
+      const classTypes = new Set(catalog.map((node) => node.classType));
+      const missing = external.find(([, node]) => !classTypes.has(node.class_type));
+      if (missing) return { ok: false, error: `连接的节点目录中不存在:${missing[1].class_type}` };
+      return comfyJobs.submit({ connectionId, canvasId, prompt: comfyFormat.cleanPrompt(graph) });
+    } catch (error) { return { ok: false, error: error.message }; }
+  }
   return canvasJobs.startJob(canvasId, {
     canvasLoad: (id) => canvases.load(id),
     patchNode: (cid, nid, fn) => canvases.patchNode(cid, nid, fn),

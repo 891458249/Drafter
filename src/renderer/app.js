@@ -762,6 +762,80 @@ for (const kind of AUX_KINDS) {
 }
 
 $('apikey-cancel').onclick = () => $('apikey-modal').classList.add('hidden');
+
+// ---------------------------------------------------------------------------
+// ComfyUI 连接:服务地址/令牌只经预加载 IPC 进入主进程，列表永远脱敏。
+// ---------------------------------------------------------------------------
+let editingComfyId = null;
+function resetComfyForm() {
+  editingComfyId = null;
+  $('comfy-form-title').textContent = '添加 ComfyUI 连接';
+  $('comfy-name').value = '';
+  $('comfy-url').value = 'http://127.0.0.1:8188';
+  $('comfy-auth').value = 'none';
+  $('comfy-header').value = '';
+  $('comfy-secret').value = '';
+  $('comfy-http-confirm').checked = false;
+  $('comfy-tls-confirm').checked = false;
+}
+function editComfy(connection) {
+  editingComfyId = connection.id;
+  $('comfy-form-title').textContent = '编辑 ComfyUI 连接';
+  $('comfy-name').value = connection.name || '';
+  $('comfy-url').value = connection.baseUrl || '';
+  $('comfy-auth').value = connection.authType || 'none';
+  $('comfy-header').value = connection.headerName || '';
+  $('comfy-secret').value = '';
+  $('comfy-http-confirm').checked = !!connection.remoteHttpConfirmed;
+  $('comfy-tls-confirm').checked = !!connection.allowInsecureTls;
+}
+async function renderComfyList() {
+  const box = $('comfy-list');
+  const list = await api.comfyListConnections();
+  if (!list.length) { box.innerHTML = '<div class="mcp-row"><span style="color:var(--text-dim)">暂无 ComfyUI 连接，可在下方添加。</span></div>'; return; }
+  box.innerHTML = list.map((connection) => `<div class="mcp-row"><span class="name">${escapeHtml(connection.name)}</span><span class="scope">${escapeHtml(connection.baseUrl)} · ${escapeHtml(connection.authType || 'none')}${connection.authConfigured ? ` ${escapeHtml(connection.secretHint)}` : ''}${connection.health ? ` · ${connection.health.ok ? '已连接' : '连接失败'}` : ''}</span><span class="ops"><button class="btn btn-sm" data-comfy="test" data-id="${connection.id}">测试</button><button class="btn btn-sm" data-comfy="catalog" data-id="${connection.id}">节点目录</button><button class="btn btn-sm" data-comfy="edit" data-id="${connection.id}">编辑</button><button class="btn btn-sm" data-comfy="delete" data-id="${connection.id}">删除</button></span></div>`).join('');
+  for (const button of box.querySelectorAll('[data-comfy]')) button.onclick = async () => {
+    const connection = list.find((item) => item.id === button.dataset.id);
+    const status = $('comfy-status');
+    if (button.dataset.comfy === 'edit') { editComfy(connection); return; }
+    if (button.dataset.comfy === 'delete') { await api.comfyDeleteConnection(connection.id); await renderComfyList(); return; }
+    button.disabled = true;
+    if (button.dataset.comfy === 'test') {
+      const result = await api.comfyTestConnection(connection.id);
+      status.className = 'modal-status ' + (result.ok ? 'ok' : 'err');
+      status.textContent = result.ok ? `连接成功${result.version ? ` · ${result.version}` : ''}` : `连接失败: ${result.error || '未知错误'}`;
+      await renderComfyList();
+    } else {
+      const result = await api.comfyCatalog(connection.id, { refresh: true });
+      status.className = 'modal-status ' + (result.ok ? 'ok' : 'err');
+      status.textContent = result.ok ? `已读取 ${result.catalog.length} 个节点，可用于 ComfyUI 工作流导入与编辑。` : `读取节点目录失败: ${result.error || '未知错误'}`;
+    }
+    button.disabled = false;
+  };
+}
+async function openComfyModal() {
+  resetComfyForm();
+  $('comfy-status').textContent = '';
+  $('comfy-modal').classList.remove('hidden');
+  await renderComfyList();
+}
+window.addEventListener('drafter:open-comfy', openComfyModal);
+$('comfy-close').onclick = () => $('comfy-modal').classList.add('hidden');
+$('comfy-save').onclick = async () => {
+  const entry = {
+    name: $('comfy-name').value.trim() || 'ComfyUI', baseUrl: $('comfy-url').value.trim(),
+    authType: $('comfy-auth').value, headerName: $('comfy-header').value.trim(), secret: $('comfy-secret').value.trim(),
+    remoteHttpConfirmed: $('comfy-http-confirm').checked, insecureTlsConfirmed: $('comfy-tls-confirm').checked,
+    allowInsecureTls: $('comfy-tls-confirm').checked,
+  };
+  if (editingComfyId) entry.id = editingComfyId;
+  const result = await api.comfySaveConnection(entry);
+  const status = $('comfy-status');
+  status.className = 'modal-status ' + (result.ok ? 'ok' : 'err');
+  status.textContent = result.ok ? '已保存 ComfyUI 连接。' : (result.error || '保存失败');
+  if (result.ok) { resetComfyForm(); await renderComfyList(); }
+};
+
 $('apikey-save').onclick = async () => {
   const entry = {
     name: $('key-name').value.trim() || 'Key',

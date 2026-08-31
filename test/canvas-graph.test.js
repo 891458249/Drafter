@@ -69,6 +69,23 @@ test('validate:缺 class_type / 提示词空 / 未勾模型 / 循环依赖带可
   assert.ok(Object.values(v3.nodeErrors).flat().some((e) => e.type === 'unsupported_node'));
 });
 
+test('外部 ComfyUI 节点:连接戳保留、可回灌 Drawflow 且无连接戳时拒绝', () => {
+  const prompt = {
+    '1': { id: '1', class_type: 'CheckpointLoaderSimple', title: '加载模型', inputs: { ckpt_name: 'base.safetensors', _comfyConnectionId: 'comfy_local' } },
+    '2': { id: '2', class_type: 'KSampler', inputs: { model: ['1', 0], steps: 20, _comfyConnectionId: 'comfy_local' } },
+  };
+  assert.strictEqual(g.validate(prompt).ok, true);
+  const drawflow = g.toDrawflow(prompt);
+  assert.strictEqual(drawflow.drawflow.Home.data['2'].data.type, 'external');
+  assert.strictEqual(drawflow.drawflow.Home.data['2'].data.comfyClassType, 'KSampler');
+  assert.deepStrictEqual(drawflow.drawflow.Home.data['2'].inputs.input_1.connections, [{ node: '1', input: 'output_1' }]);
+  const back = g.fromDrawflow(drawflow);
+  assert.strictEqual(back['2'].class_type, 'KSampler');
+  assert.strictEqual(back['2'].inputs._comfyConnectionId, 'comfy_local');
+  assert.deepStrictEqual(back['2'].inputs.model, ['1', 0]);
+  assert.strictEqual(g.validate({ x: { id: 'x', class_type: 'KSampler', inputs: {} } }).ok, false);
+});
+
 test('nodeSignature:祖先 id 变化但结构同则签名同;内容变则签名变', () => {
   const a1 = {
     '10': { id: '10', class_type: 'drafter/text', inputs: { text: '猫' } },

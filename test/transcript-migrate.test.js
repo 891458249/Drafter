@@ -12,7 +12,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-transcript-test-'));
 installElectronStub(tmp);
 // 必须在 require sessions 之前:sessions.js 模块加载时按 CLAUDE_CONFIG_DIR 定位记录根目录
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude-cfg');
-const { encodeCwdForProjects, migrateTranscript } = require('../src/main/sessions');
+const { encodeCwdForProjects, migrateTranscript, transcriptPath, isTranscriptResumable } = require('../src/main/sessions');
 
 const PROJECTS = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects');
 const SID = 'test-session-id-123';
@@ -43,6 +43,16 @@ test('encodeCwdForProjects:超 200 字符截断并加哈希后缀', () => {
   assert.ok(enc.startsWith(head + '-'));
   assert.ok(/^-[0-9a-z]+$/.test(enc.slice(200)), '后缀应为 base36 哈希');
   assert.strictEqual(enc, encodeCwdForProjects(longCwd), '同输入编码应稳定');
+});
+
+test('isTranscriptResumable:有效 JSONL 最后一行可恢复,不存在或截断则降级', () => {
+  const cwd = 'D:\\ResumeCheck';
+  assert.strictEqual(transcriptPath(SID, cwd), path.join(PROJECTS, encodeCwdForProjects(cwd), SID + '.jsonl'));
+  assert.strictEqual(isTranscriptResumable(SID, cwd), false, '不存在的记录不可恢复');
+  seedTranscript(cwd, '{"type":"user"}\n{"type":"assistant"}\n');
+  assert.strictEqual(isTranscriptResumable(SID, cwd), true, '最后一条完整 JSON 可恢复');
+  seedTranscript(cwd, '{"type":"user"}\n{"type":"assistant"');
+  assert.strictEqual(isTranscriptResumable(SID, cwd), false, '中断写入的末行不可恢复');
 });
 
 test('migrateTranscript:旧目录记录复制到新目录,原文件保留', () => {
