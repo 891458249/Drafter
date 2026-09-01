@@ -495,6 +495,36 @@ ipcMain.handle('comfy:submit', async (_e, payload = {}) => {
 });
 ipcMain.handle('comfy:jobs', (_e, { canvasId } = {}) => comfyJobs.list(canvasId));
 ipcMain.handle('comfy:cancel', (_e, jobId) => comfyJobs.cancel(jobId));
+// 本机 ComfyUI 官方工作流预设(comfyui_workflow_templates_json 包):只读扫描模板 JSON,
+// 按文件名前缀归类;加载时经 comfyFormat.importAny 转画布 API 格式后建新画布。
+const COMFY_TEMPLATE_DIR = () => {
+  const base = (store.getSetting('comfyLocal', {}) || {}).installPath || 'D:\\ComfyUI-cu126';
+  return path.join(base, 'ComfyUI_windows_portable', 'python_embeded', 'Lib', 'site-packages', 'comfyui_workflow_templates_json', 'templates');
+};
+ipcMain.handle('comfy:templates', () => {
+  const dir = COMFY_TEMPLATE_DIR();
+  try {
+    const names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort();
+    return { ok: true, dir, templates: names.map((n) => ({ name: n.replace(/\.json$/, ''), category: n.split('_')[0].toLowerCase() })) };
+  } catch (error) { return { ok: false, error: error.message, templates: [] }; }
+});
+ipcMain.handle('comfy:loadTemplate', async (_e, { name } = {}) => {
+  try {
+    const safe = String(name || '').replace(/[\\/]/g, '');
+    if (!safe || safe.includes('..')) return { ok: false, error: '模板名无效' };
+    const file = path.join(COMFY_TEMPLATE_DIR(), safe + '.json');
+    const source = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const imported = comfyFormat.importAny(source);
+    for (const [id, node] of Object.entries(imported.prompt)) {
+      const meta = imported.layout[id];
+      if (meta) { if (meta.pos) node.pos = meta.pos; if (meta.title) node.title = meta.title; }
+      node.inputs._comfyConnectionId = 'comfy_local';
+    }
+    const canvas = canvases.create(safe);
+    canvases.save(canvas.id, { graph: imported.prompt });
+    return { ok: true, canvas, format: imported.format };
+  } catch (error) { return { ok: false, error: '加载模板失败: ' + error.message }; }
+});
 ipcMain.handle('comfy:importFile', async (_e, { connectionId } = {}) => {
   const win = getWindow();
   const selected = await dialog.showOpenDialog(win, {

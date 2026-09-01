@@ -107,13 +107,43 @@
             <button id="btn-cv-zoom-in" class="icon-btn" title="放大">＋</button>
           </div>
           <div class="canvas-native-layout">
+            <nav id="cv-rail" class="cv-rail">
+              <button class="active" data-cv-rail="assets" title="资产">🗂️<span>资产</span></button>
+              <button data-cv-rail="nodes" title="节点">⬡<span>节点</span></button>
+              <button data-cv-rail="models" title="模型">◈<span>模型</span></button>
+              <button data-cv-rail="workflows" title="工作流">⌘<span>工作流</span></button>
+              <button data-cv-rail="apps" title="应用">▦<span>应用</span></button>
+              <button data-cv-rail="templates" title="模板">🧩<span>模板</span></button>
+            </nav>
             <aside id="cv-node-browser" class="cv-node-browser">
-              <div class="cv-node-browser-head"><strong>节点</strong><button id="btn-cv-catalog-refresh" class="icon-btn" title="刷新本机 ComfyUI 节点目录">⟳</button></div>
-              <div class="cv-node-browser-tabs"><button class="active" data-cv-browser="nodes">全部节点</button><button data-cv-browser="favorites">收藏</button></div>
-              <input id="cv-node-search" class="input-sm" placeholder="搜索 900 个 ComfyUI 节点…" />
-              <div id="cv-node-categories" class="cv-node-categories"><div class="cv-catalog-empty">正在加载节点目录…</div></div>
+              <div class="cv-node-browser-head"><strong id="cv-browser-title">资产</strong><button id="btn-cv-catalog-refresh" class="icon-btn" title="刷新本机 ComfyUI 节点目录">⟳</button></div>
+              <div id="cv-browser-assets" class="cv-browser-pane">资产库接入现有素材板块，可用“素材”面板统一管理。</div>
+              <div id="cv-browser-models" class="cv-browser-pane hidden">本机模型目录：读取 ComfyUI models/checkpoints、loras、vae 等；当前未下载模型。</div>
+              <div id="cv-browser-workflows" class="cv-browser-pane hidden">工作流列表将从本机 ComfyUI 工作流目录读取。</div>
+              <div id="cv-browser-apps" class="cv-browser-pane hidden">应用视图用于后续将工作流打包为独立入口。</div>
+              <div id="cv-browser-nodes" class="cv-browser-pane hidden">
+                <div class="cv-node-browser-tabs"><button class="active" data-cv-browser="nodes">全部节点</button><button data-cv-browser="favorites">收藏</button></div>
+                <input id="cv-node-search" class="input-sm" placeholder="搜索 900 个 ComfyUI 节点…" />
+                <div id="cv-node-categories" class="cv-node-categories"><div class="cv-catalog-empty">正在加载节点目录…</div></div>
+              </div>
             </aside>
             <div class="cv-workspace">
+              <!-- 画布标签页(ComfyUI 顶部工作流标签):打开的多个画布以标签形式切换 -->
+              <div id="cv-tabs" class="cv-tabs"></div>
+              <div class="cv-view-toggle"><button class="active" data-cv-view="graph">图形</button><button data-cv-view="app">应用</button></div>
+              <!-- 选中节点悬浮工具栏(ComfyUI):删除/信息/形状/绕过/复制/适配/更多,激活时附带颜色条 -->
+              <div id="cv-node-toolbar" class="cv-node-toolbar hidden">
+                <div id="cv-toolbar-colors" class="cv-toolbar-colors"></div>
+                <div class="cv-toolbar-row">
+                  <button title="删除选定的项目" data-cvt="delete">🗑</button>
+                  <button title="节点信息" data-cvt="info">ℹ️</button>
+                  <button title="形状" data-cvt="shape">⚪<i class="cv-caret">▾</i></button>
+                  <button title="忽略/取消忽略选中节点" data-cvt="bypass">⏭️</button>
+                  <button title="最小化节点" data-cvt="min">🗜</button>
+                  <button title="复制选中节点" data-cvt="clone">📑</button>
+                  <button title="更多操作" data-cvt="more">⋯</button>
+                </div>
+              </div>
               <div id="drawflow" class="drawflow-host"></div>
               <div id="cv-minimap" class="cv-minimap" title="画布缩略图"></div>
               <div id="canvas-empty" class="canvas-empty hidden">还没有画布——点左侧「＋ 新画布」新建一个</div>
@@ -330,6 +360,17 @@
         <button id="apikey-cancel" class="btn">关闭</button>
         <button id="apikey-save" class="btn btn-primary">保存</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 画布模板:我的模板(用户自存) + 本机 ComfyUI 官方预设 -->
+  <div id="cv-template-modal" class="modal-mask hidden">
+    <div class="modal modal-wide">
+      <h2>模板</h2>
+      <p class="modal-hint">「我的模板」来自你保存的画布;「ComfyUI 预设」从本机 ComfyUI 的官方模板库读取。点击预设会作为新画布导入。</p>
+      <input id="cv-template-search" class="input-sm" placeholder="搜索模板…" style="width:100%;margin-bottom:8px" />
+      <div id="cv-template-list" class="cv-template-list"></div>
+      <div class="modal-actions"><button id="cv-template-close" class="btn">关闭</button></div>
     </div>
   </div>
 

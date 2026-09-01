@@ -1073,6 +1073,15 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
 }
 .canvas-save-hint { font-size: 11px; color: var(--text-dim); margin-left: 8px; }
 .canvas-native-layout { flex: 1; min-height: 0; display: flex; }
+.cv-workspace { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; }
+.drawflow-host { width: 100%; height: 100%; min-height: 0; position: relative; }
+.cv-rail { width: 58px; flex: 0 0 58px; display: flex; flex-direction: column; gap: 3px; padding: 8px 4px; border-right: 1px solid var(--border); background: var(--bg); }
+.cv-rail button { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 0; background: none; color: var(--text-dim); padding: 7px 2px; border-radius: 6px; cursor: pointer; font-size: 15px; }
+.cv-rail button span { font-size: 10px; }
+.cv-rail button.active, .cv-rail button:hover { color: var(--text); background: var(--bg-hover); }
+.cv-view-toggle { position: absolute; left: 12px; top: 10px; z-index: 25; display: flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--bg-elevated); }
+.cv-view-toggle button { border: 0; background: none; color: var(--text-dim); padding: 6px 12px; font-size: 11px; cursor: pointer; }
+.cv-view-toggle button.active { background: var(--accent); color: #fff; }
 .cv-minimap { position: absolute; right: 12px; bottom: 12px; width: 150px; height: 96px; z-index: 20; background: rgba(25,24,22,.9); border: 1px solid var(--border); border-radius: 7px; overflow: hidden; pointer-events: none; }
 .cv-minimap-node { position: absolute; min-width: 5px; min-height: 4px; background: #5b9bd5; border-radius: 1px; opacity: .75; }
 .cv-minimap-node.external { background: #c7a24a; }
@@ -1088,7 +1097,14 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
 .cv-inspector-status { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
 .cv-inspector-status button { padding: 5px 2px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); font-size: 11px; cursor: pointer; }
 .cv-inspector-status button.active { background: var(--accent); color: #fff; }
-.cv-node-browser { width: 230px; flex: 0 0 230px; overflow: hidden auto; border-right: 1px solid var(--border); background: var(--bg-elevated); padding: 10px 8px; }
+.cv-node-browser { width: 250px; flex: 0 0 250px; overflow: hidden auto; border-right: 1px solid var(--border); background: var(--bg-elevated); padding: 10px 8px; }
+.cv-browser-pane { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+.cv-browser-pane.hidden { display: none; }
+.cv-template-list { display: flex; flex-direction: column; gap: 6px; max-height: 55vh; overflow: auto; }
+.cv-template-cat { font-size: 11px; color: var(--text-dim); margin-top: 6px; text-transform: uppercase; }
+.cv-template-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.cv-template-row button { border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-template-row button:hover { color: var(--accent); }
 .cv-node-browser-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .cv-node-browser .input-sm { width: 100%; margin-bottom: 8px; }
 .cv-node-browser-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
@@ -1134,14 +1150,51 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
 .cv-queue-empty { padding: 14px; text-align: center; color: var(--text-dim); font-size: 12px; }
 
 /* ---------------- Drawflow 主题化(深色) ---------------- */
-#drawflow { background: var(--bg); }
-#drawflow .parent-drawflow { background: var(--bg); }
+#drawflow { background: #1a1a1a linear-gradient(45deg, rgba(255,255,255,.035) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.035) 75%), linear-gradient(45deg, rgba(255,255,255,.035) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.035) 75%); background-size: 32px 32px; background-position: 0 0, 16px 16px; }
+#drawflow .parent-drawflow { background: transparent; }
+.cv-boxselect { position: absolute; z-index: 30; border: 1px dashed var(--accent); background: rgba(91,155,213,.12); pointer-events: none; }
+#drawflow .drawflow-node.cv-pinned { z-index: 20; box-shadow: 0 0 0 2px rgba(91,155,213,.55); }
+#drawflow .drawflow-node.cv-locked { cursor: default; }
+#drawflow .drawflow-node.cv-min .cv-body { display: none; }
+/* ---------------- 画布标签页(ComfyUI 顶部工作流标签) ---------------- */
+.cv-tabs { position: absolute; top: 8px; left: 84px; right: 12px; z-index: 24; display: flex; gap: 2px; overflow-x: auto; padding-bottom: 2px; }
+.cv-tab { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-dim); border-radius: 7px 7px 0 0; padding: 5px 10px; font-size: 12px; cursor: pointer; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 0 auto; }
+.cv-tab.active { color: var(--text); border-bottom-color: var(--accent); background: var(--bg-hover); }
+.cv-tab-close { color: var(--text-dim); font-size: 13px; padding: 0 2px; }
+.cv-tab-close:hover { color: var(--red); }
+
+/* ---------------- 节点(ComfyUI 绘制风格:侧向端口+端口名、圆角色卡) ---------------- */
 #drawflow .drawflow-node {
-  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
-  padding: 0; width: 260px; color: var(--text);
+  background: #2b2b2b; border: 1px solid #191919; border-radius: 10px;
+  padding: 0; width: 260px; color: var(--text); box-shadow: 0 4px 14px rgba(0,0,0,.45);
 }
 #drawflow .drawflow-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 #drawflow .drawflow-node.cv-nt-external { width: 320px; }
+/* 端口点移到节点两侧竖排(ComfyUI 语义),不再横排在上下边;
+   覆盖 vendor drawflow.min.css 的默认大圆点,用小实心彩点 */
+#drawflow .drawflow-node .inputs {
+  position: absolute !important; left: -6px !important; right: auto !important; top: 36px !important; bottom: auto !important;
+  display: flex !important; flex-direction: column !important; gap: 18px !important; width: auto !important; padding: 0 !important;
+}
+#drawflow .drawflow-node .outputs {
+  position: absolute !important; right: -6px !important; left: auto !important; top: 36px !important; bottom: auto !important;
+  display: flex !important; flex-direction: column !important; gap: 18px !important; width: auto !important; padding: 0 !important;
+}
+#drawflow .drawflow-node .input, #drawflow .drawflow-node .output {
+  position: relative !important; left: auto !important; right: auto !important; top: auto !important; bottom: auto !important;
+  width: 9px !important; height: 9px !important; min-width: 9px !important; min-height: 9px !important;
+  border-radius: 50% !important; background: #5b9bd5 !important; border: none !important;
+  box-shadow: 0 0 4px rgba(0,0,0,.6) !important; margin: 0 !important; cursor: crosshair !important;
+}
+#drawflow .drawflow-node .input { background: #5b9bd5 !important; }
+#drawflow .drawflow-node .output { background: #3fb27f !important; }
+#drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { transform: scale(1.4); }
+#drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { background: var(--accent); }
+/* 端口名标签:与两侧端口点同距竖排 */
+.cv-ports { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; color: #b9b9b9; padding: 0 2px 2px; }
+.cv-ports-l, .cv-ports-r { display: flex; flex-direction: column; gap: 16px; min-height: 24px; }
+.cv-ports-l span::before, .cv-ports-r span::after { content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #8ab4f8; margin: 0 4px; vertical-align: middle; }
+.cv-ports-r { text-align: right; }
 .cv-head.nt-external { background: rgba(112,112,112,.16); }
 .cv-head.cv-cat-image { background: rgba(70,170,120,.18); } .cv-head.cv-cat-video { background: rgba(130,100,220,.20); }
 .cv-head.cv-cat-audio { background: rgba(214,146,63,.18); } .cv-head.cv-cat-text { background: rgba(91,155,213,.18); }
@@ -1152,11 +1205,20 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
 .cv-dynamic input { background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 4px; }
 .cv-combo-multi { border: 1px solid var(--border); border-radius: 5px; padding: 5px; display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-dim); }
 .cv-combo-multi legend { padding: 0 3px; color: var(--text); }
-#drawflow .drawflow-node .input, #drawflow .drawflow-node .output {
-  width: 12px; height: 12px; background: var(--bg); border: 2px solid var(--accent);
-}
-#drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { background: var(--accent); }
+/* Drawflow 默认点样式被上方 ComfyUI 侧向端口规则接管 */
 #drawflow .main-path { stroke: var(--accent); stroke-width: 2.5px; }
+/* 选中节点悬浮工具栏(ComfyUI) */
+.cv-node-toolbar { position: absolute; z-index: 40; display: flex; flex-direction: column; gap: 4px; }
+.cv-node-toolbar.hidden { display: none; }
+.cv-toolbar-colors { display: flex; gap: 8px; padding: 6px 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px; width: fit-content; margin: 0 auto; }
+.cv-toolbar-colors i { width: 13px; height: 13px; border-radius: 50%; cursor: pointer; }
+.cv-toolbar-colors i:hover { transform: scale(1.2); }
+.cv-toolbar-row { display: flex; gap: 2px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px; padding: 3px 4px; width: fit-content; margin: 0 auto; }
+.cv-toolbar-row button { border: 0; background: none; color: var(--text-dim); font-size: 13px; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+.cv-toolbar-row button:hover { color: var(--text); background: var(--bg-hover); }
+.cv-toolbar-row .cv-caret { font-style: normal; font-size: 9px; margin-left: 2px; }
+#drawflow .drawflow-node.cv-shape-round { border-radius: 20px; }
+#drawflow .drawflow-node.cv-shape-card { border-radius: 2px; }
 #drawflow .main-path:hover, #drawflow .main-path.selected { stroke: var(--accent-hover); }
 #drawflow .drawflow-delete {
   background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border);
@@ -1164,7 +1226,7 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
 }
 #drawflow .drawflow-delete:hover { color: var(--red); border-color: var(--red); }
 #drawflow .connection .main-path { stroke: var(--text-dim); }
-#drawflow .drawflow-node .outputs, #drawflow .drawflow-node .inputs { padding-top: 4px; }
+#drawflow .drawflow-node .outputs, #drawflow .drawflow-node .inputs { padding-top: 0; }
 
 /* ---------------- 节点内容 ---------------- */
 .cv-head {

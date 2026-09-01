@@ -71,7 +71,7 @@ export function gemNameOf(id) {
 }
 
 export function escapeHtml(s) {
-  return (s || '').replace(/[&<>"']/g, (c) => (
+  return String(s ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }

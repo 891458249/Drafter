@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld('api', {
   comfyJobs: (canvasId) => ipcRenderer.invoke('comfy:jobs', { canvasId }),
   comfyCancel: (jobId) => ipcRenderer.invoke('comfy:cancel', jobId),
   comfyImportFile: (connectionId) => ipcRenderer.invoke('comfy:importFile', { connectionId }),
+  comfyTemplates: () => ipcRenderer.invoke('comfy:templates'),
+  comfyLoadTemplate: (name) => ipcRenderer.invoke('comfy:loadTemplate', { name }),
 
   // 辅助模型配置(Code/Chat 分析媒体附件,v0.9.1)
   auxModelsGet: () => ipcRenderer.invoke('settings:getAuxModels'),
