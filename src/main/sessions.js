@@ -494,8 +494,8 @@ class Session {
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
     }
     // 模式热切本地兜底(v0.9.37):回合中刚切换模式时,CLI 侧应用控制请求可能有延迟;
-    // 放行/拒绝类语义在 App 层立即生效,不依赖 CLI 已应用新模式。
-    // 顺序有意放在 autoAllowTools 之后:dontAsk 的「拒绝未预先批准」要尊重会话级 always 记忆。
+    // 放行类语义在 App 层立即生效,不依赖 CLI 已应用新模式。
+    // 顺序有意放在 autoAllowTools 之后:尊重会话级 always 记忆(优先命中)。
     const mode = this.meta.permissionMode || 'default';
     if (mode === 'bypassPermissions') {
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
@@ -504,7 +504,10 @@ class Session {
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
     }
     if (mode === 'dontAsk') {
-      return Promise.resolve({ behavior: 'deny', message: '当前为「不询问」模式:未预先批准的操作已自动拒绝' });
+      // 不询问(自动通过):模型的操作建议一律按其推荐执行,直到任务完成,
+      // 中途不弹权限卡。与 bypassPermissions 的区别:只读硬拦截与项目组
+      // PreToolUse 钩子仍然生效(本函数开头/会话 hooks),仅跳过逐条询问。
+      return Promise.resolve({ behavior: 'allow', updatedInput: input });
     }
     const reqId = 'perm_' + crypto.randomUUID();
     const suggestions = opts.suggestions || [];
@@ -626,10 +629,8 @@ class Session {
     store.upsertSession({ id: this.id, permissionMode: mode });
     // 热切:挂起的权限卡一并按新模式即时裁决,UI 卡片同步消失(v0.9.37)
     for (const [reqId, p] of [...this.pendingPerms]) {
-      if (mode === 'bypassPermissions' || (mode === 'acceptEdits' && EDIT_TOOLS.has(p.toolName))) {
+      if (mode === 'bypassPermissions' || mode === 'dontAsk' || (mode === 'acceptEdits' && EDIT_TOOLS.has(p.toolName))) {
         this.respondPermission(reqId, 'allow');
-      } else if (mode === 'dontAsk') {
-        this.respondPermission(reqId, 'deny', '已切换为「不询问」模式,自动拒绝');
       }
     }
     // 运行中直接发 SDK 控制请求(set_permission_mode);失败只记日志——

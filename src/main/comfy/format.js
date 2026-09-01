@@ -1,7 +1,7 @@
 // ComfyUI interchange formats. Keeps the execution prompt clean from Drafter-only runtime state.
 'use strict';
 
-const RUNTIME_KEYS = new Set(['tasks', 'results', 'active', 'view', '_v', 'file', '_comfyConnectionId']);
+const RUNTIME_KEYS = new Set(['tasks', 'results', 'active', 'view', '_v', 'file', '_comfyConnectionId', 'nodeStatus', 'nodeColor']);
 const isObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const isPromptLink = (value) => Array.isArray(value) && value.length === 2 && (typeof value[0] === 'string' || typeof value[0] === 'number') && Number.isInteger(value[1]);
