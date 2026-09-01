@@ -8,9 +8,18 @@ const safeText = (value, fallback = '') => String(value ?? fallback).replace(/[\
 function normalizeInput(name, spec, required) {
   const type = Array.isArray(spec) ? spec[0] : 'UNKNOWN';
   const config = Array.isArray(spec) ? (spec[1] || {}) : {};
-  const widget = Array.isArray(type)
-    ? { kind: 'enum', values: type.map((value) => safeText(value)).filter(Boolean).slice(0, 200), default: config.default }
-    : { kind: safeText(type, 'UNKNOWN'), default: config.default, min: config.min, max: config.max, step: config.step };
+  let widget;
+  if (Array.isArray(type)) {
+    widget = { kind: 'enum', values: type.map((value) => safeText(value)).filter(Boolean).slice(0, 200), default: config.default, tooltip: safeText(config.tooltip), multiselect: !!config.multiselect };
+  } else if (type === 'COMBO') {
+    widget = { kind: 'combo', values: Array.isArray(config.options) ? config.options.map((value) => safeText(value)).filter(Boolean).slice(0, 200) : [], default: config.default, tooltip: safeText(config.tooltip), multiselect: !!config.multiselect, remote: config.remote && { route: safeText(config.remote.route), refreshButton: !!config.remote.refresh_button } };
+  } else if (type === 'COMFY_DYNAMICCOMBO_V3') {
+    widget = { kind: 'dynamic', values: Array.isArray(config.options) ? config.options.map((value) => safeText(value)).filter(Boolean).slice(0, 100) : [], default: config.default, tooltip: safeText(config.tooltip) };
+  } else if (type === 'COMFY_AUTOGROW_V3') {
+    widget = { kind: 'autogrow', min: Number(config.min) || 0, max: Math.min(Number(config.max) || 32, 64), default: config.default, tooltip: safeText(config.tooltip) };
+  } else {
+    widget = { kind: safeText(type, 'UNKNOWN'), default: config.default, min: config.min, max: config.max, step: config.step, multiline: !!config.multiline, tooltip: safeText(config.tooltip), controlAfterGenerate: !!config.control_after_generate };
+  }
   return { name: safeText(name), required: !!required, type: Array.isArray(type) ? 'COMBO' : safeText(type, 'UNKNOWN'), widget };
 }
 

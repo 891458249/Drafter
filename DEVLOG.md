@@ -417,7 +417,15 @@ Git 工作流:
 - npm test 136/136(新增 llmtext.test.js 5 例、canvases 模板/导出用例 2 例);CDP 冒烟 17/17(llmtext 节点/模板菜单/从模板建画布 3 节点 2 连线)
 
 
-### v0.12.2(2026-09-01):画布双后端——接入外部 ComfyUI 服务
+
+### v0.12.3(2026-09-01):原生 ComfyUI Canvas——900 节点库与本地工作流界面
+- **原生节点浏览器**:画布左侧直接加载本机 ComfyUI `/object_info`,显示 900 个节点、201 个分类,支持分类树、搜索、刷新与收藏,不再嵌入官方网页,也不再受旧的 120 项菜单限制。
+- **原生三栏工作流界面**:中间为全尺寸本地无限画布,右侧为 ComfyUI 风格检查器(参数/信息/设置);节点支持分类颜色、颜色标记、正常/忽略/禁用状态,禁用/忽略会真实影响原生 DAG 调度。
+- **节点编辑能力**:多输出端口、复杂 Schema 控件(数值范围、多行文本、静态/动态/增长型 COMBO、tooltip、空模型目录提示)、动态输入、右键复制/重复/删除、Ctrl+Z/Y 撤销重做和右下角小地图。
+- **API Key + 本机 ComfyUI**:默认继续使用 API Key 模型;本机 ComfyUI 作为高级本地后端,文本/已落地图片可通过标准资产桥接进入 ComfyUI 子图,产物继续进入 Drafter 素材库。私有 LATENT/MODEL/CONDITIONING 等推理对象不会跨后端伪装成可序列化资产。
+- 本机验证:ComfyUI 0.34.0 + CUDA 12.6 在 RTX 5060 Ti 16GB 上运行;`npm test` 185/185;原生 Electron 冒烟验证 201 分类、CLIP Text Encode 节点添加、多行参数、检查器与小地图。真实出图需在 `D:\ComfyUI-cu126\ComfyUI_windows_portable\ComfyUI\models` 放置模型文件。
+
+
 - **ComfyUI 连接管理**:画布工具栏新增「⚙ ComfyUI」，可配置本机/LAN/云端/反向代理地址与 Bearer、API Key 或自定义头认证；连接条目脱敏，远程 HTTP 与不受信任 TLS 必须显式确认。
 - **节点目录与工作流互通**:读取 `/object_info` 并安全清洗后驱动外部节点选择/基础 widget 编辑；支持 ComfyUI prompt/workflow JSON 导入导出，原始 `class_type`、连接与布局保留。
 - **远程运行闭环**:纯 ComfyUI 画布通过 `/prompt` 提交，WebSocket 和 `/history` 回传队列进度；`/view` 产物安全落入本地素材目录，复用既有画廊与素材库。跨后端或跨连接混合图会明确拒绝，避免错误传递张量。

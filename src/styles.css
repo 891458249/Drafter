@@ -1072,7 +1072,36 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
   padding: 6px 10px; border-bottom: 1px solid var(--border);
 }
 .canvas-save-hint { font-size: 11px; color: var(--text-dim); margin-left: 8px; }
-.drawflow-host { flex: 1; min-height: 0; position: relative; }
+.canvas-native-layout { flex: 1; min-height: 0; display: flex; }
+.cv-minimap { position: absolute; right: 12px; bottom: 12px; width: 150px; height: 96px; z-index: 20; background: rgba(25,24,22,.9); border: 1px solid var(--border); border-radius: 7px; overflow: hidden; pointer-events: none; }
+.cv-minimap-node { position: absolute; min-width: 5px; min-height: 4px; background: #5b9bd5; border-radius: 1px; opacity: .75; }
+.cv-minimap-node.external { background: #c7a24a; }
+.cv-minimap-view { position: absolute; border: 1px solid rgba(255,255,255,.65); background: rgba(255,255,255,.06); }
+.cv-inspector { width: 260px; flex: 0 0 260px; overflow: hidden auto; border-left: 1px solid var(--border); background: var(--bg-elevated); }
+.cv-inspector-head { padding: 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.cv-inspector-tabs { display: flex; gap: 2px; padding: 6px; border-bottom: 1px solid var(--border); }
+.cv-inspector-tabs button { flex: 1; border: 0; background: none; color: var(--text-dim); padding: 5px; font-size: 11px; cursor: pointer; border-radius: 4px; }
+.cv-inspector-tabs button.active, .cv-inspector-tabs button:hover { color: var(--text); background: var(--bg-hover); }
+.cv-inspector-body { padding: 10px; }
+.cv-inspector-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 11px; color: var(--text-dim); }
+.cv-inspector-row input, .cv-inspector-row select, .cv-inspector-row textarea { width: 100%; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 5px; font: inherit; }
+.cv-inspector-status { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+.cv-inspector-status button { padding: 5px 2px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); font-size: 11px; cursor: pointer; }
+.cv-inspector-status button.active { background: var(--accent); color: #fff; }
+.cv-node-browser { width: 230px; flex: 0 0 230px; overflow: hidden auto; border-right: 1px solid var(--border); background: var(--bg-elevated); padding: 10px 8px; }
+.cv-node-browser-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.cv-node-browser .input-sm { width: 100%; margin-bottom: 8px; }
+.cv-node-browser-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.cv-node-browser-tabs button { flex: 1; border: 0; background: var(--bg); color: var(--text-dim); padding: 5px; font-size: 11px; border-radius: 4px; cursor: pointer; }
+.cv-node-browser-tabs button.active { color: var(--text); background: var(--bg-hover); }
+.cv-node-categories { display: flex; flex-direction: column; gap: 3px; }
+.cv-cat summary { cursor: pointer; padding: 5px 6px; color: var(--text); font-size: 12px; border-radius: 5px; }
+.cv-cat summary:hover { background: var(--bg-hover); }
+.cv-cat-list { display: flex; flex-direction: column; padding-left: 7px; }
+.cv-cat-node { border: 0; background: none; color: var(--text-dim); text-align: left; padding: 4px 6px; border-radius: 4px; font-size: 11px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-cat-node:hover { color: var(--text); background: var(--bg-hover); }
+.cv-catalog-empty { color: var(--text-dim); font-size: 12px; padding: 8px; }
+.drawflow-host { height: 100%; min-height: 0; position: relative; }
 .canvas-empty {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: var(--text-dim); font-size: 13px; pointer-events: none;
@@ -1112,7 +1141,17 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
   padding: 0; width: 260px; color: var(--text);
 }
 #drawflow .drawflow-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-#drawflow .drawflow-node .drawflow_content_node { width: 100%; }
+#drawflow .drawflow-node.cv-nt-external { width: 320px; }
+.cv-head.nt-external { background: rgba(112,112,112,.16); }
+.cv-head.cv-cat-image { background: rgba(70,170,120,.18); } .cv-head.cv-cat-video { background: rgba(130,100,220,.20); }
+.cv-head.cv-cat-audio { background: rgba(214,146,63,.18); } .cv-head.cv-cat-text { background: rgba(91,155,213,.18); }
+.cv-head.cv-cat-model { background: rgba(190,110,160,.18); } .cv-head.cv-cat-3d { background: rgba(63,167,178,.20); }
+.cv-head.cv-cat-partner { background: rgba(190,160,75,.18); } .cv-head.cv-cat-utilities { background: rgba(125,125,125,.18); }
+.cv-dynamic { display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--border); padding-top: 6px; font-size: 11px; color: var(--text-dim); }
+.cv-dynamic label { display: flex; justify-content: space-between; } .cv-dynamic button { border: 0; background: none; color: var(--text-dim); cursor: pointer; }
+.cv-dynamic input { background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 4px; }
+.cv-combo-multi { border: 1px solid var(--border); border-radius: 5px; padding: 5px; display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-dim); }
+.cv-combo-multi legend { padding: 0 3px; color: var(--text); }
 #drawflow .drawflow-node .input, #drawflow .drawflow-node .output {
   width: 12px; height: 12px; background: var(--bg); border: 2px solid var(--accent);
 }
@@ -1266,6 +1305,7 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
 #drawflow .drawflow-node.cv-st-cached { border-color: #5b9bd5; box-shadow: 0 0 0 1px #5b9bd5; }
 #drawflow .drawflow-node.cv-st-fail, #drawflow .drawflow-node.cv-err { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
 #drawflow .drawflow-node.cv-st-skipped { border-color: #8a5bd6; opacity: .72; }
+#drawflow .drawflow-node.cv-node-disabled { opacity: .38; filter: grayscale(.8); }
 .cv-node-err {
   font-size: 11px; color: var(--red); background: rgba(214,125,106,.12);
   border: 1px solid rgba(214,125,106,.35); border-radius: 6px; padding: 4px 7px;

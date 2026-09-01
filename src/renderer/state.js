@@ -14,6 +14,7 @@ export const state = {
   diffComments: [],      // [{file, line, side, text}]
   gems: [],              // Gem 自定义助手缓存(v0.9.11),gems.js 负责刷新
   instantJump: true,     // 导航点击/回到底部瞬时跳转(v0.9.15);false=平滑滚动,boot 时从设置载入
+  comfyAdvancedMode: false, // 外部 ComfyUI 服务为高级可选后端;默认 API Key 原生画布
   mediaShop: 'all',      // 创作板块工坊筛选:'all'|'image'|'video'|'audio'|'model'(v0.9.38)
   GroupsCache: new Map(),// Kuro 模型分组缓存:keyId → [{category, model_type, models}](populateModelSelects/ensureGroups 填充)
 };

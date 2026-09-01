@@ -78,6 +78,16 @@ class ComfyJobs {
     return { ok: true, job: this.summary(job), nodeErrors: result.node_errors || null };
   }
 
+  wait(jobId) {
+    const job = this.jobs.get(jobId);
+    if (!job) return Promise.reject(new Error('ComfyUI 任务不存在'));
+    if (TERMINAL.has(job.status)) return Promise.resolve(this.summary(job));
+    return new Promise((resolve) => {
+      const timer = this.setTimer(() => resolve(this.wait(jobId)), Math.min(this.pollMs, 250));
+      if (timer && typeof timer.unref === 'function') timer.unref();
+    });
+  }
+
   push(job, extra) {
     this.emit({ backend: 'comfy', jobId: job.jobId, canvasId: job.canvasId, promptId: job.promptId, ...extra });
   }

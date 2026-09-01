@@ -146,6 +146,16 @@ const MIGRATIONS = [
       convertDir(path.join(dir, 'templates'));
     },
   },
+  {
+    version: '0.12.3',
+    desc: 'ComfyUI 高级模式默认收起，已配置外部连接的用户保留入口',
+    run({ store }) {
+      const connections = store.getSetting('comfyConnections', []);
+      if (Array.isArray(connections) && connections.length && store.getSetting('comfyAdvancedMode', null) === null) {
+        store.setSetting('comfyAdvancedMode', true);
+      }
+    },
+  },
 ];
 
 // --- 入口 --------------------------------------------------------------------

@@ -347,7 +347,8 @@ function makeFileLink(text, hit) {
   span.className = 'file-link';
   span.textContent = text;
   span.title = hit.path + '\n点击在右侧编辑器打开';
-  span.onclick = (e) => { e.stopPropagation(); emit('open-file', hit); };
+  // preventDefault:路径若被 AI 写成 [路径](路径) 包在 <a> 里,不拦截会触发就地导航黑屏(v0.12.3)
+  span.onclick = (e) => { e.preventDefault(); e.stopPropagation(); emit('open-file', hit); };
   return span;
 }
 
@@ -359,7 +360,7 @@ function linkifyPaths(el) {
     if (!hit) continue;
     code.classList.add('file-link');
     code.title = hit.path + '\n点击在右侧编辑器打开';
-    code.onclick = (e) => { e.stopPropagation(); emit('open-file', hit); };
+    code.onclick = (e) => { e.preventDefault(); e.stopPropagation(); emit('open-file', hit); };
   }
   // ② 正文文本节点:绝对路径(无反引号)也可点击
   const SKIP = 'pre,code,a,script,style,.file-link,.code-card-head';
@@ -759,7 +760,7 @@ function addToolCard(s, parentId, id, name, input) {
     const label = row.querySelector('.act-label');
     label.classList.add('file-link');
     label.title = fp + '(点击在编辑器面板预览)';
-    label.onclick = (e) => { e.stopPropagation(); emit('open-file', fp); };
+    label.onclick = (e) => { e.preventDefault(); e.stopPropagation(); emit('open-file', fp); };
   }
   act.list.appendChild(row);
   s.ui.toolCards.set(id, { el: row, body, name, input, activity: act });

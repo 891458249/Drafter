@@ -85,6 +85,9 @@ function fromDrawflow(exportJson) {
         if (conn) inputs[inputName] = [String(conn.node), Math.max(0, (Number(String(conn.input).replace('output_', '')) || 1) - 1)];
       }
       if (d.comfyConnectionId) inputs._comfyConnectionId = d.comfyConnectionId;
+      if (d.comfyCategory) inputs._comfyCategory = d.comfyCategory;
+      if (Array.isArray(d.comfyOutputs)) inputs._comfyOutputs = d.comfyOutputs;
+      if (d.comfyInputTypes && typeof d.comfyInputTypes === 'object') inputs._comfyInputTypes = d.comfyInputTypes;
     }
     out[String(id)] = {
       id: String(id),
@@ -124,6 +127,9 @@ function toDrawflow(apiGraph) {
           type: 'external', comfyClassType: node.class_type,
           comfyConnectionId: node.inputs && node.inputs._comfyConnectionId || '',
           comfyDisplayName: node.title || node.class_type,
+          comfyCategory: node.inputs && node.inputs._comfyCategory || '',
+          comfyOutputs: node.inputs && node.inputs._comfyOutputs || [],
+          comfyInputTypes: node.inputs && node.inputs._comfyInputTypes || {},
           comfyInputs: Object.fromEntries(Object.entries(node.inputs || {}).filter(([key, value]) => !isLink(value) && !key.startsWith('_') && !['tasks', 'results', 'active', 'view', '_v', 'file'].includes(key))),
           slotNames: inputNames,
           tasks: node.inputs && node.inputs.tasks || [], active: node.inputs && node.inputs.active || -1, view: node.inputs && node.inputs.view || 0,

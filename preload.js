@@ -59,10 +59,12 @@ contextBridge.exposeInMainWorld('api', {
 
   // ComfyUI 连接(凭据始终留在主进程;列表为脱敏数据)
   comfyListConnections: () => ipcRenderer.invoke('comfy:listConnections'),
+  comfyLocalCatalog: () => ipcRenderer.invoke('comfy:localCatalog'),
   comfySaveConnection: (entry) => ipcRenderer.invoke('comfy:saveConnection', entry),
   comfyDeleteConnection: (id) => ipcRenderer.invoke('comfy:deleteConnection', id),
   comfyTestConnection: (id) => ipcRenderer.invoke('comfy:testConnection', id),
   comfyCatalog: (id, opts) => ipcRenderer.invoke('comfy:catalog', id, opts),
+  comfyComboOptions: (id, route) => ipcRenderer.invoke('comfy:comboOptions', { id, route }),
   comfyImportGraph: (graph, schema) => ipcRenderer.invoke('comfy:importGraph', graph, schema),
   comfyExportPrompt: (graph) => ipcRenderer.invoke('comfy:exportPrompt', graph),
   comfyExportWorkflow: (payload) => ipcRenderer.invoke('comfy:exportWorkflow', payload),

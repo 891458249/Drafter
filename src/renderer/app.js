@@ -84,6 +84,7 @@ async function boot() {
   try {
     const st = await api.getStore();
     if (st && st.settings && st.settings.instantJump === false) state.instantJump = false;
+    if (st && st.settings && st.settings.comfyAdvancedMode === true) state.comfyAdvancedMode = true;
     if (st && st.settings && st.settings.sharedPromptCache === false) state.sharedPromptCache = false;
   } catch {}
   populateModelSelects(); // 按活跃 Key 填充模型下拉(v0.7.0)
@@ -330,6 +331,7 @@ function renderThemeCards() {
 function openSettingsModal() {
   renderThemeCards();
   $('set-instantjump').checked = state.instantJump;
+  $('set-comfy-advanced').checked = !!state.comfyAdvancedMode;
   $('set-sharedcache').checked = state.sharedPromptCache !== false;
   renderUpdateStatus(); // 更新区:显示当前版本,不自动请求网络
   $('settings-modal').classList.remove('hidden');
@@ -434,6 +436,11 @@ $('settings-close').onclick = () => $('settings-modal').classList.add('hidden');
 $('set-instantjump').onchange = (e) => { // 瞬时 ↔ 平滑(原 v0.9.15 菜单项)
   state.instantJump = !!e.target.checked;
   api.setSetting('instantJump', state.instantJump);
+};
+$('set-comfy-advanced').onchange = (e) => {
+  state.comfyAdvancedMode = !!e.target.checked;
+  api.setSetting('comfyAdvancedMode', state.comfyAdvancedMode);
+  window.dispatchEvent(new Event('drafter:comfy-advanced-changed'));
 };
 // 跨会话共享提示缓存(v0.10.2):盖戳进新会话 meta.staticPrompt(sessions.js 创建时读取)
 $('set-sharedcache').onchange = (e) => {

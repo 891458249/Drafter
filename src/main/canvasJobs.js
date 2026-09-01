@@ -10,6 +10,7 @@
 // 执行器不直接依赖 electron/网络:createTask/pollTask/downloadResults/llmComplete 由 main.js 注入。
 const crypto = require('crypto');
 const graph = require('./canvasGraph');
+const bridge = require('./canvasBridge');
 
 const TERMINAL = new Set(['done', 'fail', 'timeout', 'interrupted']);
 const IMG_RE = /\.(png|jpe?g|gif|webp)$/i;
@@ -60,13 +61,8 @@ async function runNodeMedia(job, id, node, type, deps) {
     const src = job.graphSnapshot[String(v[0])];
     if (!src) continue;
     const st = graph.typeOfClass(src.class_type);
-    if (st === 'upload' && src.inputs.file && src.inputs.file.path) refFiles.push({ path: src.inputs.file.path, name: src.inputs.file.name });
-    else if (st === 'image') {
-      const tasks = src.inputs.tasks || [];
-      const adopted = tasks[src.inputs.active];
-      const f = adopted && (adopted.files || []).find((x) => IMG_RE.test(x.name));
-      if (f) refFiles.push({ path: f.path, name: f.name });
-    }
+    if (st === 'upload') refFiles.push(...bridge.referenceFiles(src, 'IMAGE'));
+    else if (st === 'image' || (st === null && src.inputs && src.inputs._comfyConnectionId)) refFiles.push(...bridge.referenceFiles(src, 'IMAGE'));
   }
   for (const modelVal of modelVals) {
     if (job.cancelled) return;
@@ -152,7 +148,28 @@ async function runJob(job, deps) {
     const node = g[id];
     const type = graph.typeOfClass(node.class_type);
     const t = graph.NODE_TYPES[type];
-    // 非目标子图/非生成节点:不算入执行(text/upload 是数据节点,天然完成)
+    if (node.inputs && node.inputs.nodeStatus === 'disabled') {
+      skipped.add(id);
+      job.outputs[id] = { status: 'skipped', reason: '节点已禁用' };
+      push(job, { nodeId: id, status: 'skipped', reason: '节点已禁用' });
+      continue;
+    }
+    if (node.inputs && node.inputs.nodeStatus === 'bypass') {
+      done.add(id);
+      job.outputs[id] = { status: 'done', bypassed: true };
+      push(job, { nodeId: id, status: 'done', bypassed: true });
+      continue;
+    }
+    // 外部 ComfyUI 节点已经由混合调度器完成并将标准产物写回 tasks；在 API
+    // 子图中它们是已完成的数据源，不尝试把私有推理对象交给原生执行器。
+    if (type === null && node.inputs && node.inputs._comfyConnectionId) {
+      const files = bridge.adoptedFiles(node);
+      if (!files.length) { failed.add(id); job.failedNodes.push({ id, reason: 'ComfyUI 节点尚无可桥接产物' }); continue; }
+      done.add(id);
+      job.outputs[id] = { status: 'done', files };
+      push(job, { nodeId: id, status: 'done', backend: 'comfy', files });
+      continue;
+    }
     if (!t || t.unsupported) { failed.add(id); job.failedNodes.push({ id, reason: '不支持的节点类型:' + node.class_type }); continue; }
     // 上游失败 → 本节点跳过(ComfyUI:下游不跑)
     const upstreamFailed = Object.values(node.inputs || {}).some((v) => Array.isArray(v) && (failed.has(String(v[0])) || skipped.has(String(v[0]))));

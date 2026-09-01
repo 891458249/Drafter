@@ -39,6 +39,10 @@ const comfyCatalogs = new Map(); // connectionId → normalized object_info cata
 let saveTimer = null;
 let importing = false;      // import 期间不触发保存
 let addSeq = 0;             // 新节点错位摆放
+let selectedNodeId = null;
+let inspectorTab = 'params';
+let catalogMode = 'nodes';
+const favoriteNodes = new Set();
 
 function defaultData(type) {
   if (type === 'text') return { type, text: '' };
@@ -69,9 +73,71 @@ async function loadModelOptions(force = false) {
   modelOptions = byType;
 }
 
+function catalogEntries() {
+  return [...comfyCatalogs.entries()].flatMap(([connectionId, source]) => source.catalog.map((node) => ({ connectionId, source, node })));
+}
+
+function renderCatalogBrowser(query = '') {
+  const box = $('cv-node-categories');
+  if (!box) return;
+  const q = query.trim().toLowerCase();
+  const entries = catalogEntries().filter(({ node }) => (catalogMode !== 'favorites' || favoriteNodes.has(node.classType)) && (!q || `${node.displayName} ${node.classType} ${node.category}`.toLowerCase().includes(q)));
+  const groups = new Map();
+  for (const entry of entries) { const list = groups.get(entry.node.category) || []; list.push(entry); groups.set(entry.node.category, list); }
+  if (!entries.length) { box.innerHTML = '<div class="cv-catalog-empty">未找到节点。请启用高级 ComfyUI 模式并刷新节点目录。</div>'; return; }
+  box.innerHTML = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([category, list]) => `<details class="cv-cat" ${q ? 'open' : ''}><summary>${escapeHtml(category)} · ${list.length}</summary><div class="cv-cat-list">${list.map(({ connectionId, node }) => `<button class="cv-cat-node" data-comfy-connection="${escapeHtml(connectionId)}" data-comfy-class="${escapeHtml(node.classType)}" title="${escapeHtml(node.classType)}">${escapeHtml(node.displayName)}</button>`).join('')}</div></details>`).join('');
+  for (const button of box.querySelectorAll('[data-comfy-class]')) button.onclick = () => { if (cvId) addExternalNodeAt(button.dataset.comfyConnection, button.dataset.comfyClass); };
+}
+
+function renderInspector() {
+  const title = $('cv-inspector-title');
+  const body = $('cv-inspector-body');
+  if (!title || !body) return;
+  const d = selectedNodeId && nodeData.get(String(selectedNodeId));
+  if (!d) { title.textContent = '工作流概览'; body.innerHTML = '<div class="cv-catalog-empty">选择一个节点以查看参数、信息和设置。</div>'; return; }
+  title.textContent = d.comfyDisplayName || NODE_TYPES[d.type]?.label || d.comfyClassType || '节点';
+  if (inspectorTab === 'info') { body.innerHTML = `<div class="cv-inspector-row"><span>类型</span><code>${escapeHtml(d.comfyClassType || d.type || '')}</code></div><div class="cv-inspector-row"><span>后端</span><span>${d.type === 'external' ? 'ComfyUI' : 'API Key'}</span></div>`; return; }
+  if (inspectorTab === 'settings') {
+    const status = d.nodeStatus || 'normal';
+    const isExternal = d.type === 'external';
+    body.innerHTML = `<div class="cv-inspector-row"><span>节点状态</span><div class="cv-inspector-status"><button data-cv-status="normal" class="${status === 'normal' ? 'active' : ''}">正常</button><button data-cv-status="bypass" class="${status === 'bypass' ? 'active' : ''}">忽略</button><button data-cv-status="disabled" class="${status === 'disabled' ? 'active' : ''}">禁用</button></div></div><div class="cv-inspector-row"><span>节点颜色</span><input data-cv-color type="color" value="${escapeHtml(d.nodeColor || '#585858')}" /></div>${isExternal ? `<button class="btn btn-sm" data-cv-favorite>${favoriteNodes.has(d.comfyClassType) ? '★ 取消收藏节点' : '☆ 收藏节点'}</button>` : ''}`;
+    return;
+  }
+  const values = d.type === 'external' ? (d.comfyInputs || {}) : d;
+  body.innerHTML = Object.entries(values).filter(([key]) => !['type', 'tasks', 'results', 'active', 'view', 'file', 'models', 'comfyInputs', 'comfyWidgets', 'comfyInputTypes'].includes(key)).map(([key, value]) => `<label class="cv-inspector-row"><span>${escapeHtml(key)}</span>${typeof value === 'boolean' ? `<input data-cv-param="${escapeHtml(key)}" type="checkbox" ${value ? 'checked' : ''} />` : `<textarea data-cv-param="${escapeHtml(key)}" rows="${typeof value === 'string' && value.length > 80 ? 4 : 1}">${escapeHtml(typeof value === 'object' ? JSON.stringify(value) : value ?? '')}</textarea>`}</label>`).join('') || '<div class="cv-catalog-empty">此节点没有可编辑的本地参数。</div>';
+}
+
+function bindInspector() {
+  for (const btn of document.querySelectorAll('[data-cv-inspector-tab]')) btn.onclick = () => { inspectorTab = btn.dataset.cvInspectorTab; for (const b of document.querySelectorAll('[data-cv-inspector-tab]')) b.classList.toggle('active', b === btn); renderInspector(); };
+  $('cv-inspector-body').addEventListener('click', (e) => {
+    if (!e.target.closest('[data-cv-favorite]') || !selectedNodeId) return;
+    const d = nodeData.get(String(selectedNodeId)); if (!d?.comfyClassType) return;
+    if (favoriteNodes.has(d.comfyClassType)) favoriteNodes.delete(d.comfyClassType); else favoriteNodes.add(d.comfyClassType);
+    renderInspector(); renderCatalogBrowser($('cv-node-search').value);
+  });
+  $('cv-inspector-body').addEventListener('change', (e) => {
+    const d = selectedNodeId && nodeData.get(String(selectedNodeId)); if (!d) return;
+    if (e.target.dataset.cvStatus) { d.nodeStatus = e.target.dataset.cvStatus; const el = document.querySelector(`#node-${selectedNodeId}`); if (el) el.classList.toggle('cv-node-disabled', d.nodeStatus === 'disabled'); renderInspector(); scheduleSave(); return; }
+    if (e.target.dataset.cvColor) { d.nodeColor = e.target.value; const el = document.querySelector(`#node-${selectedNodeId} .cv-head`); if (el) el.style.borderLeft = `5px solid ${d.nodeColor}`; scheduleSave(); return; }
+    const key = e.target.dataset.cvParam; if (!key) return;
+    const target = d.type === 'external' ? (d.comfyInputs ||= {}) : d;
+    target[key] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    renderNodeBody(selectedNodeId); scheduleSave();
+  });
+}
+
+function applyComfyAdvancedVisibility() {
+  const tools = $('cv-comfy-tools');
+  if (tools) tools.classList.toggle('hidden', !state.comfyAdvancedMode);
+}
+
 async function loadComfyCatalogs(force = false) {
   if (comfyCatalogs.size && !force) return;
   comfyCatalogs.clear();
+  // 本机 ComfyUI 是原生节点浏览器的数据源，不依赖“外部高级连接”开关。
+  const local = await api.comfyLocalCatalog();
+  if (local && local.ok) comfyCatalogs.set('comfy_local', { connection: { id: 'comfy_local', name: '本机 ComfyUI', enabled: true }, catalog: local.catalog || [] });
+  if (!state.comfyAdvancedMode) return;
   const connections = await api.comfyListConnections();
   for (const connection of connections || []) {
     if (connection.enabled === false) continue;
@@ -98,11 +164,17 @@ function externalEntry(connectionId, classType) {
 // ---------------------------------------------------------------------------
 // 节点外壳与内容渲染(内容全量重建;输入事件不重建以保光标)
 // ---------------------------------------------------------------------------
+function comfyCategoryClass(category = '') {
+  const root = String(category).split('/')[0].toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return `cv-cat-${root || 'other'}`;
+}
+
 function nodeShellHtml(type, d = {}) {
   const t = NODE_TYPES[type];
   if (type === 'external') {
     const label = escapeHtml(d.title || d.comfyDisplayName || d.comfyClassType || 'ComfyUI 节点');
-    return `<div class="cv-shell cv-external"><div class="cv-head nt-external"><span>☁</span><span class="cv-title">${label}</span><button class="cv-del" title="删除节点">✕</button></div><div class="cv-body"></div></div>`;
+    const category = comfyCategoryClass(d.comfyCategory);
+    return `<div class="cv-shell cv-external"><div class="cv-head nt-external ${category}"><span>☁</span><span class="cv-title">${label}</span><button class="cv-del" title="删除节点">✕</button></div><div class="cv-body"></div></div>`;
   }
   const safe = t || { ico: '❔', label: '未知节点' };
   return `<div class="cv-shell"><div class="cv-head nt-${escapeHtml(type)}"><span>${safe.ico}</span><span class="cv-title">${escapeHtml(safe.label)}</span><button class="cv-del" title="删除节点">✕</button></div><div class="cv-body"></div></div>`;
@@ -165,16 +237,43 @@ function galleryHtml(d) {
   </div>`;
 }
 
+function renderMinimap() {
+  const map = $('cv-minimap');
+  if (!map || !editor) return;
+  const nodes = Object.values(editor.drawflow.drawflow.Home.data || {});
+  if (!nodes.length) { map.innerHTML = ''; return; }
+  const minX = Math.min(...nodes.map(n => n.pos_x || 0)); const minY = Math.min(...nodes.map(n => n.pos_y || 0));
+  const maxX = Math.max(...nodes.map(n => (n.pos_x || 0) + 320)); const maxY = Math.max(...nodes.map(n => (n.pos_y || 0) + 180));
+  const scale = Math.min(140 / Math.max(1, maxX - minX), 86 / Math.max(1, maxY - minY));
+  map.innerHTML = nodes.map((node) => { const d = nodeData.get(String(node.id)) || {}; return `<i class="cv-minimap-node ${d.type === 'external' ? 'external' : ''}" style="left:${5 + ((node.pos_x || 0) - minX) * scale}px;top:${5 + ((node.pos_y || 0) - minY) * scale}px;width:${Math.max(5, 260 * scale)}px;height:${Math.max(4, 70 * scale)}px"></i>`; }).join('');
+}
+
+function dynamicWidgetsHtml(d) {
+  const specs = d.comfyDynamicWidgets || [];
+  if (!specs.length) return '';
+  return specs.map((spec, index) => `<div class="cv-dynamic"><label>${escapeHtml(spec.label || `输入 ${index + 1}`)}<button data-act="dynamic-remove" data-dyn="${index}" title="移除">−</button></label><input data-comfy-dynamic="${index}" value="${escapeHtml(d.comfyDynamicValues?.[index] || '')}" /></div>`).join('') + `<button class="btn btn-sm" data-act="dynamic-add">＋ 添加输入</button>`;
+}
+
 function externalBodyHtml(d) {
   const inputs = d.comfyInputs || {};
   const names = d.slotNames || Object.keys(inputs);
+  const widgetSchema = d.comfyWidgets || {};
   const widgets = names.filter((name) => !Array.isArray(inputs[name])).map((name) => {
     const value = inputs[name];
-    if (typeof value === 'boolean') return `<label class="cv-ext-field">${escapeHtml(name)} <input data-comfy-input="${escapeHtml(name)}" type="checkbox" ${value ? 'checked' : ''} /></label>`;
-    if (typeof value === 'number') return `<label class="cv-ext-field">${escapeHtml(name)} <input data-comfy-input="${escapeHtml(name)}" type="number" value="${escapeHtml(value)}" /></label>`;
-    return `<label class="cv-ext-field">${escapeHtml(name)} <input data-comfy-input="${escapeHtml(name)}" value="${escapeHtml(value ?? '')}" /></label>`;
+    const schema = widgetSchema[name] || {};
+    const title = schema.tooltip ? ` title="${escapeHtml(schema.tooltip)}"` : '';
+    if ((schema.kind === 'enum' || schema.kind === 'combo' || schema.kind === 'dynamic') && Array.isArray(schema.values)) {
+      if (!schema.values.length) return `<label class="cv-ext-field"${title}>${escapeHtml(name)} <span class="cv-ref-src">当前本机没有可用选项</span></label>`;
+      if (schema.multiselect) return `<fieldset class="cv-combo-multi"${title}><legend>${escapeHtml(name)}</legend>${schema.values.map((v) => `<label><input data-comfy-input="${escapeHtml(name)}" type="checkbox" value="${escapeHtml(v)}" ${(Array.isArray(value) ? value : [value]).map(String).includes(String(v)) ? 'checked' : ''} />${escapeHtml(v)}</label>`).join('')}</fieldset>`;
+      return `<label class="cv-ext-field"${title}>${escapeHtml(name)} <select data-comfy-input="${escapeHtml(name)}">${schema.values.map((v) => `<option value="${escapeHtml(v)}" ${String(v) === String(value) ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}</select></label>`;
+    }
+    if (schema.kind === 'autogrow') return `<label class="cv-ext-field"${title}>${escapeHtml(name)} <input data-comfy-input="${escapeHtml(name)}" value="${escapeHtml(value ?? '')}" /><span class="cv-ref-src">可增长输入组，范围 ${schema.min || 0}–${schema.max || 32}</span></label>`;
+    if (typeof value === 'boolean') return `<label class="cv-ext-field"${title}>${escapeHtml(name)} <input data-comfy-input="${escapeHtml(name)}" type="checkbox" ${value ? 'checked' : ''} /></label>`;
+    if (typeof value === 'number') return `<label class="cv-ext-field"${title}>${escapeHtml(name)} <input data-comfy-input="${escapeHtml(name)}" type="number" min="${schema.min ?? ''}" max="${schema.max ?? ''}" step="${schema.step ?? 'any'}" value="${escapeHtml(value)}" /></label>`;
+    if (schema.multiline) return `<label class="cv-ext-field"${title}>${escapeHtml(name)} <textarea data-comfy-input="${escapeHtml(name)}" rows="4">${escapeHtml(value ?? '')}</textarea></label>`;
+    return `<label class="cv-ext-field"${title}>${escapeHtml(name)} <input data-comfy-input="${escapeHtml(name)}" value="${escapeHtml(value ?? '')}" /></label>`;
   });
-  return `<div class="cv-ref-src">ComfyUI · ${escapeHtml(d.comfyConnectionName || d.comfyConnectionId || '')}</div>${widgets.join('') || '<div class="cv-ref-src">连接端口由连线提供</div>'}${galleryHtml(d)}`;
+  return `<div class="cv-ref-src">ComfyUI · ${escapeHtml(d.comfyConnectionName || d.comfyConnectionId || '')}</div>${widgets.join('')}${dynamicWidgetsHtml(d) || ''}${!widgets.length && !d.comfyDynamicWidgets?.length ? '<div class="cv-ref-src">连接端口由连线提供</div>' : ''}${galleryHtml(d)}`;
 }
 
 function bodyHtml(id, d) {
@@ -406,6 +505,7 @@ async function openCanvas(id) {
       renderNodeShell(String(nid), data);
       renderNodeBody(String(nid));
     }
+    renderMinimap();
   }
   importing = false;
   $('canvas-empty').classList.add('hidden');
@@ -487,7 +587,9 @@ export async function enterSection() {
   if (!editor) bootEditor();
   await loadModelOptions(true); // 每次进板块重取(Key 可能刚改过)
   await loadComfyCatalogs();
+  applyComfyAdvancedVisibility();
   buildAddMenu();
+  renderCatalogBrowser();
   await seedPresetsIfEmpty();   // 模板铺底(一次性)
   await renderList();
   if (!cvId) {
@@ -508,6 +610,7 @@ function addNodeAt(type) {
   const id = String(editor.addNode('cv-' + type, t.inputs, t.outputs, x, y, 'cv-nt-' + type, {}, nodeShellHtml(type), false));
   nodeData.set(id, defaultData(type));
   renderNodeBody(id);
+  renderMinimap();
   scheduleSave();
   return id;
 }
@@ -516,24 +619,52 @@ function addExternalNodeAt(connectionId, classType) {
   const { source, schema } = externalEntry(connectionId, classType);
   if (!source || !schema) { alert('ComfyUI 节点目录已过期，请在连接设置中刷新。'); return null; }
   const i = addSeq++;
-  const id = String(editor.addNode('cv-external', (schema.inputs || []).length, Math.max(1, (schema.outputs || []).length), 120 + (i % 6) * 40, 80 + (i % 5) * 40, 'cv-nt-external', {}, nodeShellHtml('external', { comfyDisplayName: schema.displayName }), false));
+  const outCount = Math.max(1, (schema.outputs || []).length);
+  const id = String(editor.addNode('cv-external', (schema.inputs || []).length, outCount, 120 + (i % 6) * 40, 80 + (i % 5) * 40, 'cv-nt-external', {}, nodeShellHtml('external', { comfyDisplayName: schema.displayName, comfyCategory: schema.category }), false));
   const data = {
     type: 'external', comfyConnectionId: connectionId, comfyConnectionName: source.connection.name,
-    comfyClassType: classType, comfyDisplayName: schema.displayName, comfyInputs: externalDefaults(schema),
+    comfyClassType: classType, comfyDisplayName: schema.displayName, comfyCategory: schema.category, comfyOutputs: schema.outputs || [],
+    comfyInputs: externalDefaults(schema),
+    comfyWidgets: Object.fromEntries((schema.inputs || []).map((input) => [input.name, input.widget || {}])),
+    comfyInputTypes: Object.fromEntries((schema.inputs || []).map((input) => [input.name, input.type])),
     slotNames: (schema.inputs || []).map((input) => input.name), tasks: [], active: -1, view: 0,
   };
   nodeData.set(id, data);
   renderNodeBody(id);
+  renderMinimap();
   scheduleSave();
   return id;
 }
+
+const undoStack = [];
+const redoStack = [];
+let historyTimer = null;
+function snapshotCanvas() {
+  if (!editor || importing) return;
+  clearTimeout(historyTimer);
+  historyTimer = setTimeout(() => {
+    const graph = editor.export();
+    const nodes = graph?.drawflow?.Home?.data;
+    if (nodes) for (const [id, node] of Object.entries(nodes)) node.data = structuredClone(nodeData.get(String(id)) || {});
+    undoStack.push(graph); if (undoStack.length > 30) undoStack.shift(); redoStack.length = 0;
+  }, 150);
+}
+function restoreSnapshot(graph) {
+  if (!graph || !editor) return;
+  importing = true; editor.clear(); nodeData.clear(); editor.import(graph);
+  for (const [id, node] of Object.entries(graph.drawflow.Home.data || {})) { nodeData.set(String(id), node.data || {}); renderNodeShell(id, node.data || {}); renderNodeBody(id); }
+  importing = false; scheduleSave();
+}
+function undoCanvas() { if (!undoStack.length) return; const current = editor.export(); redoStack.push(current); restoreSnapshot(undoStack.pop()); }
+function redoCanvas() { if (!redoStack.length) return; const current = editor.export(); undoStack.push(current); restoreSnapshot(redoStack.pop()); }
 
 function bootEditor() {
   editor = new Drawflow($('drawflow'));
   editor.start();
 
-  editor.on('nodeRemoved', (id) => { nodeData.delete(String(id)); scheduleSave(); });
-  editor.on('nodeMoved', () => scheduleSave());
+  editor.on('nodeSelected', (id) => { selectedNodeId = String(id); renderInspector(); });
+  editor.on('nodeRemoved', (id) => { snapshotCanvas(); nodeData.delete(String(id)); if (String(id) === selectedNodeId) { selectedNodeId = null; renderInspector(); } scheduleSave(); });
+  editor.on('nodeMoved', () => { snapshotCanvas(); renderMinimap(); scheduleSave(); });
   editor.on('connectionCreated', (info) => {
     const src = nodeData.get(String(info.output_id)) || {};
     const dst = nodeData.get(String(info.input_id)) || {};
@@ -742,7 +873,7 @@ async function runCanvas() {
 const terminalJob = (status) => ['completed', 'completed_with_errors', 'failed', 'cancelled'].includes(status);
 function jobLine(job, backend) {
   const status = job.status || 'queued';
-  const title = backend === 'comfy' ? `ComfyUI · ${job.promptId || job.jobId}` : `原生 · ${job.jobId}`;
+  const title = backend === 'comfy' ? `ComfyUI · ${job.promptId || job.jobId}` : `API Key · ${job.jobId}`;
   const when = new Date(job.createdAt || Date.now()).toLocaleTimeString('zh-CN', { hour12: false });
   const cancel = !terminalJob(status) ? `<button class="btn btn-sm" data-job-cancel="${escapeHtml(job.jobId)}" data-job-backend="${backend}">取消</button>` : '';
   const outputs = Array.isArray(job.files) && job.files.length ? ` · ${job.files.length} 个产物` : '';
@@ -822,8 +953,10 @@ async function reopenCurrent() {
   for (const [nid, node] of Object.entries(nodes)) {
     const data = node.data && node.data.type ? node.data : defaultData(String(node.class || '').replace('cv-nt-', ''));
     nodeData.set(String(nid), data);
+    renderNodeShell(String(nid), data);
     renderNodeBody(String(nid));
   }
+  renderMinimap();
   importing = false;
   // 状态环保留(直到下次运行前清除)
 }
@@ -856,6 +989,9 @@ function bindToolbar() {
     e.stopPropagation();
     $('cv-add-menu').classList.toggle('hidden');
   };
+  $('cv-node-search').oninput = (e) => renderCatalogBrowser(e.target.value);
+  for (const button of document.querySelectorAll('[data-cv-browser]')) button.onclick = () => { catalogMode = button.dataset.cvBrowser; for (const b of document.querySelectorAll('[data-cv-browser]')) b.classList.toggle('active', b === button); renderCatalogBrowser($('cv-node-search').value); };
+  $('btn-cv-catalog-refresh').onclick = async () => { await loadComfyCatalogs(true); renderCatalogBrowser($('cv-node-search').value); };
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.cv-add-wrap')) {
       $('cv-add-menu').classList.add('hidden');
@@ -889,6 +1025,17 @@ function nodeIdOf(target) {
 
 function bindDelegation() {
   const host = $('drawflow');
+
+  host.addEventListener('contextmenu', (e) => {
+    const id = nodeIdOf(e.target);
+    if (!id || !nodeData.has(id)) return;
+    e.preventDefault(); selectedNodeId = id; renderInspector();
+    showCtxMenu(e.clientX, e.clientY, [
+      { label: '复制节点', onClick: () => { window.__cvClipboard = structuredClone(nodeData.get(id)); } },
+      { label: '重复节点', onClick: () => { const d = structuredClone(nodeData.get(id)); const n = editor.getNodeFromId(id); const newId = String(editor.addNode('cv-' + d.type, n.inputs ? Object.keys(n.inputs).length : 0, n.outputs ? Object.keys(n.outputs).length : 1, (n.pos_x || 120) + 36, (n.pos_y || 80) + 36, 'cv-nt-' + d.type, {}, nodeShellHtml(d.type, d), false)); nodeData.set(newId, d); renderNodeBody(newId); snapshotCanvas(); scheduleSave(); } },
+      { label: '删除节点', danger: true, onClick: () => editor.removeNodeId(id) },
+    ]);
+  });
 
   host.addEventListener('click', async (e) => {
     const id = nodeIdOf(e.target);
@@ -931,6 +1078,20 @@ function bindDelegation() {
       scheduleSave();
     } else if (act === 'gen') {
       runNode(id);
+    } else if (act === 'combo-refresh') {
+      const schema = d.comfyWidgets && d.comfyWidgets[actBtn.dataset.combo];
+      if (schema && schema.remote && schema.remote.route) {
+        const r = await api.comfyComboOptions(d.comfyConnectionId, schema.remote.route);
+        if (r && r.ok) { schema.values = r.values || []; renderNodeBody(id); }
+      }
+    } else if (act === 'dynamic-add') {
+      d.comfyDynamicValues = d.comfyDynamicValues || [];
+      d.comfyDynamicValues.push('');
+      renderNodeBody(id); scheduleSave();
+    } else if (act === 'dynamic-remove') {
+      d.comfyDynamicValues = d.comfyDynamicValues || [];
+      d.comfyDynamicValues.splice(Number(actBtn.dataset.dyn), 1);
+      renderNodeBody(id); scheduleSave();
     } else if (act === 'prev') {
       d.view = Math.max(0, (d.view || 0) - 1);
       renderNodeBody(id);
@@ -978,6 +1139,10 @@ function bindDelegation() {
       if (!d.comfyInputs) d.comfyInputs = {};
       d.comfyInputs[key] = e.target.type === 'checkbox' ? e.target.checked : (e.target.type === 'number' ? Number(e.target.value) : e.target.value);
       scheduleSave();
+    } else if (d.type === 'external' && e.target.matches('[data-comfy-dynamic]')) {
+      d.comfyDynamicValues = d.comfyDynamicValues || [];
+      d.comfyDynamicValues[Number(e.target.dataset.comfyDynamic)] = e.target.value;
+      scheduleSave();
     } else if (e.target.classList.contains('cv-prompt') && !e.target.readOnly) {
       d.prompt = e.target.value;
       scheduleSave();
@@ -991,6 +1156,19 @@ function bindDelegation() {
 export function init() {
   bindToolbar();
   bindDelegation();
+  document.addEventListener('keydown', (e) => {
+    if (!state.section || state.section !== 'canvas' || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redoCanvas(); else undoCanvas(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redoCanvas(); }
+    if (e.key === 'Delete' && selectedNodeId) { editor.removeNodeId(selectedNodeId); }
+  });
+  bindInspector();
+  window.addEventListener('drafter:comfy-advanced-changed', async () => {
+    applyComfyAdvancedVisibility();
+    await loadComfyCatalogs(true);
+    buildAddMenu();
+    renderCatalogBrowser($('cv-node-search') && $('cv-node-search').value);
+  });
   api.on('aigc:exec-status', onExecStatus);
   api.on('canvas:job-status', onJobStatus); // 整图运行状态流(v0.12.0)
 }

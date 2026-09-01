@@ -1,6 +1,8 @@
 // ComfyUI HTTP protocol adapter. No Electron dependency: tests inject fetch through global.fetch.
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
 
 function endpoint(connection, suffix) {
@@ -86,4 +88,23 @@ async function view(connection, { filename, subfolder = '', type = 'output' } = 
   return request(connection, `/view?${query}`, undefined, requestOptions);
 }
 
-module.exports = { MAX_JSON_BYTES, endpoint, headers, request, json, health, objectInfo, queue, history, submit, interrupt, deleteQueued, view };
+async function comboOptions(connection, route, options) {
+  const safe = String(route || '');
+  if (!safe.startsWith('/internal/') || safe.includes('..') || safe.includes('\\')) throw new Error('ComfyUI 远程选项路径无效');
+  return json(connection, safe, undefined, options);
+}
+
+async function uploadImage(connection, file, options) {
+  if (!file || !file.path) throw new Error('缺少要桥接的图片文件');
+  const data = fs.readFileSync(file.path);
+  const name = path.basename(file.name || file.path).replace(/[\\/]/g, '_') || 'image.png';
+  const boundary = '----drafter-' + Math.random().toString(16).slice(2);
+  const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${name}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
+  const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+  const response = await json(connection, '/upload/image', { method: 'POST', headers: { 'content-type': `multipart/form-data; boundary=${boundary}` }, body: Buffer.concat([head, data, tail]) }, options);
+  if (!response || !response.name) throw new Error('ComfyUI 图片上传未返回文件名');
+  if (String(response.name).includes('..') || /[\\/]/.test(String(response.name))) throw new Error('ComfyUI 返回了无效图片文件名');
+  return response.subfolder ? `${response.subfolder}/${response.name}` : response.name;
+}
+
+module.exports = { MAX_JSON_BYTES, endpoint, headers, request, json, health, objectInfo, queue, history, submit, interrupt, deleteQueued, view, comboOptions, uploadImage };

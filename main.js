@@ -53,6 +53,7 @@ const comfyConnections = require('./src/main/comfy/connection-store');
 const comfyClient = require('./src/main/comfy/client');
 const comfySchema = require('./src/main/comfy/schema');
 const comfyFormat = require('./src/main/comfy/format');
+const comfyBridge = require('./src/main/comfy/bridge');
 const { ComfyJobs } = require('./src/main/comfy/jobs');
 const aux = require('./src/main/aux-models');
 const title = require('./src/main/title');
@@ -218,9 +219,14 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
   // 会话中的网页链接一律外抛系统浏览器(v0.9.33):渲染的 markdown <a> 默认行为是
   // 主窗口就地导航——窗口变成"浏览器"且没有返回路。will-navigate 拦截 http(s) 外抛,
-  // setWindowOpenHandler 拦截 target=_blank/window.open;file://(本地 index.html)放行。
+  // setWindowOpenHandler 拦截 target=_blank/window.open。
+  // v0.12.3:file:// 等其余导航也一律拦截——AI 常把文件路径写成 [路径](路径),
+  // 浏览器把 D:\... 解析成 file:///D:/%5C... 后就地导航失败,整窗黑屏(无路返回)。
+  // 程序化 loadFile/loadURL 不触发 will-navigate,不影响 App 自身加载。
   mainWindow.webContents.on('will-navigate', (e, url) => {
-    if (/^https?:\/\//i.test(url)) { e.preventDefault(); shell.openExternal(url); }
+    e.preventDefault();
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    else console.warn('[nav] blocked in-window navigation:', url);
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -433,6 +439,10 @@ async function getComfyCatalog(id, refresh = false) {
   return catalog;
 }
 ipcMain.handle('comfy:listConnections', () => comfyConnections.list());
+ipcMain.handle('comfy:localCatalog', async () => {
+  try { return { ok: true, catalog: comfySchema.normalizeCatalog(await comfyClient.objectInfo({ baseUrl: 'http://127.0.0.1:8188', authType: 'none', secret: '' })) }; }
+  catch (error) { return { ok: false, error: error.message }; }
+});
 ipcMain.handle('comfy:saveConnection', (_e, entry) => {
   const result = comfyConnections.save(entry);
   if (result && result.ok && result.connection) comfyCatalogs.delete(result.connection.id);
@@ -461,6 +471,14 @@ ipcMain.handle('comfy:catalog', async (_e, id, { refresh = false } = {}) => {
   } catch (error) {
     return { ok: false, error: error.message };
   }
+});
+ipcMain.handle('comfy:comboOptions', async (_e, { id, route } = {}) => {
+  try {
+    const connection = comfyConnections.byId(id);
+    if (!connection) return { ok: false, error: 'ComfyUI 连接不存在' };
+    const values = await comfyClient.comboOptions(connection, route);
+    return { ok: true, values: Array.isArray(values) ? values.slice(0, 200).map((value) => String(value).slice(0, 512)) : [] };
+  } catch (error) { return { ok: false, error: error.message }; }
 });
 ipcMain.handle('comfy:importGraph', (_e, graph, schema = {}) => {
   try { return { ok: true, ...comfyFormat.importAny(graph, schema) }; }
@@ -872,13 +890,14 @@ ipcMain.handle('assets:list', () => canvases.listAssets());
 // ---------------------------------------------------------------------------
 // traceId → { jobId, nodeId }:job 取消时按 traceId 停掉在跑的远程任务
 const traceJobIndex = new Map();
+const comfyTraceJobIndex = new Map();
 ipcMain.handle('canvas:run', async (_e, { canvasId } = {}) => {
   const canvas = canvases.load(canvasId);
   const graph = canvas && canvas.graph;
   const external = Object.entries(graph || {}).filter(([, node]) => node && node.inputs && node.inputs._comfyConnectionId);
-  // 一组同连接的 Comfy 节点必须作为一个 prompt 提交；混合图暂由校验明确拦住，避免错误地把张量跨后端传递。
+  // 外部 Comfy 节点作为一个子图运行；所有原生 API 生成节点将在它完成并将
+  // 标准产物回写后由 canvasJobs 继续执行，支持 ComfyUI → API 图片/视频链路。
   if (external.length) {
-    if (external.length !== Object.keys(graph || {}).length) return { ok: false, error: '原生节点与 ComfyUI 节点不能在同一次运行中混合，请拆分为独立画布。' };
     const connectionIds = [...new Set(external.map(([, node]) => node.inputs._comfyConnectionId))];
     if (connectionIds.length !== 1) return { ok: false, error: '一个画布的 ComfyUI 节点必须使用同一连接。' };
     const connectionId = connectionIds[0];
@@ -887,7 +906,26 @@ ipcMain.handle('canvas:run', async (_e, { canvasId } = {}) => {
       const classTypes = new Set(catalog.map((node) => node.classType));
       const missing = external.find(([, node]) => !classTypes.has(node.class_type));
       if (missing) return { ok: false, error: `连接的节点目录中不存在:${missing[1].class_type}` };
-      return comfyJobs.submit({ connectionId, canvasId, prompt: comfyFormat.cleanPrompt(graph) });
+      const connection = comfyConnections.byId(connectionId);
+      const prompt = await comfyBridge.projectPrompt(graph, { uploadImage: (file) => comfyClient.uploadImage(connection, file) });
+      const submitted = await comfyJobs.submit({ connectionId, canvasId, prompt });
+      if (!submitted.ok) return submitted;
+      comfyTraceJobIndex.set(submitted.job.jobId, { canvasId, externalIds: external.map(([id]) => id) });
+      (async () => {
+        const final = await comfyJobs.wait(submitted.job.jobId);
+        if (!final || !['completed', 'completed_with_errors'].includes(final.status)) return;
+        // ComfyJobs 的 emit 已按 nodeId 回写终态产物；重新进入原生 DAG，
+        // 外部节点以已落地素材作为数据源，执行其 API 下游。
+        canvasJobs.startJob(canvasId, {
+          canvasLoad: (id) => canvases.load(id), patchNode: (cid, nid, fn) => canvases.patchNode(cid, nid, fn),
+          keysById: (kid) => keys.byId(kid), modelTypeOf: (kid, mdl) => keys.modelType(kid, mdl),
+          createTask: (keyEntry, board, opts) => aigc.createTask(keyEntry, board, opts), pollTask: (keyEntry, traceId, onStatus) => aigc.pollTask(keyEntry, traceId, onStatus),
+          downloadResults: (keyEntry, traceId) => aigc.downloadResults(keyEntry, traceId, path.join(AIGC_DIR(), traceId)),
+          llmComplete: (keyEntry, opts) => llmtext.complete(keyEntry, opts), registerTrace: (traceId, jobId, nodeId) => traceJobIndex.set(traceId, { jobId, nodeId }),
+          emit: (payload) => { const win = getWindow(); if (win && !win.isDestroyed()) win.webContents.send('canvas:job-status', { ...payload, parentJobId: submitted.job.jobId }); },
+        });
+      })().catch(() => {});
+      return submitted;
     } catch (error) { return { ok: false, error: error.message }; }
   }
   return canvasJobs.startJob(canvasId, {
@@ -907,9 +945,13 @@ ipcMain.handle('canvas:run', async (_e, { canvasId } = {}) => {
   });
 });
 ipcMain.handle('canvas:job:list', (_e, { canvasId } = {}) => canvasJobs.listJobs(canvasId));
-ipcMain.handle('canvas:job:cancel', (_e, { jobId } = {}) => {
-  // 先停 job 循环,再停它在跑的远程任务
-  const ok = canvasJobs.cancelJob(jobId);
+ipcMain.handle('canvas:job:cancel', async (_e, { jobId } = {}) => {
+  // 先停原生 job 循环,再停它在跑的远程任务；Comfy 子图 job 同样可由统一入口取消。
+  let ok = canvasJobs.cancelJob(jobId);
+  if (comfyTraceJobIndex.has(jobId)) {
+    ok = await comfyJobs.cancel(jobId) || ok;
+    comfyTraceJobIndex.delete(jobId);
+  }
   for (const [traceId, ref] of traceJobIndex) {
     if (ref.jobId === jobId) {
       const h = aigcTasks.get(traceId);

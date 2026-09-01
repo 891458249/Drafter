@@ -87,7 +87,7 @@
         <!-- 无限画布板块(v0.10.0):节点工作流(Drawflow),多模型 fan-out / 节点生成历史 -->
         <div id="canvas-root" class="canvas-root">
           <div class="canvas-toolbar">
-            <button id="btn-cv-run" class="btn btn-sm btn-primary" title="整图运行:校验后按拓扑序执行全部生成节点;未变更节点命中缓存直接复用(ComfyUI 语义)">▶ 运行</button>
+            <button id="btn-cv-run" class="btn btn-sm btn-primary" title="整图运行:校验后按拓扑序执行全部生成节点;未变更节点自动复用上次结果(增量缓存)">▶ 运行</button>
             <div class="cv-add-wrap">
               <button id="btn-cv-add" class="btn btn-sm" title="添加节点(或双击画布空白搜索)">＋ 节点</button>
               <div id="cv-add-menu" class="cv-add-menu hidden"></div>
@@ -97,9 +97,8 @@
               <div id="cv-tpl-menu" class="cv-add-menu cv-tpl-menu hidden"></div>
             </div>
             <button id="btn-cv-import" class="btn btn-sm" title="导入别人分享的画布 JSON(fork)">⇪ 导入</button>
-            <button id="btn-cv-comfy-import" class="btn btn-sm" title="导入 ComfyUI workflow 或 prompt JSON">⇪ Comfy</button>
-            <button id="btn-cv-comfy" class="btn btn-sm" title="配置并管理 ComfyUI 服务连接">⚙ ComfyUI</button>
-            <button id="btn-cv-queue" class="btn btn-sm" title="查看本地与 ComfyUI 队列历史">☷ 队列</button>
+            <span id="cv-comfy-tools" class="hidden"><button id="btn-cv-comfy-import" class="btn btn-sm" title="导入外部 ComfyUI workflow 或 prompt JSON">⇪ Comfy</button><button id="btn-cv-comfy" class="btn btn-sm" title="高级:配置并管理外部 ComfyUI 服务">⚙ ComfyUI</button></span>
+            <button id="btn-cv-queue" class="btn btn-sm" title="查看运行队列和历史">☷ 队列</button>
             <div id="cv-queue-panel" class="cv-queue-panel hidden"></div>
             <span id="canvas-save-hint" class="canvas-save-hint" title="画布自动保存"></span>
             <span class="grow"></span>
@@ -107,8 +106,24 @@
             <button id="btn-cv-zoom-reset" class="icon-btn" title="重置缩放">1:1</button>
             <button id="btn-cv-zoom-in" class="icon-btn" title="放大">＋</button>
           </div>
-          <div id="drawflow" class="drawflow-host"></div>
-          <div id="canvas-empty" class="canvas-empty hidden">还没有画布——点左侧「＋ 新画布」新建一个</div>
+          <div class="canvas-native-layout">
+            <aside id="cv-node-browser" class="cv-node-browser">
+              <div class="cv-node-browser-head"><strong>节点</strong><button id="btn-cv-catalog-refresh" class="icon-btn" title="刷新本机 ComfyUI 节点目录">⟳</button></div>
+              <div class="cv-node-browser-tabs"><button class="active" data-cv-browser="nodes">全部节点</button><button data-cv-browser="favorites">收藏</button></div>
+              <input id="cv-node-search" class="input-sm" placeholder="搜索 900 个 ComfyUI 节点…" />
+              <div id="cv-node-categories" class="cv-node-categories"><div class="cv-catalog-empty">正在加载节点目录…</div></div>
+            </aside>
+            <div class="cv-workspace">
+              <div id="drawflow" class="drawflow-host"></div>
+              <div id="cv-minimap" class="cv-minimap" title="画布缩略图"></div>
+              <div id="canvas-empty" class="canvas-empty hidden">还没有画布——点左侧「＋ 新画布」新建一个</div>
+            </div>
+            <aside id="cv-inspector" class="cv-inspector">
+              <div class="cv-inspector-head"><strong id="cv-inspector-title">工作流概览</strong></div>
+              <div class="cv-inspector-tabs"><button class="active" data-cv-inspector-tab="params">参数</button><button data-cv-inspector-tab="info">信息</button><button data-cv-inspector-tab="settings">设置</button></div>
+              <div id="cv-inspector-body" class="cv-inspector-body"><div class="cv-catalog-empty">选择一个节点以查看参数、信息和设置。</div></div>
+            </aside>
+          </div>
         </div>
         <!-- 素材板块(v0.10.0):全部生成产物的归档网格(会话 + 画布两源) -->
         <div id="assets-root" class="assets-root">
@@ -513,6 +528,9 @@
         <h3>偏好</h3>
         <label class="settings-row" style="cursor:pointer">
           <input type="checkbox" id="set-instantjump" /> ⚡ 瞬时跳转定位(消息导航/回到底部,关闭则平滑滚动)
+        </label>
+        <label class="settings-row" style="cursor:pointer" title="外部 ComfyUI 是可选高级后端，需要自行部署和运行服务；API Key 原生画布无需此设置。">
+          <input type="checkbox" id="set-comfy-advanced" /> 🧪 高级模式:接入外部 ComfyUI 服务(需自备服务，实验性)
         </label>
         <label class="settings-row" style="cursor:pointer" title="新会话的系统提示把目录/git/记忆等动态段移到首条用户消息,提示前缀跨会话静态,缓存命中率更高、首轮更快。只影响设置后新建的会话。">
           <input type="checkbox" id="set-sharedcache" /> 🚀 跨会话共享提示缓存(仅影响新建会话,响应更快)
