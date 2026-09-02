@@ -228,6 +228,21 @@ export abstract class SessionPersistence extends Service {
   abstract list(signal?: AbortSignal): Promise<SessionHeader[]>
 
   /**
+   * Purge one session's durable artifact. A live Session bound to the id must
+   * be disposed BEFORE this call (the host's deleteSession does so); calling
+   * it against a live session rejects, since its write-behind would re-materialize
+   * the artifact. A session that was never materialized (created but never
+   * prompted — no artifact on disk) resolves as a no-op success. Unknown ids
+   * likewise resolve `false`.
+   * @param id - the session whose artifact is deleted.
+   * @returns whether a materialized artifact was removed.
+   */
+  async delete(id: SessionId): Promise<boolean> {
+    void id
+    throw new Error('session persistence backend does not support deletion')
+  }
+
+  /**
    * List materialized sessions with cheap per-log change tokens.
    *
    * Repeated observations of an unchanged log return the same revision. A

@@ -130,6 +130,12 @@ export type WorkspaceBrowserInjected = {
    */
   archiveSession: (sessionId: SessionId) => Promise<void>
   /**
+   * Permanently delete a Session: removes the persisted log and the workspace
+   * accounting slot. Irreversible; the confirmation dialog is the owning
+   * component's gate, not the RPC's.
+   */
+  deleteSession: (sessionId: SessionId) => Promise<void>
+  /**
    * Reorder a session inside its Workspace account (DOM-insertBefore
    * semantics: omitted anchor appends to the end). The view refreshes from
    * the Host response/changed frame; failures leave the order unchanged.

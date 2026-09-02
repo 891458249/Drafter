@@ -106,4 +106,16 @@ export interface WorkspaceApi {
    */
   archiveSession(request: RpcRequest<{ sessionId: SessionId }>):
   Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>>
+
+  /**
+   * Permanently deletes one session's persisted log and every registry
+   * reference. A live attached Agent is disposed first (its running turn is
+   * interrupted); its workspace accounting slot and archive-set entry go with
+   * it. A session with no materialized log (never prompted) is still deleted
+   * through its registry slots. Unknown ids fail with `session-not-found`.
+   * Fork lineage: children whose parent is deleted keep their own logs (their
+   * seeds are self-contained); the parent's id becomes a dangling lineage link.
+   */
+  deleteSession(request: RpcRequest<{ sessionId: SessionId }>):
+  Promise<RpcResponse<{ deleted: true }>>
 }

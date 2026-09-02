@@ -91,4 +91,11 @@ export interface IWorkspaces {
    * @param sessionId - session to archive.
    */
   archiveSession(sessionId: SessionId): Promise<void>
+  /**
+   * Permanently delete a session: the Host removes its persisted log and every
+   * registry reference (workspace accounting slot and archive-set entry). The
+   * local list projection drops the row via the session-removed echo.
+   * @param sessionId - session to permanently delete.
+   */
+  deleteSession(sessionId: SessionId): Promise<void>
 }

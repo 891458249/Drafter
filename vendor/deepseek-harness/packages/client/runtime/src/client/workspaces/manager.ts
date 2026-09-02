@@ -232,6 +232,18 @@ export class WorkspaceManager {
   }
 
   /**
+   * Permanently delete one session. No local projection mutation: the Host's
+   * workspace-changed/session-removed frames install the post-delete state —
+   * the unary echo carries no snapshot to install.
+   * @param sessionId - session to permanently delete.
+   * @returns the wire result.
+   */
+  async deleteSession(sessionId: SessionId): Promise<RpcResult<{ deleted: true }>> {
+    const { result } = await this.api.workspace.deleteSession({ sessionId })
+    return result
+  }
+
+  /**
    * Host-frame entry. Non-workspace frames are ignored so the runtime can
    * fan one host stream out to both object managers.
    * @param envelope - host stream envelope.

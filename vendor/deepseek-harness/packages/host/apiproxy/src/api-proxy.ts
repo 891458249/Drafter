@@ -1066,6 +1066,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const presetSwitches = new Map<SessionId, Promise<unknown>>()
   /** Client-chosen identity creation/resume, deduplicated across concurrent retries. */
   const sessionCreations = new Map<SessionId, Promise<Agent>>()
+  /** Owner handles of sessions created or resumed through this proxy; deleteSession disposes them. */
+  const liveHandles = new Map<SessionId, { dispose(): Promise<void> }>()
   /** Serializes path ownership and explicit title checks with Workspace mutations. */
   let workspaceCreationChain = Promise.resolve()
   const pendingQuestions = new Map<RpcId, PendingQuestion>()
@@ -1595,11 +1597,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           // session's history was produced under that composition, and
           // rebuilding it differently would replay tool calls the model can no
           // longer make.
-          return (await ctx.agents.resume({
+          const handle = await ctx.agents.resume({
             resumeSessionId: sessionId,
             agentOptions: agentOptions(),
             setup: (await composeAgent(storedPreset)).setup,
-          })).agent
+          })
+          liveHandles.set(sessionId, handle)
+          return handle.agent
         }
 
         try {
@@ -1608,7 +1612,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
         }
         const composition = await composeAgent(presetId)
-        return (await ctx.agents.create({
+        const handle = await ctx.agents.create({
           sessionId,
           agentOptions: agentOptions(),
           meta: {
@@ -1616,7 +1620,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             ...composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset },
           },
           setup: composition.setup,
-        })).agent
+        })
+        liveHandles.set(sessionId, handle)
+        return handle.agent
       })().catch((error: unknown) => {
         // Another Host entry path may have published the same identity while
         // this operation crossed an asynchronous persistence/filesystem step.
@@ -2817,6 +2823,57 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })
         }
         return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] })
+      },
+
+      async deleteSession(request) {
+        const { sessionId } = request.payload
+        const persistence = ctx.get('sessionPersistence')
+        if (persistence === undefined) {
+          return err(request, {
+            code: 'internal',
+            message: 'session deletion is unavailable: no session persistence backend is mounted',
+            details: {},
+          })
+        }
+        // Dispose the live owner first: a still-live session's write-behind
+        // would re-materialize the artifact after rm. Disposal fires
+        // session/disposed → host/session-removed, and the coordinator's
+        // retire drains the tail before this continues.
+        const handle = liveHandles.get(sessionId)
+        if (handle !== undefined) {
+          liveHandles.delete(sessionId)
+          await handle.dispose()
+        }
+        // Unknown id check BEFORE any state mutation: a session with neither a
+        // live owner nor a materialized artifact has nothing to delete. A
+        // never-prompted session exists in the registry's sessionIds with no
+        // artifact, so absence from persistence.list() alone cannot gate.
+        const attached = ctx.sessions.get(sessionId)
+        const listed = (await persistence.list()).find(header => header.id === sessionId)
+        const accounted = ctx.workspaceRegistry.list().some(workspace =>
+          workspace.sessionIds.includes(sessionId))
+        if (listed === undefined && attached === undefined && !accounted) {
+          return err(request, {
+            code: 'session-not-found',
+            message: `session "${sessionId}" not found`,
+            details: { sessionId },
+          })
+        }
+        // Serialize with the workspace write chain: detach/unarchive and the
+        // artifact rm must not interleave with a concurrent attach from another
+        // client (the chain is the same one create/rename/delete ride).
+        const operation = workspaceCreationChain.then(async () => {
+          await persistence.delete(sessionId)
+          for (const workspace of ctx.workspaceRegistry.list()) {
+            if (workspace.sessionIds.includes(sessionId)) await workspace.detachSession(sessionId)
+          }
+          if (ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)) {
+            await ctx.workspaceRegistry.unarchiveSession(sessionId)
+          }
+        })
+        workspaceCreationChain = operation.then(() => undefined, () => undefined)
+        await operation
+        return ok(request, { deleted: true as const })
       },
     },
 

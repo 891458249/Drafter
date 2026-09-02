@@ -1150,6 +1150,22 @@ export class PersistenceCoordinator<TornMarker = unknown> {
     })
   }
 
+  /**
+   * Drop all coordinator-side tracking for one id after its artifact was
+   * deleted out from under the backend (JsonlSessionPersistence.delete). A live
+   * owner must already be disposed by the caller; this only clears the
+   * bookkeeping that would otherwise re-adopt a stale cursor.
+   * @param id - the deleted session id.
+   */
+  deleteTracked(id: SessionId): void {
+    const tracked = this.states.get(id)
+    if (tracked === undefined) return
+    if (tracked.owner !== undefined && this.live.has(tracked.owner)) {
+      throw new Error(`cannot delete tracked session "${id}": its live owner is not disposed`)
+    }
+    this.states.delete(id)
+  }
+
   /** Drain and release state owned by one exact disposed Session lifecycle. */
   private async retireCore(session: Session): Promise<void> {
     await this.flush(session)

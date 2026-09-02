@@ -193,6 +193,22 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     return this.coordinator.inspect(id, signal)
   }
 
+  /**
+   * Delete one session's whole artifact directory (the log plus any sibling
+   * files the backend owns). The live-boundary check is the caller's (the
+   * coordinator's write-behind would re-materialize the file after a mid-turn
+   * delete). A never-materialized or already-absent id resolves `false`.
+   */
+  override async delete(id: SessionId): Promise<boolean> {
+    const path = await this.findLog(id)
+    if (path === undefined) return false
+    const dir = dirname(path)
+    await rm(dir, { recursive: true, force: true })
+    // Evict coordinator-side tracked state so a stale cursor cannot republish.
+    this.coordinator.deleteTracked(id)
+    return true
+  }
+
   // JSONL is sequential media: no loadStoredFrom hook, so the coordinator
   // parses the stored prefix (both encodings) and skips forward to fromSeq.
   readFrom(id: SessionId, fromSeq: number, signal?: AbortSignal): Promise<{ meta: SessionHeader; events: SessionEvent[] }> {
