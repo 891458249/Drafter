@@ -1163,43 +1163,48 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
 .cv-tab-close { color: var(--text-dim); font-size: 13px; padding: 0 2px; }
 .cv-tab-close:hover { color: var(--red); }
 
-/* ---------------- 节点(ComfyUI 绘制风格:侧向端口+端口名、圆角色卡) ---------------- */
+/* ---------------- 节点(Bifrost 图编辑器风格:深色石板卡+顶部色条+小方块端口) ---------------- */
 #drawflow .drawflow-node {
-  background: #2b2b2b; border: 1px solid #191919; border-radius: 10px;
-  padding: 0; width: 260px; color: var(--text); box-shadow: 0 4px 14px rgba(0,0,0,.45);
+  background: #3d4348; border: 1px solid #2a2e32; border-radius: 7px;
+  padding: 0; width: 260px; color: #e6e9ec; box-shadow: 0 2px 10px rgba(0,0,0,.5);
 }
-#drawflow .drawflow-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-#drawflow .drawflow-node.cv-nt-external { width: 320px; }
-/* 端口点移到节点两侧竖排(ComfyUI 语义),不再横排在上下边;
-   覆盖 vendor drawflow.min.css 的默认大圆点,用小实心彩点 */
+#drawflow .drawflow-node.selected { border-color: #7fb8e8; box-shadow: 0 0 0 1.5px #7fb8e8; }
+#drawflow .drawflow-node.cv-nt-external { width: 300px; }
+/* 端口点:小方块,半嵌在两侧边缘(Bifrost) */
 #drawflow .drawflow-node .inputs {
-  position: absolute !important; left: -6px !important; right: auto !important; top: 36px !important; bottom: auto !important;
+  position: absolute !important; left: -5px !important; right: auto !important; top: 40px !important; bottom: auto !important;
   display: flex !important; flex-direction: column !important; gap: 18px !important; width: auto !important; padding: 0 !important;
 }
 #drawflow .drawflow-node .outputs {
-  position: absolute !important; right: -6px !important; left: auto !important; top: 36px !important; bottom: auto !important;
+  position: absolute !important; right: -5px !important; left: auto !important; top: 40px !important; bottom: auto !important;
   display: flex !important; flex-direction: column !important; gap: 18px !important; width: auto !important; padding: 0 !important;
 }
 #drawflow .drawflow-node .input, #drawflow .drawflow-node .output {
   position: relative !important; left: auto !important; right: auto !important; top: auto !important; bottom: auto !important;
-  width: 9px !important; height: 9px !important; min-width: 9px !important; min-height: 9px !important;
-  border-radius: 50% !important; background: #5b9bd5 !important; border: none !important;
-  box-shadow: 0 0 4px rgba(0,0,0,.6) !important; margin: 0 !important; cursor: crosshair !important;
+  width: 8px !important; height: 11px !important; min-width: 8px !important; min-height: 11px !important;
+  padding: 0 !important; line-height: 1 !important; resize: none !important; max-height: none !important;
+  border-radius: 2px !important; border: none !important; margin: 0 !important; cursor: crosshair !important;
+  box-shadow: 0 0 3px rgba(0,0,0,.5) !important;
 }
-#drawflow .drawflow-node .input { background: #5b9bd5 !important; }
-#drawflow .drawflow-node .output { background: #3fb27f !important; }
-#drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { transform: scale(1.4); }
-#drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { background: var(--accent); }
+#drawflow .drawflow-node .input { background: #58c8e8 !important; }
+#drawflow .drawflow-node .output { background: #8fd07a !important; }
+#drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { transform: scale(1.35); }
 /* 端口名标签:与两侧端口点同距竖排 */
-.cv-ports { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; color: #b9b9b9; padding: 0 2px 2px; }
-.cv-ports-l, .cv-ports-r { display: flex; flex-direction: column; gap: 16px; min-height: 24px; }
-.cv-ports-l span::before, .cv-ports-r span::after { content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #8ab4f8; margin: 0 4px; vertical-align: middle; }
+.cv-ports { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; color: #aeb6bd; padding: 0 2px 3px; }
+.cv-ports-l, .cv-ports-r { display: flex; flex-direction: column; gap: 18px; min-height: 24px; }
+.cv-ports-l span::before, .cv-ports-r span::after { content: ''; display: inline-block; width: 5px; height: 8px; border-radius: 1px; background: #58c8e8; margin: 0 4px; vertical-align: middle; }
+.cv-ports-r span::after { background: #8fd07a; }
 .cv-ports-r { text-align: right; }
 .cv-head.nt-external { background: rgba(112,112,112,.16); }
-.cv-head.cv-cat-image { background: rgba(70,170,120,.18); } .cv-head.cv-cat-video { background: rgba(130,100,220,.20); }
-.cv-head.cv-cat-audio { background: rgba(214,146,63,.18); } .cv-head.cv-cat-text { background: rgba(91,155,213,.18); }
-.cv-head.cv-cat-model { background: rgba(190,110,160,.18); } .cv-head.cv-cat-3d { background: rgba(63,167,178,.20); }
-.cv-head.cv-cat-partner { background: rgba(190,160,75,.18); } .cv-head.cv-cat-utilities { background: rgba(125,125,125,.18); }
+/* Bifrost 顶部色条:分类色改为节点头部上沿细条,头部本体保持深色 */
+.cv-head.nt-external, .cv-head { border-top: 3px solid rgba(125,125,125,.55); border-radius: 6px 6px 0 0 !important; background: rgba(0,0,0,.18) !important; border-bottom: 1px solid rgba(0,0,0,.4) !important; }
+.cv-head.cv-cat-image { border-top-color: #46aa78; } .cv-head.cv-cat-video { border-top-color: #8264dc; }
+.cv-head.cv-cat-audio { border-top-color: #d6923f; } .cv-head.cv-cat-text { border-top-color: #5b9bd5; }
+.cv-head.cv-cat-model { border-top-color: #be6ea0; } .cv-head.cv-cat-3d { border-top-color: #3fa7b2; }
+.cv-head.cv-cat-partner { border-top-color: #bea04b; } .cv-head.cv-cat-utilities { border-top-color: #7d7d7d; }
+.cv-head.nt-text { border-top-color: #5b9bd5; } .cv-head.nt-upload { border-top-color: #3fb27f; }
+.cv-head.nt-image { border-top-color: #3fb27f; } .cv-head.nt-video { border-top-color: #8a5bd6; }
+.cv-head.nt-audio { border-top-color: #d6923f; } .cv-head.nt-model3d { border-top-color: #3fa7b2; }
 .cv-dynamic { display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--border); padding-top: 6px; font-size: 11px; color: var(--text-dim); }
 .cv-dynamic label { display: flex; justify-content: space-between; } .cv-dynamic button { border: 0; background: none; color: var(--text-dim); cursor: pointer; }
 .cv-dynamic input { background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 4px; }
@@ -1211,6 +1216,16 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
 .cv-node-toolbar { position: absolute; z-index: 40; display: flex; flex-direction: column; gap: 4px; }
 .cv-node-toolbar.hidden { display: none; }
 .cv-toolbar-colors { display: flex; gap: 8px; padding: 6px 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px; width: fit-content; margin: 0 auto; }
+.cv-toolbar-colors.hidden, .cv-toolbar-shapes.hidden { display: none; }
+.cv-toolbar-shapes { display: flex; flex-direction: column; gap: 2px; padding: 4px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px; width: fit-content; margin: 0 auto; }
+.cv-toolbar-shapes button { border: 0; background: none; color: var(--text-dim); font-size: 11px; padding: 4px 12px; border-radius: 5px; cursor: pointer; text-align: left; }
+.cv-toolbar-shapes button:hover, .cv-toolbar-shapes button.active { color: var(--text); background: var(--bg-hover); }
+/* 节点整体配色(ComfyUI 语义:颜色条改整个节点) */
+#drawflow .drawflow-node.cv-node-colored {
+  background: color-mix(in srgb, #3d4348 70%, var(--cv-node-color) 30%);
+  border-color: var(--cv-node-color);
+}
+#drawflow .drawflow-node.cv-node-colored .cv-head { border-top-color: var(--cv-node-color); background: color-mix(in srgb, transparent 60%, var(--cv-node-color) 40%) !important; }
 .cv-toolbar-colors i { width: 13px; height: 13px; border-radius: 50%; cursor: pointer; }
 .cv-toolbar-colors i:hover { transform: scale(1.2); }
 .cv-toolbar-row { display: flex; gap: 2px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px; padding: 3px 4px; width: fit-content; margin: 0 auto; }

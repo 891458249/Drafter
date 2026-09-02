@@ -122,8 +122,8 @@ function bindInspector() {
   });
   $('cv-inspector-body').addEventListener('change', (e) => {
     const d = selectedNodeId && nodeData.get(String(selectedNodeId)); if (!d) return;
-    if (e.target.dataset.cvStatus) { d.nodeStatus = e.target.dataset.cvStatus; const el = document.querySelector(`#node-${selectedNodeId}`); if (el) el.classList.toggle('cv-node-disabled', d.nodeStatus === 'disabled'); renderInspector(); scheduleSave(); return; }
-    if (e.target.dataset.cvColor) { d.nodeColor = e.target.value; const el = document.querySelector(`#node-${selectedNodeId} .cv-head`); if (el) el.style.borderLeft = `5px solid ${d.nodeColor}`; scheduleSave(); return; }
+    if (e.target.dataset.cvStatus) { d.nodeStatus = e.target.dataset.cvStatus; applyNodeVisual(selectedNodeId, d); renderInspector(); scheduleSave(); return; }
+    if (e.target.dataset.cvColor) { d.nodeColor = e.target.value; applyNodeVisual(selectedNodeId, d); scheduleSave(); return; }
     const key = e.target.dataset.cvParam; if (!key) return;
     const target = d.type === 'external' ? (d.comfyInputs ||= {}) : d;
     target[key] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
@@ -195,6 +195,7 @@ function nodeShellHtml(type, d = {}) {
 function renderNodeShell(id, d) {
   const host = document.querySelector(`#node-${id} .drawflow_content_node`);
   if (host) host.innerHTML = nodeShellHtml(d.type, d);
+  applyNodeVisual(id, d); // 颜色/形状/禁用态随壳一起恢复
 }
 
 function nodeEl(id) {
@@ -684,6 +685,7 @@ function addExternalNodeAt(connectionId, classType, pos) {
     slotNames: (schema.inputs || []).map((input) => input.name), tasks: [], active: -1, view: 0,
   };
   nodeData.set(id, data);
+  renderNodeShell(id, data); // 外部节点壳依赖 data.slotNames/comfyOutputs 才能渲染端口名
   renderNodeBody(id);
   renderMinimap();
   scheduleSave();
@@ -781,7 +783,10 @@ function bootEditor() {
     if (e.target.closest('.cv-gallery') || e.target.closest('textarea') || e.target.closest('select')) return; // 节点内可滚内容优先滚动
     e.preventDefault();
     if (e.deltaY > 0) editor.zoom_out(); else editor.zoom_in();
+    if (selectedNodeId) requestAnimationFrame(() => showNodeToolbar(selectedNodeId));
   }, { passive: false });
+  // 画布平移/缩放时悬浮工具栏同步跟随选中节点
+  editor.on('translate', () => { if (selectedNodeId) showNodeToolbar(selectedNodeId); });
 
   // 连线中点/路径点击 → 悬浮菜单:Add Node / Add Reroute / Delete(ComfyUI 语义)
   $('drawflow').addEventListener('click', (e) => {
@@ -805,7 +810,8 @@ function bootEditor() {
   editor.on('nodeSelected', (id) => { selectedNodeId = String(id); renderInspector(); showNodeToolbar(String(id)); });
   editor.on('nodeUnselected', () => { hideNodeToolbar(); });
   editor.on('nodeRemoved', (id) => { snapshotCanvas(); nodeData.delete(String(id)); if (String(id) === selectedNodeId) { selectedNodeId = null; renderInspector(); hideNodeToolbar(); } scheduleSave(); });
-  editor.on('nodeMoved', () => { snapshotCanvas(); renderMinimap(); scheduleSave(); });
+  // 节点拖动后悬浮工具栏跟随(Bifrost/ComfyUI 语义:工具栏贴着选中节点)
+  editor.on('nodeMoved', () => { if (selectedNodeId) showNodeToolbar(selectedNodeId); snapshotCanvas(); renderMinimap(); scheduleSave(); });
   editor.on('connectionCreated', (info) => {
     const src = nodeData.get(String(info.output_id)) || {};
     const dst = nodeData.get(String(info.input_id)) || {};
@@ -1185,7 +1191,7 @@ function pasteNode(payload, atPos) {
   const c = atPos || canvasViewCenter();
   const id = String(editor.addNode('cv-' + payload.data.type, payload.inputs, payload.outputs, c.x + 40, c.y + 40, 'cv-nt-' + payload.data.type, {}, nodeShellHtml(payload.data.type, payload.data), false));
   nodeData.set(id, structuredClone(payload.data));
-  renderNodeBody(id); renderMinimap(); snapshotCanvas(); scheduleSave();
+  renderNodeBody(id); applyNodeVisual(id, payload.data); renderMinimap(); snapshotCanvas(); scheduleSave();
   return id;
 }
 function pasteAtScreen(clientX, clientY) {
@@ -1216,8 +1222,19 @@ function fitCanvas() {
   editor.precanvas.style.transform = `translate(${editor.canvas_x}px, ${editor.canvas_y}px) scale(${editor.zoom})`;
 }
 
-// 选中节点悬浮工具栏(v0.12.5,ComfyUI):删除/信息/形状/绕过/最小化/复制/更多+颜色条
+// 节点整体配色(Bifrost/ComfyUI:颜色改整个节点,不是一条边);通过 CSS 变量驱动
+function applyNodeVisual(id, d) {
+  const el = document.querySelector(`#node-${id}`);
+  if (!el || !d) return;
+  el.style.setProperty('--cv-node-color', d.nodeColor || '');
+  el.classList.toggle('cv-node-colored', !!d.nodeColor);
+  if (d.nodeShape) { el.classList.remove('cv-shape-box', 'cv-shape-round', 'cv-shape-card'); el.classList.add(d.nodeShape); }
+  el.classList.toggle('cv-node-disabled', (d.nodeStatus || 'normal') === 'disabled');
+}
+
+// 选中节点悬浮工具栏(v0.12.5,ComfyUI):删除/信息/形状/绕过/最小化/复制/更多
 const TOOLBAR_COLORS = ['#585858','#a05050','#b0684a','#5a8a50','#5a5aa8','#5aa8a0','#8a5aa8','#b0a050','#8a8a8a'];
+const NODE_SHAPES = [['cv-shape-box', '⬛ 方形'], ['cv-shape-round', '⬤ 圆形'], ['cv-shape-card', '▭ 卡片']];
 function showNodeToolbar(id) {
   const bar = $('cv-node-toolbar');
   const el = document.querySelector(`#node-${id}`);
@@ -1228,17 +1245,23 @@ function showNodeToolbar(id) {
   const bw = 240;
   bar.style.left = Math.max(4, Math.min(wr.width - bw - 8, r.left - wr.left + r.width / 2 - bw / 2)) + 'px';
   bar.style.top = Math.max(2, r.top - wr.top - (bar.classList.contains('with-colors') ? 88 : 54)) + 'px';
-  const colors = $('cv-toolbar-colors');
-  colors.innerHTML = TOOLBAR_COLORS.map((c) => `<i style="background:${c}" data-cvt-color="${c}"></i>`).join('');
-  bar.classList.add('with-colors');
 }
-function hideNodeToolbar() { $('cv-node-toolbar')?.classList.add('hidden'); }
+function hideNodeToolbar() { $('cv-node-toolbar')?.classList.add('hidden'); barRemoveColors(); }
+function barHasColors() { return !!$('cv-toolbar-colors') && !$('cv-toolbar-colors').classList.contains('hidden'); }
+function barRemoveColors() { $('cv-toolbar-colors')?.classList.add('hidden'); $('cv-toolbar-shapes')?.classList.add('hidden'); $('cv-node-toolbar')?.classList.remove('with-colors'); }
 function bindNodeToolbar() {
   $('cv-node-toolbar').addEventListener('click', (e) => {
     const colorBtn = e.target.closest('[data-cvt-color]');
     if (colorBtn && selectedNodeId) {
       const d = nodeData.get(selectedNodeId);
-      if (d) { d.nodeColor = colorBtn.dataset.cvtColor; const head = document.querySelector(`#node-${selectedNodeId} .cv-head`); if (head) head.style.borderLeft = `5px solid ${d.nodeColor}`; scheduleSave(); }
+      if (d) { d.nodeColor = colorBtn.dataset.cvtColor; applyNodeVisual(selectedNodeId, d); scheduleSave(); }
+      return;
+    }
+    const shapeOpt = e.target.closest('[data-cvt-shape-opt]');
+    if (shapeOpt && selectedNodeId) {
+      const d = nodeData.get(selectedNodeId);
+      if (d) { d.nodeShape = shapeOpt.dataset.cvtShapeOpt; applyNodeVisual(selectedNodeId, d); scheduleSave(); }
+      $('cv-toolbar-shapes')?.classList.add('hidden');
       return;
     }
     const btn = e.target.closest('[data-cvt]');
@@ -1251,19 +1274,74 @@ function bindNodeToolbar() {
     else if (act === 'min') document.querySelector(`#node-${id}`)?.classList.toggle('cv-min');
     else if (act === 'clone' && d) pasteNode(cloneNodeData(id));
     else if (act === 'shape') {
-      const el = document.querySelector(`#node-${id}`);
-      if (el) { const shapes = ['cv-shape-box', 'cv-shape-round', 'cv-shape-card']; const cur = shapes.findIndex((s) => el.classList.contains(s)); el.classList.remove(...shapes); el.classList.add(shapes[(cur + 1) % shapes.length]); if (d) d.nodeShape = shapes[(cur + 1) % shapes.length]; scheduleSave(); }
+      // 形状按钮:展开颜色条 + 形状下拉菜单(不是点一次变一次)
+      if (barHasColors()) { barRemoveColors(); showNodeToolbar(id); return; }
+      $('cv-toolbar-colors').innerHTML = TOOLBAR_COLORS.map((c) => `<i style="background:${c}" data-cvt-color="${c}"></i>`).join('');
+      $('cv-toolbar-colors').classList.remove('hidden');
+      $('cv-toolbar-shapes').innerHTML = NODE_SHAPES.map(([cls, label]) => `<button data-cvt-shape-opt="${cls}"${d && d.nodeShape === cls ? ' class="active"' : ''}>${label}</button>`).join('');
+      $('cv-toolbar-shapes').classList.remove('hidden');
+      $('cv-node-toolbar').classList.add('with-colors');
+      showNodeToolbar(id);
     } else if (act === 'more') {
       const r = btn.getBoundingClientRect();
       const el = document.querySelector(`#node-${id}`);
       if (el) el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left, clientY: r.bottom + 4 }));
     }
-    if (act !== 'more') showNodeToolbar(id);
+    if (act !== 'more' && act !== 'shape') showNodeToolbar(id);
   });
 }
 
 function bindDelegation() {
   const host = $('drawflow');
+
+  // 左侧输入引脚主动连线(Bifrost/ComfyUI 语义:左引脚 → 其他节点右引脚,反方向拉起)
+  let inputDrag = null;
+  host.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const dot = e.target.closest('.input');
+    if (!dot) return;
+    const nodeEl = dot.closest('.drawflow-node');
+    if (!nodeEl) return;
+    e.stopPropagation(); e.preventDefault();
+    inputDrag = { dstNode: nodeEl.id.replace('node-', ''), dstClass: dot.classList[1] || 'input_1' };
+    dot.classList.add('cv-linking');
+  }, true);
+  window.addEventListener('pointerup', (e) => {
+    if (!inputDrag) return;
+    const src = inputDrag; inputDrag = null;
+    for (const el of document.querySelectorAll('.cv-linking')) el.classList.remove('cv-linking');
+    const dot = e.target.closest('.output');
+    if (!dot) return;
+    const nodeEl = dot.closest('.drawflow-node');
+    if (!nodeEl) return;
+    const srcNode = nodeEl.id.replace('node-', '');
+    const srcClass = dot.classList[1] || 'output_1';
+    // 复用 connectionCreated 的类型校验:左引脚(目标 input) ← 右引脚(源 output)
+    const srcData = nodeData.get(String(srcNode)) || {};
+    const dstData = nodeData.get(String(src.dstNode)) || {};
+    const slot = Number(String(src.dstClass).replace('input_', '')) - 1;
+    const externalPair = srcData.type === 'external' && dstData.type === 'external' && srcData.comfyConnectionId && srcData.comfyConnectionId === dstData.comfyConnectionId;
+    const accept = dstData.type && NODE_TYPES[dstData.type] ? NODE_TYPES[dstData.type].inTypes[slot] : null;
+    const offer = srcData.type && NODE_TYPES[srcData.type] ? NODE_TYPES[srcData.type].outType : null;
+    if (!externalPair && (!accept || accept !== offer)) return;
+    editor.addConnection(srcNode, src.dstNode, srcClass, src.dstClass);
+    applyLinkedPrompt(src.dstNode);
+    scheduleSave();
+  });
+
+  // 节点拖拽期间隐藏悬浮工具栏,停手后重新跟随显示(ComfyUI 语义)
+  let dragWatch = null;
+  host.addEventListener('mousedown', (e) => {
+    const el = e.target.closest('.drawflow-node');
+    if (el) dragWatch = { id: el.id.replace('node-', ''), x: e.clientX, y: e.clientY, dragging: false };
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (dragWatch && !dragWatch.dragging && (Math.abs(e.clientX - dragWatch.x) > 4 || Math.abs(e.clientY - dragWatch.y) > 4)) { dragWatch.dragging = true; hideNodeToolbar(); }
+  });
+  window.addEventListener('mouseup', () => {
+    if (dragWatch && dragWatch.dragging && selectedNodeId) showNodeToolbar(selectedNodeId);
+    dragWatch = null;
+  });
 
   // 左键空白处框选(ComfyUI 语义):捕获阶段拦住 Drawflow 的默认画布拖动
   let boxSel = null;

@@ -131,9 +131,10 @@
               <!-- 画布标签页(ComfyUI 顶部工作流标签):打开的多个画布以标签形式切换 -->
               <div id="cv-tabs" class="cv-tabs"></div>
               <div class="cv-view-toggle"><button class="active" data-cv-view="graph">图形</button><button data-cv-view="app">应用</button></div>
-              <!-- 选中节点悬浮工具栏(ComfyUI):删除/信息/形状/绕过/复制/适配/更多,激活时附带颜色条 -->
+              <!-- 选中节点悬浮工具栏(ComfyUI):删除/信息/形状/绕过/复制/适配/更多;颜色条+形状下拉由形状按钮展开 -->
               <div id="cv-node-toolbar" class="cv-node-toolbar hidden">
-                <div id="cv-toolbar-colors" class="cv-toolbar-colors"></div>
+                <div id="cv-toolbar-colors" class="cv-toolbar-colors hidden"></div>
+                <div id="cv-toolbar-shapes" class="cv-toolbar-shapes hidden"></div>
                 <div class="cv-toolbar-row">
                   <button title="删除选定的项目" data-cvt="delete">🗑</button>
                   <button title="节点信息" data-cvt="info">ℹ️</button>
