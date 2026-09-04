@@ -27,33 +27,36 @@
     box-shadow: 0 4px 16px rgba(0, 0, 0, .45), inset 0 1px 2px rgba(255, 255, 255, .15);
     display: flex; align-items: center; justify-content: center;
     cursor: grab; touch-action: none;
-    transition: border-radius .35s cubic-bezier(.34, 1.56, .64, 1), box-shadow .2s;
+    transition: box-shadow .2s;
     will-change: transform;
   }
-  /* 贴边停靠:整圆 → 半圆页签,平边与屏幕边缘严丝合缝(窗口已由主进程 flush 到边缘) */
-  #ball.dock-left   { border-radius: 0 32px 32px 0; transform: translateX(-16px); }
-  #ball.dock-right  { border-radius: 32px 0 0 32px; transform: translateX(16px); }
-  #ball.dock-top    { border-radius: 0 0 32px 32px; transform: translateY(-4px); }
-  #ball.dock-bottom { border-radius: 32px 32px 0 0; transform: translateY(272px); }
+  /* .dock-* 仅作贴边状态标记(冒烟断言/联动),变形视觉由 overlay.js applyBallVisual 逐帧驱动 */
   #ball:hover { box-shadow: 0 6px 22px rgba(0, 0, 0, .55), 0 0 12px rgba(212, 175, 116, .25), inset 0 1px 2px rgba(255,255,255,.15); }
   #ball.dragging { cursor: grabbing; }
   #ball .logo { font-size: 26px; color: #d4af74; text-shadow: 0 1px 3px rgba(0,0,0,.6); pointer-events: none; }
-  /* 任务小球:conic-gradient 进度环 */
+  /* 任务小球:暗色底 + 斑马纹旋转环(busy) */
   #orbs { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 8px; }
   .orb {
     width: 40px; height: 40px; border-radius: 50%;
-    background: conic-gradient(#d4af74 calc(var(--pct, 0) * 1%), rgba(255,255,255,.12) 0),
-                radial-gradient(circle at 35% 30%, #3a332b, #211d18 70%);
+    background: radial-gradient(circle at 35% 30%, #3a332b, #211d18 70%);
     border: 1.5px solid rgba(255, 255, 255, .18);
     box-shadow: 0 3px 10px rgba(0, 0, 0, .4);
     display: flex; align-items: center; justify-content: center;
     cursor: pointer; position: relative;
     transition: transform .15s;
-    will-change: transform;
   }
   .orb:hover { transform: scale(1.12); }
-  .orb .dot { width: 26px; height: 26px; border-radius: 50%; background: #15120f; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #cbb; overflow: hidden; }
+  .orb .dot { width: 26px; height: 26px; border-radius: 50%; background: #15120f; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #cbb; overflow: hidden; position: relative; }
   .orb .dot span { max-width: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 进行中:斑马纹加载环旋转(repeating-conic 条纹 + 环形 mask) */
+  .orb.busy::before {
+    content: ''; position: absolute; inset: -1.5px; border-radius: 50%;
+    background: repeating-conic-gradient(#d4af74 0deg 14deg, rgba(212, 175, 116, .12) 14deg 28deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px));
+    animation: orb-spin 1.1s linear infinite;
+  }
+  @keyframes orb-spin { to { transform: rotate(360deg); } }
   .orb.done {
     background: radial-gradient(circle at 35% 30%, #4ade80, #16a34a 70%);
     border-color: rgba(134, 239, 172, .7);

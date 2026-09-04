@@ -11,7 +11,7 @@ const { SessionManager } = require('../src/main/sessions');
 test.after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
 const {
   PREDICT_ASYMPTOTE, predictedPct, isTrackableKind, SNAP_THRESHOLD,
-  snapshotToMap, reduceSessEvent, snapTarget, springStep, clamp,
+  snapshotToMap, reduceSessEvent, snapTarget, snapWindow, springStep, clamp,
 } = require('../src/main/overlayMath');
 
 const T0 = 1_000_000;
@@ -101,6 +101,29 @@ test('snapTarget: 返回球心到边缘的距离 dist(吸附阈值判定用)', (
   const t3 = snapTarget({ x: 1900, y: 100, w: 96, h: 340 }, wa);
   assert.strictEqual(t3.dist, 0);
   assert.strictEqual(SNAP_THRESHOLD, 80);
+});
+
+test('snapWindow: 以球 rect(非窗口中心)算距离——上下边缘吸附判定回归', () => {
+  // 悬浮窗 96×340,球 rect 在窗口内 (16,4) 64×64(球心偏移 48,36)。
+  // 球已贴到屏幕顶(窗口 y=10 → 球心 y=46)
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  const BALL = { ox: 16, oy: 4, w: 64, h: 64 };
+  const nearTop = snapWindow({ x: 800, y: 10 }, BALL, wa);
+  assert.strictEqual(nearTop.edge, 'top');
+  assert.strictEqual(nearTop.dist, 46); // 球心距顶 46px ≤80 → 吸
+  assert.strictEqual(nearTop.y, 4);     // 换算回窗口坐标(margin 8 - 球偏移 4)
+  // 窗口中心距顶 180px,但球心只有 46px——用窗口中心算会误判为不吸附(回归点)
+  const farTop = snapWindow({ x: 800, y: 300 }, BALL, wa);
+  assert.ok(farTop.dist > SNAP_THRESHOLD);
+  assert.strictEqual(farTop.edge, 'top'); // 最近仍是顶,但调用方按阈值放弃吸附
+  // 底部同理(球心贴底:窗口 y = 1040-46-36 = 958,窗口大部分悬在屏外,球在窗顶可见)
+  const nearBottom = snapWindow({ x: 800, y: 958 }, BALL, wa);
+  assert.strictEqual(nearBottom.edge, 'bottom');
+  assert.strictEqual(nearBottom.dist, 46);
+  // 左右不受影响(窗口x=1814,球心 1862,距右 58)
+  const nearRight = snapWindow({ x: 1920 - 96 - 10, y: 300 }, BALL, wa);
+  assert.strictEqual(nearRight.edge, 'right');
+  assert.strictEqual(nearRight.dist, 58);
 });
 
 test('snapTarget: 选最近边并沿边 clamp(任务栏在底部)', () => {

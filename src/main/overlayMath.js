@@ -111,6 +111,15 @@ function snapTarget(ball, wa, margin = 8) {
   return t;
 }
 
+// 以「窗口 + 窗口内球的 rect」求吸附:悬浮窗里球不在窗口几何中心(96×340 窗口、
+// 球 rect 偏移 16,4 尺寸 64×64),若直接用窗口中心算距离,上下边缘永远到不了
+// 阈值(中心偏 170px)——必须换算成球 rect 再 snap,结果再换算回窗口坐标。
+// win: {x, y}(窗口左上);ball: {ox, oy, w, h}(球在窗口内的 rect)
+function snapWindow(win, ball, wa, margin = 8) {
+  const t = snapTarget({ x: win.x + ball.ox, y: win.y + ball.oy, w: ball.w, h: ball.h }, wa, margin);
+  return { edge: t.edge, dist: t.dist, x: t.x - ball.ox, y: t.y - ball.oy };
+}
+
 // 阻尼弹簧(半隐式欧拉,归一化位移):k 刚度、c 阻尼;欠阻尼(c < 2√k)允许一次
 // 过冲——果冻感的来源。state: {x, v}(x = 到目标的归一化位移);dt 秒。
 // 返回 true 表示已收敛(|x|<0.5px 且 |v|<5px/s,调用方钉死到目标坐标)。
@@ -135,6 +144,7 @@ const M = {
   snapshotToMap,
   reduceSessEvent,
   snapTarget,
+  snapWindow,
   springStep,
   clamp,
 };

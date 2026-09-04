@@ -215,6 +215,24 @@ function check(name, cond, extra) {
       `吸附后 x=${dockPos && dockPos.x} 期望=${flushX} edge=${dockFb && dockFb.edge}`)
     check('吸附后半圆贴边变形(dock-right 类)', typeof dockCls === 'string' && dockCls.includes('dock-right'), dockCls)
 
+    // 场景三:从右缘拖到屏幕顶部附近(向左下移出右缘阈值)→ 上下边缘识别回归
+    const stR = await evalJs(oc, `window.api.overlayGetState()`)
+    const rightBallCx = stR.x + 48, rightBallCy = stR.y + 36
+    setCursor(rightBallCx, rightBallCy)
+    await sleep(400)
+    const topTargetCx = waWin.x + 400, topTargetCy = waWin.y + 60 // 球心距顶 60、距右 >200
+    dragProc = dragMoves(rightBallCx, rightBallCy, topTargetCx, topTargetCy)
+    await sleep(1600)
+    releaseLeft()
+    await new Promise((r) => { dragProc.on('exit', r); setTimeout(r, 5000) })
+    await sleep(2200)
+    const topPos = await evalJs(oc, `window.api.overlayGetState()`)
+    const topFb = await evalJs(mc, `window.api.getStore().then(s => s.settings.floatBall || {})`)
+    const topCls = await evalJs(oc, `document.getElementById('ball').className`)
+    check('靠近顶部松手 → 吸附贴顶缘(上下识别回归)', !!topPos && Math.abs(topPos.y - waWin.y) <= 2 && topFb.edge === 'top',
+      `吸附后 y=${topPos && topPos.y} 期望=${waWin.y} edge=${topFb && topFb.edge}`)
+    check('贴顶后半圆变形(dock-top 类)', typeof topCls === 'string' && topCls.includes('dock-top'), topCls)
+
     const pdCount = await evalJs(oc, `window.__pd`)
     const pdInfo = await evalJs(oc, `JSON.stringify(window.__pdInfo)`)
     const orbStart = await evalJs(oc, `window.__orbDragStart === true`)

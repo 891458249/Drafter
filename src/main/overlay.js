@@ -286,8 +286,20 @@ function setPos({ x, y, edge }) {
   win.setPosition(cx, cy);
 }
 
+// 持久化停靠状态:坐标按 workArea 夹取(贴边轴 flush,其余轴夹在界内),
+// 避免持久化未夹取的弹簧目标值(如沿边坐标越界)导致恢复时窗口漂移
 function setDock({ x, y, edge, displayId }) {
-  saveSetting({ x: Math.round(x), y: Math.round(y), edge, displayId });
+  const displays = screen.getAllDisplays();
+  const d = displays.find((v) => v.id === displayId) || workAreaFor(x, y).display;
+  const wa = d ? d.workArea : workAreaFor(x, y).wa;
+  let px = Math.round(x), py = Math.round(y);
+  if (edge === 'left') px = wa.x;
+  else if (edge === 'right') px = wa.x + wa.width - WIN_W;
+  else px = math.clamp(px, wa.x, wa.x + wa.width - WIN_W);
+  if (edge === 'top') py = wa.y;
+  else if (edge === 'bottom') py = wa.y + wa.height - WIN_H;
+  else py = math.clamp(py, wa.y, wa.y + wa.height - WIN_H);
+  saveSetting({ x: px, y: py, edge: edge || null, displayId });
 }
 
 // --- pendingDone / 交互 -----------------------------------------------------
