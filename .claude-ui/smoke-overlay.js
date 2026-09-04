@@ -176,29 +176,56 @@ function check(name, cond, extra) {
     await sleep(600)
     const preDrag = await evalJs(oc, `window.api.overlayGetState()`)
     console.log('  拖拽前 interactive=' + (preDrag && preDrag.interactive) + ' 窗口=(' + (preDrag && preDrag.x) + ',' + (preDrag && preDrag.y) + ') 球心=(' + ballCx + ',' + ballCy + ')')
-    // 按住移动(不松手)→ 窗口应实时跟手
-    const dragProc = dragMoves(ballCx, ballCy, ballCx - 500, ballCy + 60)
-    let maxFollow = 0, dragPos = null
+    const waWin = st.workAreas.find((w) => ballCx >= w.x && ballCx <= w.x + w.width) || st.workAreas[0]
+
+    // 场景一:拖放远离边缘(>80px)→ 自由摆放,不吸附
+    let dragProc = dragMoves(ballCx, ballCy, ballCx - 500, ballCy + 60)
+    let maxFollow = 0
     for (let i = 0; i < 20; i++) {
       await sleep(150)
       const s = await evalJs(oc, `window.api.overlayGetState()`)
-      if (s) { maxFollow = Math.max(maxFollow, Math.abs(s.x - st.x), Math.abs(s.y - st.y)); dragPos = s }
+      if (s) maxFollow = Math.max(maxFollow, Math.abs(s.x - st.x), Math.abs(s.y - st.y))
     }
-    check('拖拽中窗口实时跟随(>300px)', maxFollow > 300, `maxFollow=${maxFollow}px 末位=(${dragPos && dragPos.x},${dragPos && dragPos.y})`)
-    releaseLeft() // 松手 → 果冻弹簧应回吸到最近边缘
+    releaseLeft()
     await new Promise((r) => { dragProc.on('exit', r); setTimeout(r, 5000) })
-    await sleep(2000) // 弹簧收敛
+    await sleep(800)
+    const floatPos = await evalJs(oc, `window.api.overlayGetState()`)
+    const floatFb = await evalJs(mc, `window.api.getStore().then(s => s.settings.floatBall || {})`)
+    const floatDropX = ballCx - 500 - 48, floatDropY = ballCy + 60 - 36 // 松手时窗口左上≈光标-grab偏移
+    check('拖拽中窗口实时跟随(>300px)', maxFollow > 300, `maxFollow=${maxFollow}px`)
+    check('远离边缘松手 → 自由摆放不吸附', !!floatPos && Math.abs(floatPos.x - floatDropX) <= 24 && Math.abs(floatPos.y - floatDropY) <= 24 && !floatFb.edge,
+      `落点=(${floatDropX},${floatDropY}) 实际=(${floatPos && floatPos.x},${floatPos && floatPos.y}) edge=${floatFb && floatFb.edge}`)
+
+    // 场景二:再拖到右边缘附近(球心距边缘 ≤80px)松手 → 果冻吸附 + 半圆贴边变形
+    const stMid = await evalJs(oc, `window.api.overlayGetState()`)
+    const nearCx = waWin.x + waWin.width - 60 // 窗口贴右缘留 60px 拖入 → 球心距边缘 ~68px
+    const midBallCx = stMid.x + 48, midBallCy = stMid.y + 36
+    setCursor(midBallCx, midBallCy)
+    await sleep(400)
+    dragProc = dragMoves(midBallCx, midBallCy, nearCx, midBallCy)
+    await sleep(1400)
+    releaseLeft()
+    await new Promise((r) => { dragProc.on('exit', r); setTimeout(r, 5000) })
+    await sleep(2200) // 弹簧吸附+变形动画
+    const dockPos = await evalJs(oc, `window.api.overlayGetState()`)
+    const dockFb = await evalJs(mc, `window.api.getStore().then(s => s.settings.floatBall || {})`)
+    const dockCls = await evalJs(oc, `document.getElementById('ball').className`)
+    const flushX = waWin.x + waWin.width - 96
+    check('靠近边缘松手 → 果冻吸附贴右缘(flush)', !!dockPos && Math.abs(dockPos.x - flushX) <= 2 && dockFb.edge === 'right',
+      `吸附后 x=${dockPos && dockPos.x} 期望=${flushX} edge=${dockFb && dockFb.edge}`)
+    check('吸附后半圆贴边变形(dock-right 类)', typeof dockCls === 'string' && dockCls.includes('dock-right'), dockCls)
+
     const pdCount = await evalJs(oc, `window.__pd`)
     const pdInfo = await evalJs(oc, `JSON.stringify(window.__pdInfo)`)
-    const p2 = await evalJs(oc, `'probe2(pd)=' + window.__probe2 + ' mousedown=' + (window.__md2||0)`)
     const orbStart = await evalJs(oc, `window.__orbDragStart === true`)
     const orbErr = await evalJs(oc, `window.__orbErr || null`)
     const errMsg = await evalJs(oc, `window.__err`)
-    check('pointerdown 到达球体且处理函数执行', pdCount >= 1 && orbStart === true, `pd=${pdCount} info=${pdInfo} ${p2} handler=${orbStart} captureErr=${orbErr} err=${errMsg}`)
-    const stAfter = await evalJs(oc, `window.api.overlayGetState()`)
-    const fb = await evalJs(mc, `window.api.getStore().then(s => s.settings.floatBall || {})`)
-    check('松手后果冻吸附回边缘并持久化', !!stAfter && !!fb && fb.x != null && ['left', 'right', 'top', 'bottom'].includes(fb.edge) && Math.abs(stAfter.x - fb.x) <= 2 && Math.abs(stAfter.y - fb.y) <= 2,
-      `落点≈(${dragPos && dragPos.x},${dragPos && dragPos.y}) 吸附后=(${stAfter && stAfter.x},${stAfter && stAfter.y}) edge=${fb && fb.edge}`)
+    check('pointerdown 到达球体且处理函数执行', pdCount >= 1 && orbStart === true, `pd=${pdCount} info=${pdInfo} handler=${orbStart} captureErr=${orbErr} err=${errMsg}`)
+
+    // 贴边形态截图
+    const shot2 = await oc.send('Page.captureScreenshot', { format: 'png' })
+    fs.writeFileSync(path.join(TMP, 'overlay-docked.png'), Buffer.from(shot2.result.data, 'base64'))
+    console.log('贴边截图: ' + path.join(TMP, 'overlay-docked.png'))
     setCursor(wa0.x + wa0.width / 2, wa0.y + wa0.height / 2) // 光标归位,避免影响后续检查
     // 截图
     const shot = await oc.send('Page.captureScreenshot', { format: 'png' })

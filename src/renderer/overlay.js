@@ -3,7 +3,7 @@
 // (由 overlay.html 以经典脚本引入,挂 window.overlayMath;Chromium ESM 不认 CJS)。
 const math = window.overlayMath;
 
-const { predictedPct, snapshotToMap, reduceSessEvent, snapTarget, springStep, clamp } = math;
+const { predictedPct, snapshotToMap, reduceSessEvent, snapTarget, springStep, clamp, SNAP_THRESHOLD } = math;
 
 const ball = document.getElementById('ball');
 const orbsEl = document.getElementById('orbs');
@@ -119,6 +119,15 @@ function onOrbClick(sid) {
   render();
 }
 
+// --- 贴边停靠形态 -----------------------------------------------------------
+// dockedEdge: null=自由摆放(整圆球);'left'/'right'/'top'/'bottom'=贴边半圆页签
+// (平边与屏幕边缘严丝合缝,见 overlay.html .dock-* 样式与主进程 setPos 的 flush 夹取)
+let dockedEdge = null;
+function applyDockClass() {
+  ball.classList.remove('dock-left', 'dock-right', 'dock-top', 'dock-bottom');
+  if (dockedEdge) ball.classList.add('dock-' + dockedEdge);
+}
+
 // --- 可交互区域上报 -----------------------------------------------------------
 // 窗口全局穿透,由主进程轮询光标做命中(见 src/main/overlay.js startHoverPoll);
 // 这里上报球体所在的窗口相对坐标:主球固定 (16,4,64,64),小球槽位 76+46i。
@@ -126,7 +135,13 @@ function onOrbClick(sid) {
 // 悬停检测不能放在渲染端。
 function reportRegions() {
   const n = visibleTasks().slice(0, 6).length;
-  const regions = [{ x: 16, y: 4, w: 64, h: 64 }];
+  // 贴边时主球在窗口内向边缘平移(见 .dock-* 样式),区域随之调整
+  const ballRect = { x: 16, y: 4, w: 64, h: 64 };
+  if (dockedEdge === 'left') ballRect.x = 0;
+  else if (dockedEdge === 'right') ballRect.x = 32;
+  else if (dockedEdge === 'top') ballRect.y = 0;
+  else if (dockedEdge === 'bottom') ballRect.y = 276;
+  const regions = [ballRect];
   for (let i = 0; i < n; i++) regions.push({ x: 28, y: 76 + i * 46, w: 40, h: 40 });
   api.overlaySetRegions({ regions });
 }
@@ -149,6 +164,8 @@ function setSquash(vx, vy, dominantAxis) {
 ball.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   dragging = true;
+  dockedEdge = null;      // 从贴边态拖起:恢复整圆球形态
+  applyDockClass();
   ball.classList.add('dragging');
   try { ball.setPointerCapture(e.pointerId); } catch (err) { window.__orbErr = String(err); }
   window.__orbDragStart = true; // 冒烟/排障探针
@@ -182,11 +199,22 @@ async function endDrag(e) {
 
 // 阻尼弹簧吸附:归一化位移弹簧(欠阻尼过一次冲),逐帧 overlay:setPos 驱窗口,
 // 过冲/形变由 CSS transform 表现(窗口始终被主进程 clamp 在 workArea 内)。
+// 仅当松手点距边缘 ≤ SNAP_THRESHOLD 才吸附;否则自由摆放在原地。
 let springRAF = null;
 function springTo(x, y, wa) {
   if (springRAF) cancelAnimationFrame(springRAF);
   const [w, h] = winSize;
   const target = snapTarget({ x, y, w, h }, wa);
+  if (target.dist > SNAP_THRESHOLD) {
+    dockedEdge = null;
+    applyDockClass();
+    dock({ x, y, edge: null }, wa); // 自由摆放:原地持久化,无吸附动画
+    return;
+  }
+  // 吸附:贴边形态随弹簧过程同步变形(半圆页签滑向边缘)
+  dockedEdge = target.edge;
+  applyDockClass();
+  reportRegions();
   const dx = target.x - x, dy = target.y - y;
   const dist = Math.hypot(dx, dy);
   if (dist < 4) { dock(target, wa); return; }
@@ -202,7 +230,7 @@ function springTo(x, y, wa) {
     const done = springStep(state, dt);
     const px = target.x - ux * state.x;
     const py = target.y - uy * state.x;
-    api.overlaySetPos({ x: px, y: py });
+    api.overlaySetPos({ x: px, y: py, edge: target.edge });
     setSquash(ux * state.v, uy * state.v, dominant);
     if (done) {
       ball.style.transform = '';
@@ -215,8 +243,11 @@ function springTo(x, y, wa) {
 }
 
 function dock(target, wa) {
-  api.overlaySetPos({ x: target.x, y: target.y });
+  dockedEdge = target.edge;
+  applyDockClass();
+  api.overlaySetPos({ x: target.x, y: target.y, edge: target.edge });
   api.overlaySetDock({ x: target.x, y: target.y, edge: target.edge, displayId: wa.id });
+  reportRegions();
 }
 
 // --- 其他交互 ---------------------------------------------------------------
@@ -230,6 +261,7 @@ ball.addEventListener('contextmenu', (e) => { e.preventDefault(); api.overlayMen
   try {
     const st = await api.overlayGetState();
     if (st && st.size) winSize = st.size;
+    if (st && st.edge) { dockedEdge = st.edge; applyDockClass(); } // 恢复贴边形态
   } catch {}
   await refreshSnapshot();
   render();

@@ -10,7 +10,7 @@ installElectronStub(tmp);
 const { SessionManager } = require('../src/main/sessions');
 test.after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
 const {
-  PREDICT_ASYMPTOTE, predictedPct, isTrackableKind,
+  PREDICT_ASYMPTOTE, predictedPct, isTrackableKind, SNAP_THRESHOLD,
   snapshotToMap, reduceSessEvent, snapTarget, springStep, clamp,
 } = require('../src/main/overlayMath');
 
@@ -88,6 +88,19 @@ test('reduceSessEvent: 快照+事件竞态(busy 快照后会话已结束)', () =
   reduceSessEvent(map, { sid: 's_a', ev: { type: 'ui_status', busy: false, running: false } }, T0 + 90000);
   // 未完成且进程已停:不残留假进度球
   assert.ok(!map.has('s_a'));
+});
+
+test('snapTarget: 返回球心到边缘的距离 dist(吸附阈值判定用)', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  const t = snapTarget({ x: 1700, y: 500, w: 64, h: 64 }, wa);
+  assert.strictEqual(t.edge, 'right');
+  assert.strictEqual(t.dist, 1920 - (1700 + 32)); // 球心 1732 → 距右边缘 188
+  const t2 = snapTarget({ x: 1800, y: 100, w: 96, h: 340 }, wa);
+  assert.strictEqual(t2.dist, 1920 - (1800 + 48));
+  // 球心越出边缘时 dist 收敛到 0(视为紧贴,必吸附)
+  const t3 = snapTarget({ x: 1900, y: 100, w: 96, h: 340 }, wa);
+  assert.strictEqual(t3.dist, 0);
+  assert.strictEqual(SNAP_THRESHOLD, 80);
 });
 
 test('snapTarget: 选最近边并沿边 clamp(任务栏在底部)', () => {

@@ -155,8 +155,18 @@ function defaultPosition() {
 function restorePosition() {
   const fb = getSetting();
   const displays = screen.getAllDisplays();
-  const ok = fb.x != null && displays.some((d) => d.id === fb.displayId);
-  if (ok) {
+  const d = displays.find((x) => x.id === fb.displayId);
+  const ok = fb.x != null && d;
+  if (ok && fb.edge) {
+    // 贴边停靠:坐标按 workArea 重算(flush),不盲信持久化值(任务栏布局可能变)
+    const wa = d.workArea;
+    let { x, y } = fb;
+    if (fb.edge === 'left') x = wa.x;
+    else if (fb.edge === 'right') x = wa.x + wa.width - WIN_W;
+    if (fb.edge === 'top') y = wa.y;
+    else if (fb.edge === 'bottom') y = wa.y + wa.height - WIN_H;
+    win.setPosition(Math.round(x), Math.round(y));
+  } else if (ok) {
     win.setPosition(Math.round(fb.x), Math.round(fb.y));
   } else {
     const p = defaultPosition();
@@ -261,12 +271,18 @@ function endDrag() {
   return { x, y, workArea: { id: display ? display.id : undefined, ...wa } };
 }
 
-// 弹簧逐帧设位:夹取到当前所在屏 workArea(果冻过冲由渲染端 CSS transform 表现)
-function setPos({ x, y }) {
+// 弹簧逐帧设位:夹取到当前所在屏 workArea。edge 非空=贴边停靠(该轴 flush 到边缘、
+// 留白 0,配合渲染端半圆变形);否则自由摆放(常规留白 clamp)
+function setPos({ x, y, edge }) {
   if (!isUsable()) return;
   const { wa } = workAreaFor(x, y);
-  const cx = math.clamp(Math.round(x), wa.x + EDGE_MARGIN, wa.x + wa.width - WIN_W - EDGE_MARGIN);
-  const cy = math.clamp(Math.round(y), wa.y + EDGE_MARGIN, wa.y + wa.height - WIN_H - EDGE_MARGIN);
+  let cx = Math.round(x), cy = Math.round(y);
+  if (edge === 'left') cx = wa.x;
+  else if (edge === 'right') cx = wa.x + wa.width - WIN_W;
+  else cx = math.clamp(cx, wa.x + EDGE_MARGIN, wa.x + wa.width - WIN_W - EDGE_MARGIN);
+  if (edge === 'top') cy = wa.y;
+  else if (edge === 'bottom') cy = wa.y + wa.height - WIN_H;
+  else cy = math.clamp(cy, wa.y + EDGE_MARGIN, wa.y + wa.height - WIN_H - EDGE_MARGIN);
   win.setPosition(cx, cy);
 }
 
@@ -337,6 +353,7 @@ function registerIpc() {
       x, y,
       interactive,
       dragging: dragActive,
+      edge: getSetting().edge || null,
       size: [WIN_W, WIN_H],
       workAreas: screen.getAllDisplays().map((d) => ({ id: d.id, x: d.workArea.x, y: d.workArea.y, width: d.workArea.width, height: d.workArea.height })),
     };

@@ -27,9 +27,14 @@
     box-shadow: 0 4px 16px rgba(0, 0, 0, .45), inset 0 1px 2px rgba(255, 255, 255, .15);
     display: flex; align-items: center; justify-content: center;
     cursor: grab; touch-action: none;
-    transition: box-shadow .2s;
+    transition: border-radius .35s cubic-bezier(.34, 1.56, .64, 1), box-shadow .2s;
     will-change: transform;
   }
+  /* 贴边停靠:整圆 → 半圆页签,平边与屏幕边缘严丝合缝(窗口已由主进程 flush 到边缘) */
+  #ball.dock-left   { border-radius: 0 32px 32px 0; transform: translateX(-16px); }
+  #ball.dock-right  { border-radius: 32px 0 0 32px; transform: translateX(16px); }
+  #ball.dock-top    { border-radius: 0 0 32px 32px; transform: translateY(-4px); }
+  #ball.dock-bottom { border-radius: 32px 32px 0 0; transform: translateY(272px); }
   #ball:hover { box-shadow: 0 6px 22px rgba(0, 0, 0, .55), 0 0 12px rgba(212, 175, 116, .25), inset 0 1px 2px rgba(255,255,255,.15); }
   #ball.dragging { cursor: grabbing; }
   #ball .logo { font-size: 26px; color: #d4af74; text-shadow: 0 1px 3px rgba(0,0,0,.6); pointer-events: none; }

@@ -85,8 +85,11 @@ function clamp(v, lo, hi) {
 }
 
 // 边缘吸附:取球心到 workArea 四边的最小距离(必须用 workArea 而非 display.bounds,
-// 排除任务栏);返回 {edge, x, y},坐标已沿边 clamp 保证整球不出 workArea。
+// 排除任务栏);返回 {edge, x, y, dist},坐标已沿边 clamp 保证整球不出 workArea。
+// dist = 球心到该边缘的距离,调用方据此决定是否吸附(仅靠近边缘时才吸)。
 // ball: {x, y, w, h}(窗口坐标);wa: {x, y, width, height}
+const SNAP_THRESHOLD = 80; // 松手点距边缘 ≤ 此值(球心距离)才吸附,否则自由摆放
+
 function snapTarget(ball, wa, margin = 8) {
   const cx = ball.x + ball.w / 2;
   const cy = ball.y + ball.h / 2;
@@ -98,6 +101,7 @@ function snapTarget(ball, wa, margin = 8) {
   ];
   cands.sort((a, b) => a.dist - b.dist);
   const t = cands[0];
+  t.dist = Math.max(0, t.dist); // 球心已越界时取 0(视为紧贴)
   if (t.edge === 'left' || t.edge === 'right') {
     // y 存的是球心,clamp 后换回左上角坐标
     t.y = clamp(t.y, wa.y + margin + ball.h / 2, wa.y + wa.height - ball.h / 2 - margin) - ball.h / 2;
@@ -125,6 +129,7 @@ function springStep(state, dt, k = 380, c = 30) {
 const M = {
   PREDICT_ASYMPTOTE,
   PREDICT_HALF_MS,
+  SNAP_THRESHOLD,
   predictedPct,
   isTrackableKind,
   snapshotToMap,
