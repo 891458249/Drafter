@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<title>Drafter 悬浮球</title>
+<style>
+  /* 全局必须真透明:鼠标穿透(setIgnoreMouseEvents forward)按像素命中,透明区才穿透 */
+  html, body {
+    margin: 0; padding: 0;
+    background: transparent;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #dock {
+    width: 96px; height: 340px;
+    display: flex; flex-direction: column; align-items: center;
+    padding-top: 4px; box-sizing: border-box;
+  }
+  /* 主球:深色玻璃质感,沿主题色 #1a1815 */
+  #ball {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, #4a423a 0%, #2a251f 55%, #1a1815 100%);
+    border: 1.5px solid rgba(255, 255, 255, .22);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .45), inset 0 1px 2px rgba(255, 255, 255, .15);
+    display: flex; align-items: center; justify-content: center;
+    cursor: grab; touch-action: none;
+    transition: box-shadow .2s;
+    will-change: transform;
+  }
+  #ball:hover { box-shadow: 0 6px 22px rgba(0, 0, 0, .55), 0 0 12px rgba(212, 175, 116, .25), inset 0 1px 2px rgba(255,255,255,.15); }
+  #ball.dragging { cursor: grabbing; }
+  #ball .logo { font-size: 26px; color: #d4af74; text-shadow: 0 1px 3px rgba(0,0,0,.6); pointer-events: none; }
+  /* 任务小球:conic-gradient 进度环 */
+  #orbs { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 8px; }
+  .orb {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: conic-gradient(#d4af74 calc(var(--pct, 0) * 1%), rgba(255,255,255,.12) 0),
+                radial-gradient(circle at 35% 30%, #3a332b, #211d18 70%);
+    border: 1.5px solid rgba(255, 255, 255, .18);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, .4);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; position: relative;
+    transition: transform .15s;
+    will-change: transform;
+  }
+  .orb:hover { transform: scale(1.12); }
+  .orb .dot { width: 26px; height: 26px; border-radius: 50%; background: #15120f; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #cbb; overflow: hidden; }
+  .orb .dot span { max-width: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .orb.done {
+    background: radial-gradient(circle at 35% 30%, #4ade80, #16a34a 70%);
+    border-color: rgba(134, 239, 172, .7);
+    animation: donePop .5s ease;
+  }
+  .orb.done .dot { background: rgba(0,0,0,.25); color: #eafff2; }
+  .orb.error {
+    background: radial-gradient(circle at 35% 30%, #f87171, #dc2626 70%);
+    border-color: rgba(252, 165, 165, .7);
+  }
+  .orb.error .dot { background: rgba(0,0,0,.25); color: #fff1f1; }
+  @keyframes donePop {
+    0% { transform: scale(.4); } 60% { transform: scale(1.25); } 100% { transform: scale(1); }
+  }
+  #more {
+    margin-top: 2px; padding: 1px 8px; border-radius: 9px;
+    background: rgba(26, 24, 21, .85); border: 1px solid rgba(255,255,255,.15);
+    color: #d4af74; font-size: 11px; cursor: default;
+  }
+</style>
+</head>
+<body>
+  <div id="dock">
+    <div id="ball" title="Drafter · 拖动移动,双击显示主窗口"><span class="logo">✦</span></div>
+    <div id="orbs"></div>
+  </div>
+  <script type="module" src="renderer/overlay.js"></script>
+</body>
+</html>

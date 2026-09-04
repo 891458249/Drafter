@@ -60,6 +60,7 @@ const title = require('./src/main/title');
 const gems = require('./src/main/gems');
 const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
+const overlay = require('./src/main/overlay');
 const migrations = require('./src/main/migrations');
 const harnessBridge = require('./src/main/harness/harness-bridge');
 
@@ -131,6 +132,7 @@ function setupTray() {
     tray.setToolTip('Drafter');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: '显示 Drafter', click: showMainWindow },
+      { label: '窗口隐藏时显示悬浮球', type: 'checkbox', checked: overlay.isEnabled(), click: (item) => overlay.setEnabled(item.checked) },
       { type: 'separator' },
       { label: '退出', click: () => { app.isQuitting = true; cleanup(); app.quit(); } },
     ]));
@@ -199,6 +201,11 @@ function buildEnv(extra = {}, keyId = null) {
 
 const sessions = new SessionManager(getWindow, buildEnv);
 const terms = new TermManager(getWindow, buildEnv);
+// 桌面悬浮球(v0.13.3):事件扇出到悬浮窗 + 回合结束登记完成绿球
+overlay.init({ sessions, getMainWindow: getWindow, showMainWindow });
+sessions.getExtraWindows = () => (overlay.isVisible() ? [overlay.getWindow()] : []);
+const _onTurnDone = sessions.onTurnDone.bind(sessions);
+sessions.onTurnDone = (s, ev) => { _onTurnDone(s, ev); overlay.onTurnDone(s, ev); };
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -237,6 +244,7 @@ function createWindow() {
     if (app.isQuitting || process.platform === 'darwin') return;
     e.preventDefault();
     mainWindow.hide();
+    overlay.maybeShow('close'); // 桌面悬浮球(v0.13.3):隐藏后按需显示
     if (!trayHintShown) {
       trayHintShown = true;
       try {
@@ -244,6 +252,10 @@ function createWindow() {
       } catch {}
     }
   });
+  // 悬浮球显隐联动:最小化时按需显示,恢复/显示时隐藏
+  mainWindow.on('minimize', () => overlay.maybeShow('minimize'));
+  mainWindow.on('restore', () => overlay.hide());
+  mainWindow.on('show', () => overlay.hide());
   // persist renderer errors (level >= 2) to userData/logs/renderer-errors.log
   mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
     if (level >= 2) {
@@ -296,6 +308,7 @@ app.whenReady().then(() => {
   }
   createWindow();
   setupTray();
+  overlay.registerIpc();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -752,9 +765,9 @@ ipcMain.handle('sess:interrupt', async (_e, sid) => {
   if (s) await s.interrupt();
   return true;
 });
-ipcMain.handle('sess:permission', (_e, { sid, reqId, decision, denyMessage }) => {
+ipcMain.handle('sess:permission', (_e, { sid, reqId, decision, denyMessage, updatedInput, note }) => {
   const s = sessions.get(sid);
-  return s ? s.respondPermission(reqId, decision, denyMessage) : false;
+  return s ? s.respondPermission(reqId, decision, denyMessage, updatedInput, note) : false;
 });
 ipcMain.handle('sess:setMode', (_e, { sid, mode }) => {
   const s = sessions.get(sid);

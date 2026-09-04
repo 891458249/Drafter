@@ -88,6 +88,8 @@ async function boot() {
     if (st && st.settings && st.settings.comfyAdvancedMode === true) state.comfyAdvancedMode = true;
     if (st && st.settings && st.settings.sharedPromptCache === false) state.sharedPromptCache = false;
     if (st && st.settings && st.settings.canvasEngine === 'drawflow') state.canvasEngine = 'drawflow';
+    // 桌面悬浮球(v0.13.3):主进程 overlayMgr 是权威,这里仅回显设置面板
+    if (st && st.settings && st.settings.floatBall && st.settings.floatBall.enabled === true) state.floatBallEnabled = true;
   } catch {}
   populateModelSelects(); // 按活跃 Key 填充模型下拉(v0.7.0)
   const sdk = await api.sdkStatus();
@@ -333,6 +335,7 @@ function renderThemeCards() {
 function openSettingsModal() {
   renderThemeCards();
   $('set-instantjump').checked = state.instantJump;
+  $('set-floatball').checked = state.floatBallEnabled;
   $('set-canvas-native').checked = state.canvasEngine !== 'drawflow';
   $('set-comfy-advanced').checked = !!state.comfyAdvancedMode;
   $('set-sharedcache').checked = state.sharedPromptCache !== false;
@@ -439,6 +442,15 @@ $('settings-close').onclick = () => $('settings-modal').classList.add('hidden');
 $('set-instantjump').onchange = (e) => { // 瞬时 ↔ 平滑(原 v0.9.15 菜单项)
   state.instantJump = !!e.target.checked;
   api.setSetting('instantJump', state.instantJump);
+};
+// 桌面悬浮球(v0.13.3):写回 floatBall 对象(保留 asked/x/y/displayId 等既有字段)
+$('set-floatball').onchange = async (e) => {
+  state.floatBallEnabled = !!e.target.checked;
+  try {
+    const st = await api.getStore();
+    const fb = (st && st.settings && st.settings.floatBall) || {};
+    api.setSetting('floatBall', { ...fb, asked: true, enabled: state.floatBallEnabled });
+  } catch {}
 };
 $('set-comfy-advanced').onchange = (e) => {
   state.comfyAdvancedMode = !!e.target.checked;

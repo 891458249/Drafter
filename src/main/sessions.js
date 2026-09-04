@@ -534,11 +534,13 @@ class Session {
   }
 
   // decision: 'allow' | 'always' | 'deny'; denyMessage optional
-  respondPermission(reqId, decision, denyMessage) {
+  // updatedInput: 仅 allow 时生效,浅合并到原 input(v0.13.3:AskUserQuestion 回答
+  // 经 { ...input, answers } 回传);note 会随 ui_permission_done 发给渲染端展示
+  respondPermission(reqId, decision, denyMessage, updatedInput, note) {
     const p = this.pendingPerms.get(reqId);
     if (!p) return false;
     this.pendingPerms.delete(reqId);
-    this._emit({ type: 'ui_permission_done', reqId, decision }, true);
+    this._emit({ type: 'ui_permission_done', reqId, decision, note }, true);
     if (decision === 'deny') {
       p.resolve({ behavior: 'deny', message: denyMessage || '用户拒绝了此操作' });
       return true;
@@ -559,7 +561,9 @@ class Session {
       p.resolve(res);
       return true;
     }
-    p.resolve({ behavior: 'allow', updatedInput: p.input });
+    const merged = (updatedInput && typeof updatedInput === 'object')
+      ? { ...p.input, ...updatedInput } : p.input;
+    p.resolve({ behavior: 'allow', updatedInput: merged });
     return true;
   }
 
@@ -777,6 +781,12 @@ class SessionManager {
   send(channel, payload) {
     const win = this.getWindow();
     if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+    // 桌面悬浮球(v0.13.3):可见时同样收到事件(渲染端自行聚合任务进度)
+    if (typeof this.getExtraWindows === 'function') {
+      for (const w of this.getExtraWindows()) {
+        if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
+      }
+    }
   }
 
   async sdkAvailable() {
