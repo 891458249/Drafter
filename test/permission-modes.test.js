@@ -79,3 +79,28 @@ test('对照:默认模式仍弹权限卡,bypassPermissions 行为不变', async 
   const s2 = makeSession({ permissionMode: 'bypassPermissions' });
   assert.strictEqual((await s2._onPermission('Bash', { command: 'dir' })).behavior, 'allow');
 });
+
+// AskUserQuestion 交互卡(v0.13.3):渲染端提交回答时经 updatedInput 把
+// { ...input, answers } 回传给 CLI,answers 以问题文本 keyed。
+test('AskUserQuestion:allow 携带 updatedInput 时浅合并到原 input', async () => {
+  const s = makeSession({ permissionMode: 'default' });
+  const input = { questions: [{ question: '选哪个?', header: '方案', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] };
+  const p = s._onPermission('AskUserQuestion', input);
+  const reqId = [...s.pendingPerms.keys()][0];
+  const notes = [];
+  s.m.send = (ch, payload) => { if (payload.ev.type === 'ui_permission_done') notes.push(payload.ev); };
+  s.respondPermission(reqId, 'allow', undefined, { ...input, answers: { '选哪个?': 'B(用户改过的回答)' } }, '已回答:B(用户改过的回答)');
+  const r = await p;
+  assert.strictEqual(r.behavior, 'allow');
+  assert.deepStrictEqual(r.updatedInput, { ...input, answers: { '选哪个?': 'B(用户改过的回答)' } });
+  assert.strictEqual(notes[0] && notes[0].note, '已回答:B(用户改过的回答)', 'note 应随 ui_permission_done 发出');
+});
+
+test('AskUserQuestion:不传 updatedInput 时维持原样放行(回归)', async () => {
+  const s = makeSession({ permissionMode: 'default' });
+  const input = { questions: [{ question: 'q?', options: [{ label: 'A' }, { label: 'B' }] }] };
+  const p = s._onPermission('AskUserQuestion', input);
+  const reqId = [...s.pendingPerms.keys()][0];
+  s.respondPermission(reqId, 'allow');
+  assert.deepStrictEqual((await p).updatedInput, input);
+});

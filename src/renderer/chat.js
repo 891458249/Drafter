@@ -811,6 +811,15 @@ function addPermissionCard(s, ev, replay) {
   card.dataset.reqId = ev.reqId;
   const input = ev.input || {};
 
+  // AskUserQuestion(v0.13.3):交互式问答卡——点选选项填入可编辑回答框,
+  // 可任意修改后提交;回答经 updatedInput.answers 回传给 CLI。
+  if (!isPlan && ev.toolName === 'AskUserQuestion' && Array.isArray(input.questions) && input.questions.length) {
+    buildAskQuestionCard(s, ev, card, input, replay);
+    s.ui.logEl.appendChild(card);
+    scrollBottom(s.meta.id);
+    return;
+  }
+
   let bodyHtml;
   if (isPlan) {
     bodyHtml = `<div class="plan-md">${enhanceCodeHtml(renderMarkdown(input.plan || ''))}</div>`;
@@ -857,13 +866,89 @@ function addPermissionCard(s, ev, replay) {
   scrollBottom(s.meta.id);
 }
 
-function resolvePermCard(s, reqId, decision) {
+// AskUserQuestion 交互卡:每题 = 选项列表(点选填入)+ 可编辑回答输入框。
+// 提交时 answers 以「问题文本 → 回答字符串」 keyed(multiSelect 逗号分隔)回传。
+function buildAskQuestionCard(s, ev, card, input, replay) {
+  card.innerHTML = `
+    <div class="perm-head">❓ 请求使用 <span class="perm-tool">${escapeHtml(ev.toolName)}</span></div>
+    <div class="askq-body"></div>
+    <div class="perm-actions"></div>`;
+  const body = card.querySelector('.askq-body');
+  const qInputs = [];
+  for (const q of input.questions) {
+    const opts = Array.isArray(q.options) ? q.options : [];
+    const qEl = document.createElement('div');
+    qEl.className = 'askq-q';
+    qEl.innerHTML = `
+      <div class="askq-qhead">${q.header ? `<span class="askq-header">${escapeHtml(q.header)}</span>` : ''}<span class="askq-qtext">${escapeHtml(q.question || '')}</span></div>
+      <div class="askq-opts">${opts.map((o, i) => `
+        <div class="askq-opt${replay ? ' ro' : ''}" data-i="${i}">
+          <span class="askq-opt-label">${escapeHtml(o.label || '')}</span>
+          ${o.description ? `<span class="askq-opt-desc">${escapeHtml(o.description)}</span>` : ''}
+        </div>`).join('')}
+      </div>
+      <input class="askq-input" type="text" placeholder="点选上方选项填入,或直接输入自定义回答(可修改)" />`;
+    body.appendChild(qEl);
+    const answerInput = qEl.querySelector('.askq-input');
+    qInputs.push({ q, input: answerInput });
+    if (!replay) {
+      const selected = [];
+      for (const optEl of qEl.querySelectorAll('.askq-opt')) {
+        optEl.onclick = () => {
+          const label = opts[+optEl.dataset.i].label || '';
+          if (q.multiSelect) {
+            const idx = selected.indexOf(label);
+            if (idx >= 0) { selected.splice(idx, 1); optEl.classList.remove('sel'); }
+            else { selected.push(label); optEl.classList.add('sel'); }
+            answerInput.value = selected.join(', ');
+          } else {
+            for (const o of qEl.querySelectorAll('.askq-opt')) o.classList.remove('sel');
+            optEl.classList.add('sel');
+            answerInput.value = label;
+          }
+          answerInput.classList.remove('askq-missing');
+          answerInput.focus();
+        };
+      }
+    } else {
+      answerInput.disabled = true;
+      const ans = input.answers && input.answers[q.question];
+      if (ans) answerInput.value = ans;
+    }
+  }
+  const actions = card.querySelector('.perm-actions');
+  if (replay) {
+    actions.innerHTML = '<div class="perm-done">(历史请求)</div>';
+    return;
+  }
+  actions.innerHTML = `
+    <button class="btn btn-sm btn-primary" data-d="answer">提交回答</button>
+    <button class="btn btn-sm" data-d="deny">拒绝</button>`;
+  actions.querySelector('[data-d="answer"]').onclick = async () => {
+    const answers = {};
+    for (const { q, input: inp } of qInputs) {
+      const v = inp.value.trim();
+      if (!v) { inp.classList.add('askq-missing'); inp.focus(); return; }
+      answers[q.question] = v;
+    }
+    const note = '已回答:' + Object.values(answers).join(' / ');
+    await api.sessPermission({ sid: s.meta.id, reqId: ev.reqId, decision: 'allow', updatedInput: { ...input, answers }, note });
+    resolvePermCard(s, ev.reqId, 'allow', note);
+  };
+  actions.querySelector('[data-d="deny"]').onclick = async () => {
+    await api.sessPermission({ sid: s.meta.id, reqId: ev.reqId, decision: 'deny', denyMessage: '用户拒绝了此问题' });
+    resolvePermCard(s, ev.reqId, 'deny');
+  };
+}
+
+function resolvePermCard(s, reqId, decision, note) {
   const card = s.ui.logEl.querySelector(`.perm-card[data-req-id="${reqId}"]`);
   if (!card) return;
   const actions = card.querySelector('.perm-actions');
   if (actions) {
     const label = { allow: '✔ 已允许', always: '✔ 已允许(总是,已写入项目规则)', deny: '✖ 已拒绝', aborted: '已中断' }[decision] || decision;
-    actions.innerHTML = `<div class="perm-done">${label}</div>`;
+    const text = note ? (decision === 'allow' ? '✔ ' + note : label + ' · ' + note) : label;
+    actions.innerHTML = `<div class="perm-done">${escapeHtml(text)}</div>`;
   }
 }
 
@@ -978,7 +1063,7 @@ export function renderEvent(sid, ev, { replay }) {
   if (t === 'ui_stderr') { console.debug('[stderr]', ev.text); return; }
   if (t === 'ui_compact') { metaLine(s, '── 上下文已压缩 ──'); return; }
   if (t === 'ui_permission') { addPermissionCard(s, ev, replay); return; }
-  if (t === 'ui_permission_done') { resolvePermCard(s, ev.reqId, ev.decision); return; }
+  if (t === 'ui_permission_done') { resolvePermCard(s, ev.reqId, ev.decision, ev.note); return; }
 
   if (t === 'stream_event' && ev.event) {
     handleStreamEvent(s, ev.parent_tool_use_id, ev.event);

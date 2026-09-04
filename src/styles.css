@@ -346,6 +346,34 @@ html, body {
 .perm-actions { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--tool-border); }
 .perm-done { padding: 8px 14px; font-size: 12px; color: var(--text-dim); }
 
+/* AskUserQuestion interactive card (v0.13.3) */
+.askq-body { padding: 0 14px 10px; display: flex; flex-direction: column; gap: 12px; }
+.askq-qhead { display: flex; gap: 8px; align-items: baseline; font-size: 13px; margin-bottom: 6px; }
+.askq-header {
+  flex: none; font-size: 11px; padding: 1px 8px; border-radius: 8px;
+  border: 1px solid var(--tool-border); color: var(--text-dim);
+}
+.askq-qtext { font-weight: 600; }
+.askq-opts { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.askq-opt {
+  display: flex; flex-direction: column; gap: 2px; padding: 6px 10px;
+  border: 1px solid var(--tool-border); border-radius: 8px; cursor: pointer; font-size: 12px;
+}
+.askq-opt:hover { border-color: var(--accent); }
+.askq-opt.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.askq-opt.ro { cursor: default; }
+.askq-opt.ro:hover { border-color: var(--tool-border); }
+.askq-opt-label { font-weight: 600; }
+.askq-opt-desc { color: var(--text-dim); line-height: 1.4; }
+.askq-input {
+  width: 100%; box-sizing: border-box; font-size: 12px; padding: 6px 10px;
+  border: 1px solid var(--tool-border); border-radius: 8px;
+  background: var(--bg); color: var(--text);
+}
+.askq-input:focus { outline: none; border-color: var(--accent); }
+.askq-input:disabled { color: var(--text-dim); }
+.askq-input.askq-missing { border-color: var(--red, #e5534b); }
+
 /* plan card */
 .plan-card { border-color: var(--yellow); }
 .plan-card .perm-head .perm-tool { color: var(--yellow); }
