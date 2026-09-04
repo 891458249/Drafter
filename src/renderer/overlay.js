@@ -1,6 +1,7 @@
 // 桌面悬浮球(v0.13.3)渲染端:任务进度聚合 + 拖拽/果冻吸附 + 交互。
-// 纯逻辑(预测进度/聚合状态机/吸附/弹簧)与主窗 chat.js 同源,统一在 overlayMath.js。
-import math from '../main/overlayMath.js';
+// 纯逻辑(预测进度/聚合状态机/吸附/弹簧)与主窗 chat.js 同源,统一在 overlayMath.js
+// (由 overlay.html 以经典脚本引入,挂 window.overlayMath;Chromium ESM 不认 CJS)。
+const math = window.overlayMath;
 
 const { predictedPct, snapshotToMap, reduceSessEvent, snapTarget, springStep, clamp } = math;
 
@@ -99,6 +100,7 @@ function render() {
   } else if (more) {
     more.remove();
   }
+  reportRegions();
 }
 
 // 进度环 500ms 走字(预测曲线)
@@ -115,6 +117,18 @@ function onOrbClick(sid) {
   pending.delete(sid);
   api.overlayJump({ sid }); // 主进程清 pending + 唤主窗定位会话,主窗 show 联动隐藏悬浮球
   render();
+}
+
+// --- 可交互区域上报 -----------------------------------------------------------
+// 窗口全局穿透,由主进程轮询光标做命中(见 src/main/overlay.js startHoverPoll);
+// 这里上报球体所在的窗口相对坐标:主球固定 (16,4,64,64),小球槽位 76+46i。
+// 注意坑(Electron 38 实测):ignore=true 时 forward 连 mousemove 都不转发,
+// 悬停检测不能放在渲染端。
+function reportRegions() {
+  const n = visibleTasks().slice(0, 6).length;
+  const regions = [{ x: 16, y: 4, w: 64, h: 64 }];
+  for (let i = 0; i < n; i++) regions.push({ x: 28, y: 76 + i * 46, w: 40, h: 40 });
+  api.overlaySetRegions({ regions });
 }
 
 // --- 拖拽 + 果冻吸附 --------------------------------------------------------
@@ -136,7 +150,8 @@ ball.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   dragging = true;
   ball.classList.add('dragging');
-  ball.setPointerCapture(e.pointerId);
+  try { ball.setPointerCapture(e.pointerId); } catch (err) { window.__orbErr = String(err); }
+  window.__orbDragStart = true; // 冒烟/排障探针
   lastMove = { x: e.clientX, y: e.clientY, t: performance.now() };
   dragVel = { x: 0, y: 0 };
   api.overlayDragStart({ dx: e.clientX, dy: e.clientY }); // 主进程轮询光标 setPosition
@@ -218,4 +233,5 @@ ball.addEventListener('contextmenu', (e) => { e.preventDefault(); api.overlayMen
   } catch {}
   await refreshSnapshot();
   render();
+  window.__orbModuleOK = true; // 冒烟探针:模块完整求值(监听器全部挂好)
 })();

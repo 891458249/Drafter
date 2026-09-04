@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   overlayDragStart: (p) => ipcRenderer.invoke('overlay:dragStart', p),
   overlayDragEnd: () => ipcRenderer.invoke('overlay:dragEnd'),
   overlaySetPos: (p) => ipcRenderer.invoke('overlay:setPos', p),
+  overlaySetRegions: (p) => ipcRenderer.invoke('overlay:setRegions', p),
   overlaySetDock: (p) => ipcRenderer.invoke('overlay:setDock', p),
   overlayJump: (p) => ipcRenderer.invoke('overlay:jump', p),
   overlayMenu: (p) => ipcRenderer.invoke('overlay:menu', p),

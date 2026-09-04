@@ -118,7 +118,11 @@ function springStep(state, dt, k = 380, c = 30) {
   return Math.abs(state.x) < 0.5 && Math.abs(state.v) < 5;
 }
 
-module.exports = {
+// 双环境导出:Node(CJS,主进程/单测)走 module.exports;渲染端(浏览器 ESM 加载器
+// 不认 CJS interop)由 <script> 经典脚本引入挂 window.overlayMath。
+// 坑:Chromium 对 .js 一律按 ESM 解析,「import x from CJS」报
+//「does not provide an export named 'default'」且整个模块静默不执行。
+const M = {
   PREDICT_ASYMPTOTE,
   PREDICT_HALF_MS,
   predictedPct,
@@ -129,3 +133,5 @@ module.exports = {
   springStep,
   clamp,
 };
+if (typeof module !== 'undefined' && module.exports) module.exports = M;
+else window.overlayMath = M;

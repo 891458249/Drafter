@@ -18,8 +18,12 @@ const EDGE_MARGIN = 8; // 吸附后距 workArea 边缘的留白
 let win = null;
 let dragTimer = null;
 let dragOffset = null;
+let hoverTimer = null;       // 光标轮询:悬停在球体区域时切可交互
+let dragActive = false;      // 拖拽中:强制保持可交互(pointer capture 前提)
+let regions = [{ x: 16, y: 4, w: 64, h: 64 }]; // 可交互区域(窗口相对坐标,渲染端上报)
 let asking = false;
 let runtimeEnabled = null;   // 用户未勾「记住」时,仅本次进程生效
+let interactive = false;     // 悬停交互态:true=窗口收鼠标事件(仅悬停在球体上时)
 let deps = {};               // { sessions, getMainWindow, showMainWindow }
 // 完成待查看集合归主进程所有:悬浮窗可能懒创建/重建,绿球语义不能随窗丢
 const pendingDone = new Map(); // sid -> { error }
@@ -51,8 +55,12 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  // 全局鼠标穿透:透明区域点击穿透到下层应用,球体等不透明 DOM 元素照常收事件
+  // 全局鼠标穿透:透明区域点击穿透到下层应用。
+  // 注意坑(Electron 38 实测):ignore=true 时 forward 既不转发 mousemove 也不给点击,
+  // 悬停检测不能依赖渲染端事件——改由主进程轮询光标 + 渲染端上报的可交互区域
+  // (overlay:setRegions)做命中,悬停在球体上时临时关闭穿透(见 startHoverPoll)。
   win.setIgnoreMouseEvents(true, { forward: true });
+  interactive = false;
   win.loadFile(path.join(__dirname, '..', 'overlay.html'));
   // 关不掉(quitting 除外),与主窗 close 拦截完全同构 → updater 重启/托盘退出不受影响
   win.on('close', (e) => {
@@ -74,6 +82,38 @@ function createWindow() {
 function isUsable() { return win && !win.isDestroyed(); }
 function isVisible() { return isUsable() && win.isVisible(); }
 function getWindow() { return isUsable() ? win : null; }
+
+// 悬停交互切换(值不变时不重复调用,Windows 上反复切换有开销):
+// 轮询光标命中渲染端上报的球体区域 → 悬停时关闭穿透;拖拽中强制保持。
+function setInteractive(v) {
+  v = !!v;
+  if (v === interactive) return interactive;
+  interactive = v;
+  if (isUsable()) win.setIgnoreMouseEvents(!v, { forward: true });
+  return interactive;
+}
+
+function startHoverPoll() {
+  stopHoverPoll();
+  hoverTimer = setInterval(() => {
+    if (!isUsable() || !win.isVisible()) return;
+    const c = screen.getCursorScreenPoint();
+    const [wx, wy] = win.getPosition();
+    const lx = c.x - wx, ly = c.y - wy;
+    const hover = dragActive || regions.some((r) => lx >= r.x && lx <= r.x + r.w && ly >= r.y && ly <= r.y + r.h);
+    setInteractive(hover);
+  }, 50);
+}
+function stopHoverPoll() {
+  if (hoverTimer) { clearInterval(hoverTimer); hoverTimer = null; }
+}
+
+// 渲染端上报可交互区域(窗口相对坐标):主球 + 可见任务小球
+function setRegions(list) {
+  regions = (Array.isArray(list) ? list : []).filter((r) =>
+    r && Number.isFinite(r.x) && Number.isFinite(r.y) && Number.isFinite(r.w) && Number.isFinite(r.h)
+  );
+}
 
 function pushPending() {
   if (!isUsable()) return;
@@ -131,11 +171,14 @@ function show() {
   if (!isUsable()) createWindow();
   restorePosition();
   win.showInactive(); // 不抢焦点
+  startHoverPoll();
   pushPending();
 }
 
 function hide() {
   stopDrag();
+  stopHoverPoll();
+  setInteractive(false);
   if (isUsable() && win.isVisible()) win.hide();
 }
 
@@ -182,8 +225,10 @@ async function askOnce() {
 
 function startDrag({ dx, dy }) {
   if (!isUsable()) return;
-  dragOffset = { dx: dx || 0, dy: dy || 0 };
   stopDrag();
+  console.log('[overlay] dragStart', dx, dy); // 排障探针
+  dragOffset = { dx: dx || 0, dy: dy || 0 };
+  dragActive = true; // 拖拽中强制可交互,松手后由轮询接管
   dragTimer = setInterval(() => {
     if (!isUsable() || !dragOffset) return;
     const c = screen.getCursorScreenPoint();
@@ -203,6 +248,7 @@ function startDrag({ dx, dy }) {
 function stopDrag() {
   if (dragTimer) { clearInterval(dragTimer); dragTimer = null; }
   dragOffset = null;
+  dragActive = false;
 }
 
 // 拖拽结束:停轮询,持久化位置,返回球心所在屏 workArea 供渲染端跑吸附弹簧
@@ -289,6 +335,8 @@ function registerIpc() {
     const [x, y] = win.getPosition();
     return {
       x, y,
+      interactive,
+      dragging: dragActive,
       size: [WIN_W, WIN_H],
       workAreas: screen.getAllDisplays().map((d) => ({ id: d.id, x: d.workArea.x, y: d.workArea.y, width: d.workArea.width, height: d.workArea.height })),
     };
@@ -296,6 +344,7 @@ function registerIpc() {
   ipcMain.handle('overlay:dragStart', (_e, p) => { startDrag(p || {}); return true; });
   ipcMain.handle('overlay:dragEnd', () => endDrag());
   ipcMain.handle('overlay:setPos', (_e, p) => { setPos(p || {}); return true; });
+  ipcMain.handle('overlay:setRegions', (_e, p) => { setRegions(p && p.regions); return true; });
   ipcMain.handle('overlay:setDock', (_e, p) => { setDock(p || {}); return true; });
   ipcMain.handle('overlay:jump', (_e, p) => { jump(p || {}); return true; });
   ipcMain.handle('overlay:menu', (_e, p) => { openMenu(p || {}); return true; });
