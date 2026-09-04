@@ -173,3 +173,69 @@ test('removeNode 级联清理连线;disconnect 释放槽位', () => {
   assert.strictEqual(model.links.size, 0, '节点删除后其连线全部清理');
   assert.strictEqual(img.inputs[0].link, null);
 });
+
+test('存量画布(v0.12.0 迁移)外部节点:裸 comfy* 元数据键剔除,垃圾标题回退', async () => {
+  // 用户真实数据形态:fromDrawflow 把 Drawflow data 的 comfy* 键裸并进 inputs,
+  // title 落的是 Drawflow 类名 'cv-nt-external'
+  const legacy = {
+    '3': { id: '3', class_type: 'wanBlockSwap', title: 'cv-nt-external', pos: [100, 100], inputs: {
+      comfyConnectionId: 'comfy_local', comfyConnectionName: '本机 ComfyUI', comfyClassType: 'wanBlockSwap',
+      comfyDisplayName: 'wanBlockSwap', comfyCategory: '3d', comfyOutputs: ['MODEL'],
+      comfyInputs: { model: 'x.safetensors' }, comfyWidgets: { model: { kind: 'combo' } },
+      comfyInputTypes: { model: 'COMBO' }, slotNames: [],
+      tasks: [], active: -1, view: 0,
+      _comfyConnectionId: 'comfy_local', _comfyInputTypes: { model: 'COMBO' }, _comfyOutputs: ['MODEL'], _comfyCategory: '3d',
+      model: 'x.safetensors',
+    } },
+  };
+  const model = m.fromApi(legacy, REGISTRY);
+  const n = model.nodes.get('3');
+  assert.ok(n, '节点加载');
+  assert.strictEqual(n.classType, 'wanBlockSwap');
+  assert.notStrictEqual(n.title, 'cv-nt-external', '垃圾标题被回退');
+  // 元数据不得生成 widget:只允许真实参数 model
+  assert.deepStrictEqual(n.widgets.map((w) => w.name), ['model'], 'comfy* 元数据键全部剔除');
+  assert.strictEqual(n.widgets[0].value, 'x.safetensors');
+  // 重新保存:键干净
+  const api = m.toApi(model);
+  const keys = Object.keys(api['3'].inputs);
+  assert.ok(!keys.includes('comfyWidgets') && !keys.includes('slotNames') && !keys.includes('comfyClassType'), '再落盘无裸元数据键');
+});
+
+test('存量画布:参数值只在裸 comfyInputs 对象里(无裸标量键)也能恢复', async () => {
+  const legacy = {
+    '3': { id: '3', class_type: 'wanBlockSwap', title: 'cv-nt-external', pos: [0, 0], inputs: {
+      comfyConnectionId: 'comfy_local', comfyInputs: { model: 'x.safetensors', shift: 3 },
+      comfyWidgets: { model: { kind: 'combo' }, shift: { kind: 'FLOAT' } },
+      comfyInputTypes: { model: 'COMBO', shift: 'FLOAT' }, slotNames: [],
+      comfyOutputs: ['MODEL'],
+      _comfyConnectionId: 'comfy_local', _comfyInputTypes: { model: 'COMBO', shift: 'FLOAT' }, _comfyOutputs: ['MODEL'],
+      tasks: [], active: -1, view: 0,
+    } },
+  };
+  const model = m.fromApi(legacy, REGISTRY);
+  const n = model.nodes.get('3');
+  assert.deepStrictEqual(n.widgets.map((w) => w.name).sort(), ['model', 'shift'], 'comfyInputs 内的值恢复为 widget');
+  assert.strictEqual(n.widgets.find((w) => w.name === 'model').value, 'x.safetensors');
+  assert.strictEqual(n.widgets.find((w) => w.name === 'shift').value, 3);
+  const api = m.toApi(model);
+  assert.strictEqual(api['3'].inputs.model, 'x.safetensors');
+  assert.strictEqual(api['3'].inputs.shift, 3);
+});
+
+test('存量画布:仅声明(slotNames/inputTypes)而无值未连线的张量槽也要重建', async () => {
+  const legacy = {
+    '3': { id: '3', class_type: 'wanBlockSwap', title: 'cv-nt-external', pos: [0, 0], inputs: {
+      comfyConnectionId: 'comfy_local', comfyInputs: {},
+      comfyWidgets: { model: { kind: 'MODEL' } }, comfyInputTypes: { model: 'MODEL' },
+      slotNames: ['model'], comfyOutputs: ['MODEL'],
+      _comfyConnectionId: 'comfy_local', _comfyInputTypes: { model: 'MODEL' }, _comfyOutputs: ['MODEL'],
+      tasks: [], active: -1, view: 0,
+    } },
+  };
+  const model = m.fromApi(legacy, REGISTRY);
+  const n = model.nodes.get('3');
+  assert.deepStrictEqual(n.inputs.map((s) => s.name + ':' + s.type), ['model:MODEL'], '声明式张量槽重建');
+  assert.deepStrictEqual(n.outputs.map((o) => o.type), ['MODEL']);
+  assert.strictEqual(n.widgets.length, 0, '空 comfyInputs 不生成 widget');
+});

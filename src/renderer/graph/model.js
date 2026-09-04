@@ -35,6 +35,21 @@ export const SLOT_LABEL = { prompt: '提示词', ref: '参考图' };
 // 其余类型(MODEL/LATENT/CONDITIONING/IMAGE…)一律开辟输入插槽(md「类型映射断言」)
 const WIDGET_KINDS = new Set(['enum', 'combo', 'dynamic', 'autogrow', 'INT', 'FLOAT', 'BOOLEAN', 'STRING']);
 
+// ComfyUI 类型名 → 是否标量 widget(schema.js 归一化后 COMBO 保持大写,kind 才是小写)
+function isWidgetType(t) {
+  return WIDGET_KINDS.has(t) || String(t || '').toUpperCase() === 'COMBO';
+}
+const widgetKindOf = (t) => (String(t || '').toUpperCase() === 'COMBO' ? 'combo' : (t || 'STRING'));
+
+// 外部节点反序列化时跳过的键:任务历史/版本索引 + 裸元数据(旧画布 fromDrawflow 并入的
+// Drawflow data 键;干净的同名副本带 _ 前缀,由 _comfy* 分支读取)
+const EXTERNAL_META_KEYS = new Set([
+  'tasks', 'results', 'active', 'view', '_v', 'file', 'models', 'type',
+  'comfyConnectionId', 'comfyConnectionName', 'comfyClassType', 'comfyDisplayName', 'comfyCategory',
+  'comfyOutputs', 'comfyInputs', 'comfyWidgets', 'comfyInputTypes', 'comfyDynamicValues', 'comfyDynamicWidgets',
+  'slotNames', 'nodeStatus', 'nodeColor', 'nodeShape', 'locked',
+]);
+
 // 兜底文字度量(Canvas measureText 由渲染层注入;此处用于无头测试/主线程外)
 export function defaultMeasure(text, fontSize = 12) {
   let units = 0;
@@ -353,6 +368,7 @@ export function fromApi(apiJson, registry = {}) {
   const model = createModel(registry);
   if (!apiJson || typeof apiJson !== 'object') return model;
   let maxNodeId = 0;
+  const linkVals = new Map(); // id → 合并取值表(裸键 + 裸 comfyInputs 兜底,外部节点连线查找用)
   // 第一遍:建节点(连线留到第二遍,源/目标顺序无关);`_` 前缀是画布元数据(分组/视口),跳过
   for (const [id, n] of Object.entries(apiJson)) {
     if (id.startsWith('_')) continue;
@@ -380,30 +396,50 @@ export function fromApi(apiJson, registry = {}) {
       });
     } else {
       // 外部 ComfyUI 节点(或 unknown 占位):从 _comfy 字段重建槽位/widget
-      const inputTypes = (n.inputs && n.inputs._comfyInputTypes) || {};
+      // 取值表合并:裸键优先,裸 comfyInputs 对象兜底(部分存量节点只有 comfyInputs 里有参数值)
+      const inputTypes = { ...((n.inputs && typeof n.inputs.comfyInputTypes === 'object' && n.inputs.comfyInputTypes) || {}), ...((n.inputs && n.inputs._comfyInputTypes) || {}) };
+      const bareVals = (n.inputs && typeof n.inputs.comfyInputs === 'object' && n.inputs.comfyInputs) || {};
+      const allVals = { ...bareVals, ...(n.inputs || {}) };
+      linkVals.set(id, allVals);
       const scalarKeys = [], slotKeys = [];
-      for (const [key, value] of Object.entries(n.inputs || {})) {
-        if (key.startsWith('_') || ['tasks', 'results', 'active', 'view', '_v', 'file'].includes(key)) continue;
+      for (const [key, value] of Object.entries(allVals)) {
+        // 结构/历史/裸元数据键一律跳过:旧版(v0.12.0 迁移)画布把 comfyConnectionId、
+        // comfyWidgets、slotNames 等 Drawflow data 键裸并进 inputs,它们不是参数,
+        // 重建时必须剔除,否则会被误生成为 widget 行([object Object] 垃圾行)
+        if (key.startsWith('_') || EXTERNAL_META_KEYS.has(key)) continue;
         const t = inputTypes[key];
         const isLinked = isLink(value);
         // 已连线或张量类型 → 槽位;标量 → widget 值
-        if (isLinked || (t && !WIDGET_KINDS.has(t) && !scalarKind(inputTypes, key))) slotKeys.push(key);
+        if (isLinked || (t && !isWidgetType(t) && !scalarKind(inputTypes, key))) slotKeys.push(key);
         else scalarKeys.push(key);
       }
+      // 声明式槽位/参数补建:未连线且无值的张量输入在存量 JSON 里根本不作为键出现,
+      // 只在 slotNames/inputTypes 里有声明——不补建会丢插槽(如 wanBlockSwap 的 model 入槽)
+      const declaredSlots = Array.isArray(n.inputs && n.inputs.slotNames) ? n.inputs.slotNames : [];
+      for (const name of declaredSlots) {
+        if (!slotKeys.includes(name) && !scalarKeys.includes(name) && !EXTERNAL_META_KEYS.has(name)) slotKeys.push(name);
+      }
+      for (const [name, t] of Object.entries(inputTypes)) {
+        if (slotKeys.includes(name) || scalarKeys.includes(name) || EXTERNAL_META_KEYS.has(name)) continue;
+        (isWidgetType(t) ? scalarKeys : slotKeys).push(name);
+      }
+      // 垃圾标题回退:旧版落盘的 'cv-nt-external'/'cv-external' 是 Drawflow 类名,不是显示名
+      const rawTitle = n.title && !/^cv[-_]/i.test(String(n.title)) && n.title !== '未知节点' ? n.title : '';
+      const bareWidgets = (n.inputs && typeof n.inputs.comfyWidgets === 'object' && n.inputs.comfyWidgets) || {};
       const schema = {
-        classType: n.class_type, displayName: n.title || n.class_type, category: (n.inputs && n.inputs._comfyCategory) || '',
+        classType: n.class_type, displayName: rawTitle || n.class_type, category: (n.inputs && n.inputs._comfyCategory) || (n.inputs && n.inputs.comfyCategory) || '',
         inputs: [...slotKeys.map((name) => ({ name, type: inputTypes[name] || '*' })),
-                 ...scalarKeys.map((name) => ({ name, type: inputTypes[name] || 'STRING', widget: { kind: inputTypes[name] || 'STRING' } }))],
-        outputs: (n.inputs && n.inputs._comfyOutputs) || [],
+                 ...scalarKeys.map((name) => ({ name, type: inputTypes[name] || 'STRING', widget: bareWidgets[name] || { kind: widgetKindOf(inputTypes[name]) } }))],
+        outputs: (n.inputs && n.inputs._comfyOutputs) || (n.inputs && n.inputs.comfyOutputs) || [],
       };
-      const node = addExternalNode(model, { connectionId: (n.inputs && n.inputs._comfyConnectionId) || '', schema }, pos);
+      const node = addExternalNode(model, { connectionId: (n.inputs && n.inputs._comfyConnectionId) || (n.inputs && n.inputs.comfyConnectionId) || '', schema }, pos);
       node.id = id;
       model.nodes.delete(String(model.nextNodeId - 1));
       model.nodes.set(id, node);
       for (const key of scalarKeys) {
         const wd = node.widgets.find((w) => w.name === key);
-        if (wd) wd.value = n.inputs[key];
-        node.data.comfyInputs[key] = n.inputs[key];
+        if (wd) wd.value = allVals[key];
+        node.data.comfyInputs[key] = allVals[key];
       }
       node.data.tasks = (n.inputs && n.inputs.tasks) || [];
       node.data.active = (n.inputs && n.inputs.active) ?? -1;
@@ -412,13 +448,14 @@ export function fromApi(apiJson, registry = {}) {
     }
   }
   model.nextNodeId = Math.max(model.nextNodeId, maxNodeId + 1);
-  // 第二遍:连线
+  // 第二遍:连线(外部节点连线的值可能在裸 comfyInputs 里,用合并取值表查)
   for (const [id, n] of Object.entries(apiJson)) {
     if (id.startsWith('_')) continue;
     const node = model.nodes.get(String(id));
     if (!node) continue;
+    const vals = linkVals.get(id) || n.inputs || {};
     for (const slot of node.inputs) {
-      const v = n.inputs && n.inputs[slot.name];
+      const v = vals[slot.name];
       if (!isLink(v)) continue;
       const src = model.nodes.get(String(v[0]));
       if (!src) continue;

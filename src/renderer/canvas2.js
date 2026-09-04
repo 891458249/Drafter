@@ -417,7 +417,13 @@ function renderCatalogBrowser(query = '') {
   // 双语命中:displayName / classType / 原始分类路径 / i18n 中文标题与分类
   const entries = catalogEntries().filter(({ node }) => (catalogMode !== 'favorites' || favoriteNodes.has(node.classType))
     && (!q || `${node.displayName} ${node.classType} ${node.category} ${i18n.tNodeTitle(node.classType, '')} ${i18n.tCategory(node.category)}`.toLowerCase().includes(q)));
-  if (!entries.length) { box.innerHTML = '<div class="cv-catalog-empty">未找到节点。请启用高级 ComfyUI 模式并刷新节点目录。</div>'; return; }
+  if (!entries.length && !Object.keys(registry || {}).length) { box.innerHTML = '<div class="cv-catalog-empty">未找到节点。请启用高级 ComfyUI 模式并刷新节点目录。</div>'; return; }
+  // 原生节点常驻一组(ComfyUI 离线时目录不再空转);搜索时同样双语过滤
+  const nativeKeys = Object.keys(registry || {}).filter((k) => !registry[k].unsupported
+    && (!q || typeLabel(k).toLowerCase().includes(q) || k.includes(q) || i18n.tNodeTitle(k, '').toLowerCase().includes(q)));
+  const nativeHtml = nativeKeys.length
+    ? `<details class="cv-cat" open><summary>Drafter 原生 · ${nativeKeys.length}</summary><div class="cv-cat-list">${nativeKeys.map((k) => `<button class="cv-cat-node" data-native-type="${k}">${typeIco(k)} ${escapeHtml(typeLabel(k))}</button>`).join('')}</div></details>`
+    : '';
   // 两级分组:大类(category「/」前) → 子类(「/」后),避免全路径平铺刷屏
   // 分组键用原始路径(稳定),显示标签走 i18n 翻译
   const roots = new Map(); // root → Map(sub → entries)
@@ -438,6 +444,9 @@ function renderCatalogBrowser(query = '') {
       `<div class="cv-cat-list">${list.map(btnHtml).join('')}</div>`).join('');
     return `<details class="cv-cat" ${q ? 'open' : ''}><summary>${escapeHtml(i18n.tCategory(root))} · ${total}</summary>${inner}</details>`;
   }).join('');
+  box.innerHTML = nativeHtml + box.innerHTML;
+  if (!entries.length) box.innerHTML += '<div class="cv-catalog-empty">本机 ComfyUI 节点目录为空(ComfyUI 未启动或未连接)。上方 Drafter 原生节点可直接使用。</div>';
+  for (const button of box.querySelectorAll('[data-native-type]')) button.onclick = () => addNodeAt(button.dataset.nativeType);
   for (const button of box.querySelectorAll('[data-comfy-class]')) button.onclick = () => addExternalAt(button.dataset.comfyConnection, button.dataset.comfyClass);
 }
 
