@@ -13,6 +13,7 @@ import * as term from './term.js';
 import * as gems from './gems.js';
 import * as codeblock from './codeblock.js';
 import * as canvas from './canvas.js';
+import * as canvas2 from './canvas2.js'; // 原生引擎画布(v0.13.0,默认);settings.canvasEngine='drawflow' 回退旧引擎
 import * as assets from './assets.js';
 import * as harness from './harness.js';
 import { THEMES, applyTheme, currentTheme, bootTheme } from './themes.js';
@@ -86,6 +87,7 @@ async function boot() {
     if (st && st.settings && st.settings.instantJump === false) state.instantJump = false;
     if (st && st.settings && st.settings.comfyAdvancedMode === true) state.comfyAdvancedMode = true;
     if (st && st.settings && st.settings.sharedPromptCache === false) state.sharedPromptCache = false;
+    if (st && st.settings && st.settings.canvasEngine === 'drawflow') state.canvasEngine = 'drawflow';
   } catch {}
   populateModelSelects(); // 按活跃 Key 填充模型下拉(v0.7.0)
   const sdk = await api.sdkStatus();
@@ -331,6 +333,7 @@ function renderThemeCards() {
 function openSettingsModal() {
   renderThemeCards();
   $('set-instantjump').checked = state.instantJump;
+  $('set-canvas-native').checked = state.canvasEngine !== 'drawflow';
   $('set-comfy-advanced').checked = !!state.comfyAdvancedMode;
   $('set-sharedcache').checked = state.sharedPromptCache !== false;
   renderUpdateStatus(); // 更新区:显示当前版本,不自动请求网络
@@ -441,6 +444,10 @@ $('set-comfy-advanced').onchange = (e) => {
   state.comfyAdvancedMode = !!e.target.checked;
   api.setSetting('comfyAdvancedMode', state.comfyAdvancedMode);
   window.dispatchEvent(new Event('drafter:comfy-advanced-changed'));
+};
+$('set-canvas-native').onchange = (e) => { // 画布引擎:原生(默认)↔ Drawflow,重启生效
+  state.canvasEngine = e.target.checked ? 'native' : 'drawflow';
+  api.setSetting('canvasEngine', state.canvasEngine);
 };
 // 跨会话共享提示缓存(v0.10.2):盖戳进新会话 meta.staticPrompt(sessions.js 创建时读取)
 $('set-sharedcache').onchange = (e) => {
@@ -1126,6 +1133,8 @@ on('session-activated', async (sid) => {
 // 板块切换:Code(项目工作区)/ Chat(纯对话)/ 创作(图·视·音·3D 一体化,v0.9.38 四大媒体板块合并)
 // ---------------------------------------------------------------------------
 const SECTIONS = ['code', 'chat', 'media', 'canvas', 'assets', 'harness'];
+// 画布引擎选择:v0.13.0 起默认原生引擎(canvas2),可回退 Drawflow
+function canvasEngine() { return state.canvasEngine === 'drawflow' ? canvas : canvas2; }
 // 画布/素材板块(v0.10.0)不走会话挑选流程(画布列表/素材网格各有数据源);
 // harness 板块(v0.11.0)由 harness 引擎自管会话,也不走 SDK 会话挑选
 const NON_SESSION_SECTIONS = ['canvas', 'assets', 'harness'];
@@ -1147,7 +1156,7 @@ function setSection(sec, { skipSessionPick } = {}) {
   if (sec !== 'code' && sec !== 'chat') $('right-panel').classList.add('hidden');
   if (NON_SESSION_SECTIONS.includes(sec)) {
     // 各板块自行填充侧栏与主区:画布渲染画布列表,素材重扫网格,harness 启动引擎
-    if (sec === 'canvas') canvas.enterSection();
+    if (sec === 'canvas') canvasEngine().enterSection();
     else if (sec === 'assets') assets.enterSection();
     else if (sec === 'harness') harness.enterSection();
     populateModelSelects();
@@ -1220,7 +1229,7 @@ editor.init();
 preview.init();
 tasks.init();
 term.init();
-canvas.init(); // 无限画布(v0.10.0):Drawflow 实例与画布板块接线
+canvasEngine().init(); // 无限画布:按 settings.canvasEngine 选原生(v0.13.0 默认)/Drawflow 引擎
 assets.init(); // 素材板块(v0.10.0)
 document.body.classList.add('sec-' + state.section); // 启动即挂板块 class(code-only 元素据此显隐)
 chat.setViewMode('normal');

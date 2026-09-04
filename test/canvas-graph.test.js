@@ -114,3 +114,33 @@ test('topoOrder / executionTargets:顺序与目标子图', () => {
   api['99'] = { id: '99', class_type: 'drafter/text', inputs: { text: '游离' } };
   assert.ok(!g.executionTargets(api).subgraph.has('99'));
 });
+
+// v0.13.0:原生引擎画布的 `_` 前缀保留键(分组/视口元数据)不参与校验/拓扑/签名
+test('保留键:_groups/_viewport 被校验、拓扑、签名全部跳过', () => {
+  const api = g.fromDrawflow(drawflowFixture());
+  api._groups = [{ id: '1', title: '分组', rect: { x: 0, y: 0, w: 500, h: 400 } }];
+  api._viewport = { tx: 10, ty: 20, scale: 1.2 };
+  assert.strictEqual(g.validate(api).ok, true, '保留键不触发 unsupported_node');
+  assert.deepStrictEqual(g.topoOrder(api), ['1', '2', '3']);
+  assert.deepStrictEqual(g.executionTargets(api).targets.sort(), ['2', '3']);
+  const clean = g.fromDrawflow(drawflowFixture());
+  assert.strictEqual(g.nodeSignature(api, '2'), g.nodeSignature(clean, '2'), '保留键不进签名');
+});
+
+// v0.13.0:Bypass 拓扑短路——被忽略节点的输入原样穿透到下游
+test('throughBypass / resolvePromptPreview:绕过节点穿透到上游', () => {
+  const graph = {
+    '1': { id: '1', class_type: 'drafter/text', inputs: { text: '一只猫' } },
+    '2': { id: '2', class_type: 'drafter/llmtext', inputs: { prompt: ['1', 0], models: ['k|m'], nodeStatus: 'bypass', results: [{ text: '旧结果' }], active: 0 } },
+    '3': { id: '3', class_type: 'drafter/image', inputs: { prompt: ['2', 0], models: ['k|m'] } },
+  };
+  assert.strictEqual(g.throughBypass(graph, '2'), '1', 'bypass 节点穿透到其第一个连线输入');
+  assert.strictEqual(g.throughBypass(graph, '1'), '1', '正常节点原样返回');
+  assert.strictEqual(g.resolvePromptPreview(graph, '3'), '一只猫', '穿透 bypass 节点取到上游文本');
+  // 级联 bypass
+  graph['2'].inputs.nodeStatus = 'bypass';
+  graph['4'] = { id: '4', class_type: 'drafter/image', inputs: { prompt: ['3', 0], models: ['k|m'], nodeStatus: 'bypass' } };
+  graph['5'] = { id: '5', class_type: 'drafter/image', inputs: { prompt: ['4', 0], models: ['k|m'] } };
+  assert.strictEqual(g.throughBypass(graph, '4'), '3');
+  assert.strictEqual(g.resolvePromptPreview(graph, '5'), '一只猫', '级联 bypass 一路穿到文本源');
+});

@@ -571,6 +571,9 @@
         <label class="settings-row" style="cursor:pointer">
           <input type="checkbox" id="set-instantjump" /> ⚡ 瞬时跳转定位(消息导航/回到底部,关闭则平滑滚动)
         </label>
+        <label class="settings-row" style="cursor:pointer" title="原生引擎:自研 Canvas 2D 渲染(脏标记双通道/指针锚定缩放/连线验证/分组框/PNG 工作流拖入);取消勾选回退旧 Drawflow 引擎。切换后重启生效。">
+          <input type="checkbox" id="set-canvas-native" /> 🖲 画布使用原生渲染引擎(v0.13.0,默认开)
+        </label>
         <label class="settings-row" style="cursor:pointer" title="外部 ComfyUI 是可选高级后端，需要自行部署和运行服务；API Key 原生画布无需此设置。">
           <input type="checkbox" id="set-comfy-advanced" /> 🧪 高级模式:接入外部 ComfyUI 服务(需自备服务，实验性)
         </label>

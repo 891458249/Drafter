@@ -282,8 +282,8 @@ async function createSessionInProject(p) {
 // Project sessions are created via the group's own ＋ button or the ⋯ menu's
 // "打开目录" flow.
 export async function createSession(extra = {}) {
-  // 画布板块点「＋ 新画布」:创建画布而不是会话(v0.10.0)
-  if (state.section === 'canvas') { const m = await import('./canvas.js'); return m.createFromSidebar(); }
+  // 画布板块点「＋ 新画布」:创建画布而不是会话(v0.10.0);引擎按 settings.canvasEngine(v0.13.0)
+  if (state.section === 'canvas') { const m = await import(state.canvasEngine === 'drawflow' ? './canvas.js' : './canvas2.js'); return m.createFromSidebar(); }
   let sel = parseModelValue($('model-sel').value);
   const board = state.section;
   // 创作板块必须选中模型;无可用模型时拦截并提示

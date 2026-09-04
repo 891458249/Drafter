@@ -58,7 +58,8 @@ async function runNodeMedia(job, id, node, type, deps) {
   for (const k of acceptImageSlots) {
     const v = d[k];
     if (!Array.isArray(v)) continue;
-    const src = job.graphSnapshot[String(v[0])];
+    // Bypass 短路(v0.13.0):被忽略的上游节点穿透到其上游产物源
+    const src = job.graphSnapshot[graph.throughBypass(job.graphSnapshot, String(v[0]))];
     if (!src) continue;
     const st = graph.typeOfClass(src.class_type);
     if (st === 'upload') refFiles.push(...bridge.referenceFiles(src, 'IMAGE'));

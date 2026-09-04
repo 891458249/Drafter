@@ -456,3 +456,11 @@ Git 工作流:
 - 坑:①prompt 槽是「必需槽」,空槽不落 null 占位(可选 ref 槽才占位)——否则连线类型语义被空槽吃掉;②连线判断必须区分 [id,socket] 与 models:['k|m'] 值数组(isLink);③prompt 解析沿 prompt 槽递归向上(生成节点也可作上游文本源)
 
 > 版本注:v0.12.0 的 tag 与 GitHub Release 被并行会话用于 Harness 修复(be722d49),画布升级的实际发布版本号是 **v0.12.1**(内容同上)。
+
+### v0.13.0(2026-09-03)— 画布重构:自研原生渲染引擎替换 Drawflow
+- 按《ComfyUI画布架构解析.md》三层架构重写渲染端:src/renderer/graph/ 下 model(图模型+schema 工厂+computeSize+四阶连接验证)/ viewport(双向仿射投影+指针锚定无漂移缩放+viewAABB+LOD 三级)/ render(Canvas 2D 背景·前景双画布脏标记+节点 8 层管线+动态张力贝塞尔+执行正弦脉冲进度条+Mute/Bypass 视觉)/ interact(4px 死区状态机+框选+反向拉线+引脚吸附+智能参考线+分组联动)/ history(差量+快照双轨 30 步)/ pngmeta(PNG tEXt/iTXt 拖入恢复工作流)
+- 集成层 canvas2.js 复用 DOM 外壳(目录/inspector/工具栏/tabs/队列);持久化直发 ComfyUI API 格式;诊断钩 window.__cv2
+- 主进程:canvasGraph 加 `_` 前缀保留键(_groups/_viewport 随画布落盘,校验/拓扑/签名跳过)+ throughBypass(Bypass 拓扑短路穿透上游);新 IPC canvas:registry 单一下发 NODE_TYPES(消除渲染端/主进程双份注册表)
+- 引擎开关 settings.canvasEngine(默认 native,可回退 drawflow);存量 drawflow 形画布 JSON 打开自动归一
+- 已知缺口:节点内任务画廊翻页/单节点执行按钮、widget 滑块拖拽、reroute 点待补
+- 测试:npm test 224/224(新增 22 例);CDP 冒烟 smoke-canvas2-native.js 16 断言全过(隔离 userData)

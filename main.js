@@ -900,6 +900,7 @@ ipcMain.handle('aigc:cancel', (_e, { traceId }) => {
 // IPC: 无限画布(v0.10.0)— 持久化 + 非会话执行
 // ---------------------------------------------------------------------------
 ipcMain.handle('canvas:list', () => canvases.list());
+ipcMain.handle('canvas:registry', () => canvasGraph.NODE_TYPES); // 节点类型注册表单一下发(原生引擎 v0.13.0)
 ipcMain.handle('canvas:create', (_e, { name } = {}) => canvases.create(name));
 ipcMain.handle('canvas:load', (_e, { id } = {}) => canvases.load(id));
 ipcMain.handle('canvas:save', (_e, { id, name, graph } = {}) => canvases.save(id, { name, graph }));

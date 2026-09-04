@@ -115,6 +115,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // 无限画布 + 素材库(v0.10.0)
   canvasList: () => ipcRenderer.invoke('canvas:list'),
+  canvasRegistry: () => ipcRenderer.invoke('canvas:registry'),
   canvasCreate: (name) => ipcRenderer.invoke('canvas:create', { name }),
   canvasLoad: (id) => ipcRenderer.invoke('canvas:load', { id }),
   canvasSave: (id, payload) => ipcRenderer.invoke('canvas:save', { id, ...payload }),

@@ -12,6 +12,12 @@
 
 const crypto = require('crypto');
 
+// 保留键约定(v0.13.0):`_` 前缀的顶层键是画布元数据(分组框 _groups、视口 _viewport),
+// 不是节点——校验/拓扑/签名/执行一律跳过。渲染端原生引擎据此把分组与视口随画布落盘。
+const isNodeKey = (k) => !k.startsWith('_');
+const nodeKeys = (graph) => Object.keys(graph || {}).filter(isNodeKey);
+const nodeEntries = (graph) => Object.entries(graph || {}).filter(([k]) => isNodeKey(k));
+
 // Drafter 画布节点类型注册表(与渲染端 canvas.js 的 NODE_TYPES 一致,class_type 用 drafter/ 前缀)
 // inTypes: input_1..N 接受的来源 outType;outType: 该节点输出类型;outNode: 是否整图运行终点
 const NODE_TYPES = {
@@ -179,7 +185,7 @@ function validate(graph) {
     (nodeErrors[id] = nodeErrors[id] || []).push({ type, message });
   };
   // 1) class_type / 不支持类型 / 必需输入
-  for (const [id, node] of Object.entries(nodes)) {
+  for (const [id, node] of nodeEntries(nodes)) {
     const type = typeOfClass(node.class_type);
     if (type === null) {
       // 外部 ComfyUI 节点由连接戳识别;服务端 /prompt 会做最终 schema 校验。
@@ -218,9 +224,9 @@ function validate(graph) {
     state[id] = 2;
     return ok;
   };
-  for (const id of Object.keys(nodes)) if (!state[id]) dfs(id);
+  for (const id of nodeKeys(nodes)) if (!state[id]) dfs(id);
   // 3) 至少要有一个输出节点(整图运行的终点集合)
-  const hasOut = Object.values(nodes).some((n) => {
+  const hasOut = nodeEntries(nodes).some(([, n]) => {
     const t = NODE_TYPES[typeOfClass(n.class_type)];
     return (t && t.outNode && !t.unsupported) || (typeOfClass(n.class_type) === null && n.inputs && n.inputs._comfyConnectionId);
   });
@@ -239,13 +245,26 @@ function nodeLabel(node, id) {
 // prompt 预览(校验/执行用):沿 prompt 槽向上游解析——文本节点给正文,文本生成节点给
 // 采用版本,生成节点给自身解析结果(递归);解析到自身或遇环回退自身标量,真无则空。
 // 注意:null 是「空槽」占位,不是连线;连线是 [id, socket] 数组
+// Bypass 短路(v0.13.0):被忽略节点的输入原样穿透——沿其第一个连线输入继续向上取
+function throughBypass(graph, id, stack = []) {
+  let cur = String(id);
+  while (graph[cur] && graph[cur].inputs && graph[cur].inputs.nodeStatus === 'bypass' && !stack.includes(cur)) {
+    stack.push(cur);
+    const linked = Object.values(graph[cur].inputs).find((v) => isLink(v));
+    if (!linked) break;
+    cur = String(linked[0]);
+  }
+  return cur;
+}
+
 function resolvePromptPreview(graph, id, stack = []) {
   const node = graph[id];
   if (!node) return '';
   if (stack.includes(id)) return String((node.inputs && node.inputs.prompt) || '').trim(); // 环:回退标量
   const link = node.inputs && node.inputs.prompt;
   if (isLink(link)) {
-    const src = graph[String(link[0])];
+    const srcId = throughBypass(graph, String(link[0]));
+    const src = graph[srcId];
     if (!src) return '';
     const st = typeOfClass(src.class_type);
     if (st === 'text') return String(src.inputs.text || '').trim();
@@ -254,7 +273,7 @@ function resolvePromptPreview(graph, id, stack = []) {
       const r = Array.isArray(results) && results[src.inputs.active];
       return ((r && r.text) || '').trim();
     }
-    return resolvePromptPreview(graph, String(link[0]), [...stack, id]); // 上游也是生成节点:递归
+    return resolvePromptPreview(graph, srcId, [...stack, id]); // 上游也是生成节点:递归
   }
   return String((node.inputs && node.inputs.prompt) || '').trim();
 }
@@ -271,7 +290,7 @@ function ancestorOrder(graph) {
     for (const v of Object.values(graph[id].inputs || {})) if (isLink(v)) visit(String(v[0]));
     order.set(id, idx++);
   };
-  for (const id of Object.keys(graph)) visit(id);
+  for (const id of nodeKeys(graph)) visit(id);
   return order;
 }
 
@@ -324,7 +343,7 @@ function isAncestorOf(graph, id, maybeAncestor) {
 
 // 拓扑排序(整图运行顺序):Kahn,同层按 id 稳定
 function topoOrder(graph) {
-  const nodes = Object.keys(graph || {});
+  const nodes = nodeKeys(graph);
   const inDeg = new Map(nodes.map((id) => [id, 0]));
   const downstream = new Map(nodes.map((id) => [id, []]));
   for (const id of nodes) {
@@ -351,7 +370,7 @@ function topoOrder(graph) {
 // 整图运行的目标子图:全部输出节点及其祖先(非生成链上的游离节点不跑)
 function executionTargets(graph) {
   const targets = [];
-  for (const [id, node] of Object.entries(graph || {})) {
+  for (const [id, node] of nodeEntries(graph)) {
     const t = NODE_TYPES[typeOfClass(node.class_type)];
     if (t && t.outNode && !t.unsupported) targets.push(id);
   }
@@ -370,6 +389,6 @@ function executionTargets(graph) {
 
 module.exports = {
   NODE_TYPES, CLASS_PREFIX, classOf, typeOfClass,
-  fromDrawflow, toDrawflow, validate, resolvePromptPreview, nodeLabel,
+  fromDrawflow, toDrawflow, validate, resolvePromptPreview, nodeLabel, throughBypass,
   topoOrder, nodeSignature, executionTargets, ancestorOrder,
 };
