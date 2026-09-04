@@ -445,6 +445,12 @@ function renderCatalogBrowser(query = '') {
     return `<details class="cv-cat" ${q ? 'open' : ''}><summary>${escapeHtml(i18n.tCategory(root))} · ${total}</summary>${inner}</details>`;
   }).join('');
   box.innerHTML = nativeHtml + box.innerHTML;
+  // 离线缓存提示:目录来自磁盘缓存(ComfyUI 未启动)时明确告知,避免误以为节点丢了
+  const stale = [...comfyCatalogs.values()].find((s) => s.stale);
+  if (stale) {
+    const when = stale.cachedAt ? new Date(stale.cachedAt).toLocaleString('zh-CN', { hour12: false }) : '';
+    box.innerHTML += `<div class="cv-catalog-empty">⚠ 节点目录为离线缓存(最后更新 ${when})。启动本机 ComfyUI 后点 ⟳ 刷新。</div>`;
+  }
   if (!entries.length) box.innerHTML += '<div class="cv-catalog-empty">本机 ComfyUI 节点目录为空(ComfyUI 未启动或未连接)。上方 Drafter 原生节点可直接使用。</div>';
   for (const button of box.querySelectorAll('[data-native-type]')) button.onclick = () => addNodeAt(button.dataset.nativeType);
   for (const button of box.querySelectorAll('[data-comfy-class]')) button.onclick = () => addExternalAt(button.dataset.comfyConnection, button.dataset.comfyClass);
@@ -454,7 +460,7 @@ async function loadComfyCatalogs(force = false) {
   if (comfyCatalogs.size && !force) return;
   comfyCatalogs.clear();
   const local = await api.comfyLocalCatalog();
-  if (local && local.ok) comfyCatalogs.set('comfy_local', { connection: { id: 'comfy_local', name: '本机 ComfyUI', enabled: true }, catalog: local.catalog || [] });
+  if (local && local.ok) comfyCatalogs.set('comfy_local', { connection: { id: 'comfy_local', name: '本机 ComfyUI', enabled: true }, catalog: local.catalog || [], stale: !!local.stale, cachedAt: local.cachedAt || 0 });
   if (!state.comfyAdvancedMode) return;
   const connections = await api.comfyListConnections();
   for (const connection of connections || []) {

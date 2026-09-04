@@ -54,6 +54,7 @@ const comfyClient = require('./src/main/comfy/client');
 const comfySchema = require('./src/main/comfy/schema');
 const comfyFormat = require('./src/main/comfy/format');
 const comfyBridge = require('./src/main/comfy/bridge');
+const comfyCatalogCache = require('./src/main/comfy/catalog-cache');
 const { ComfyJobs } = require('./src/main/comfy/jobs');
 const aux = require('./src/main/aux-models');
 const title = require('./src/main/title');
@@ -453,8 +454,15 @@ async function getComfyCatalog(id, refresh = false) {
 }
 ipcMain.handle('comfy:listConnections', () => comfyConnections.list());
 ipcMain.handle('comfy:localCatalog', async () => {
-  try { return { ok: true, catalog: comfySchema.normalizeCatalog(await comfyClient.objectInfo({ baseUrl: 'http://127.0.0.1:8188', authType: 'none', secret: '' })) }; }
-  catch (error) { return { ok: false, error: error.message }; }
+  try {
+    const catalog = comfySchema.normalizeCatalog(await comfyClient.objectInfo({ baseUrl: 'http://127.0.0.1:8188', authType: 'none', secret: '' }));
+    comfyCatalogCache.write(catalog); // 成功即落盘缓存(ComfyUI 离线时回退,v0.13.9)
+    return { ok: true, catalog };
+  } catch (error) {
+    const cached = comfyCatalogCache.read();
+    if (cached) return { ok: true, catalog: cached.catalog, stale: true, cachedAt: cached.cachedAt };
+    return { ok: false, error: error.message };
+  }
 });
 ipcMain.handle('comfy:saveConnection', (_e, entry) => {
   const result = comfyConnections.save(entry);
