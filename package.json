@@ -1,6 +1,6 @@
 {
   "name": "drafter",
-  "version": "0.13.5",
+  "version": "0.13.6",
   "description": "Drafter — AI desktop workbench: fast chat, coding agent and media creation",
   "main": "main.js",
   "scripts": {
