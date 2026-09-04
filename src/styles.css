@@ -1114,6 +1114,7 @@ body.sec-harness .sdk-only, body.sec-harness .workspace-only { display: none !im
 .cv-cat summary { cursor: pointer; padding: 5px 6px; color: var(--text); font-size: 12px; border-radius: 5px; }
 .cv-cat summary:hover { background: var(--bg-hover); }
 .cv-cat-list { display: flex; flex-direction: column; padding-left: 7px; }
+.cv-cat-sub { padding: 5px 6px 2px 13px; color: var(--text-dim); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.85; }
 .cv-cat-node { border: 0; background: none; color: var(--text-dim); text-align: left; padding: 4px 6px; border-radius: 4px; font-size: 11px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-cat-node:hover { color: var(--text); background: var(--bg-hover); }
 .cv-catalog-empty { color: var(--text-dim); font-size: 12px; padding: 8px; }

@@ -413,10 +413,26 @@ function renderCatalogBrowser(query = '') {
   if (!box) return;
   const q = query.trim().toLowerCase();
   const entries = catalogEntries().filter(({ node }) => (catalogMode !== 'favorites' || favoriteNodes.has(node.classType)) && (!q || `${node.displayName} ${node.classType} ${node.category}`.toLowerCase().includes(q)));
-  const groups = new Map();
-  for (const entry of entries) { const l = groups.get(entry.node.category) || []; l.push(entry); groups.set(entry.node.category, l); }
   if (!entries.length) { box.innerHTML = '<div class="cv-catalog-empty">未找到节点。请启用高级 ComfyUI 模式并刷新节点目录。</div>'; return; }
-  box.innerHTML = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([category, list]) => `<details class="cv-cat" ${q ? 'open' : ''}><summary>${escapeHtml(category)} · ${list.length}</summary><div class="cv-cat-list">${list.map(({ connectionId, node }) => `<button class="cv-cat-node" data-comfy-connection="${escapeHtml(connectionId)}" data-comfy-class="${escapeHtml(node.classType)}" title="${escapeHtml(node.classType)}">${escapeHtml(node.displayName)}</button>`).join('')}</div></details>`).join('');
+  // 两级分组:大类(category「/」前) → 子类(「/」后),避免全路径平铺刷屏
+  const roots = new Map(); // root → Map(sub → entries)
+  for (const entry of entries) {
+    const cat = entry.node.category || '其他';
+    const root = cat.split('/')[0] || '其他';
+    const sub = cat === root ? '' : cat.slice(root.length + 1);
+    if (!roots.has(root)) roots.set(root, new Map());
+    const subs = roots.get(root);
+    if (!subs.has(sub)) subs.set(sub, []);
+    subs.get(sub).push(entry);
+  }
+  const btnHtml = ({ connectionId, node }) => `<button class="cv-cat-node" data-comfy-connection="${escapeHtml(connectionId)}" data-comfy-class="${escapeHtml(node.classType)}" title="${escapeHtml(node.classType)}">${escapeHtml(node.displayName)}</button>`;
+  box.innerHTML = [...roots.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([root, subs]) => {
+    const total = [...subs.values()].reduce((n, l) => n + l.length, 0);
+    const inner = [...subs.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([sub, list]) =>
+      (sub ? `<div class="cv-cat-sub">${escapeHtml(sub)} · ${list.length}</div>` : '') +
+      `<div class="cv-cat-list">${list.map(btnHtml).join('')}</div>`).join('');
+    return `<details class="cv-cat" ${q ? 'open' : ''}><summary>${escapeHtml(root)} · ${total}</summary>${inner}</details>`;
+  }).join('');
   for (const button of box.querySelectorAll('[data-comfy-class]')) button.onclick = () => addExternalAt(button.dataset.comfyConnection, button.dataset.comfyClass);
 }
 
