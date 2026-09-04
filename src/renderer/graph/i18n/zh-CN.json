@@ -1,0 +1,257 @@
+{
+  "categories": {
+    "model": "模型",
+    "sampling": "采样",
+    "custom": "自定义",
+    "loaders": "加载器",
+    "conditioning": "条件",
+    "latent": "Latent",
+    "image": "图像",
+    "advanced": "高级",
+    "utils": "实用工具",
+    "text": "文本",
+    "video": "视频",
+    "3d": "3D",
+    "audio": "音频",
+    "mask": "遮罩",
+    "animation": "动画",
+    "inpaint": "局部重绘",
+    "upscaling": "放大",
+    "experimental": "实验",
+    "dataset": "数据集"
+  },
+  "types": {
+    "text": "文本",
+    "image": "图像",
+    "video": "视频",
+    "audio": "音频",
+    "model": "模型",
+    "MODEL": "模型",
+    "LATENT": "Latent",
+    "CONDITIONING": "条件",
+    "CLIP": "CLIP",
+    "VAE": "VAE",
+    "IMAGE": "图像",
+    "MASK": "遮罩",
+    "INT": "整数",
+    "FLOAT": "浮点",
+    "STRING": "字符串",
+    "BOOLEAN": "布尔",
+    "*": "任意"
+  },
+  "slots": {
+    "prompt": "提示词",
+    "ref": "参考图",
+    "output": "输出"
+  },
+  "nativeNodes": {
+    "text": "文本",
+    "llmtext": "文本生成",
+    "upload": "参考图",
+    "image": "图片生成",
+    "video": "视频生成",
+    "audio": "音频生成",
+    "model3d": "3D 生成",
+    "external": "ComfyUI 节点",
+    "unknown": "未知节点"
+  },
+  "nodes": {
+    "KSampler": {
+      "title": "K采样器",
+      "inputs": {
+        "model": "模型",
+        "positive": "正面条件",
+        "negative": "负面条件",
+        "latent_image": "Latent图像"
+      },
+      "widgets": {
+        "seed": "种子",
+        "steps": "步数",
+        "cfg": "cfg",
+        "sampler_name": "采样器名称",
+        "scheduler": "调度器",
+        "denoise": "降噪"
+      },
+      "outputs": {
+        "LATENT": "Latent"
+      }
+    },
+    "KSamplerAdvanced": {
+      "title": "K采样器 (高级)",
+      "inputs": {
+        "model": "模型",
+        "positive": "正面条件",
+        "negative": "负面条件",
+        "latent_image": "Latent图像"
+      },
+      "widgets": {
+        "add_noise": "增加噪声",
+        "noise_seed": "噪声种子",
+        "steps": "步数",
+        "start_at_step": "起始步数",
+        "end_at_step": "结束步数",
+        "return_with_leftover_noise": "返回残留噪声"
+      }
+    },
+    "CheckpointLoaderSimple": {
+      "title": "Checkpoint 加载器 (简易)",
+      "widgets": {
+        "ckpt_name": "大模型名称"
+      },
+      "outputs": {
+        "MODEL": "模型",
+        "CLIP": "CLIP",
+        "VAE": "VAE"
+      }
+    },
+    "CLIPTextEncode": {
+      "title": "CLIP 文本编码器 (提示词)",
+      "inputs": {
+        "clip": "CLIP"
+      },
+      "widgets": {
+        "text": "文本"
+      },
+      "outputs": {
+        "CONDITIONING": "条件"
+      }
+    },
+    "VAEDecode": {
+      "title": "VAE 解码",
+      "inputs": {
+        "samples": "Latent采样",
+        "vae": "VAE"
+      },
+      "outputs": {
+        "IMAGE": "图像"
+      }
+    },
+    "VAEEncode": {
+      "title": "VAE 编码",
+      "inputs": {
+        "pixels": "图像",
+        "vae": "VAE"
+      },
+      "outputs": {
+        "LATENT": "Latent"
+      }
+    },
+    "EmptyLatentImage": {
+      "title": "空Latent图像",
+      "widgets": {
+        "width": "宽度",
+        "height": "高度",
+        "batch_size": "批次大小"
+      },
+      "outputs": {
+        "LATENT": "Latent"
+      }
+    },
+    "SaveImage": {
+      "title": "保存图像",
+      "inputs": {
+        "images": "图像"
+      },
+      "widgets": {
+        "filename_prefix": "文件名前缀"
+      }
+    },
+    "LoadImage": {
+      "title": "加载图像",
+      "widgets": {
+        "image": "图像文件"
+      },
+      "outputs": {
+        "IMAGE": "图像",
+        "MASK": "遮罩"
+      }
+    },
+    "LoraLoader": {
+      "title": "LoRA 加载器",
+      "inputs": {
+        "model": "模型",
+        "clip": "CLIP"
+      },
+      "widgets": {
+        "lora_name": "LoRA 名称",
+        "strength_model": "模型强度",
+        "strength_clip": "CLIP 强度"
+      },
+      "outputs": {
+        "MODEL": "模型",
+        "CLIP": "CLIP"
+      }
+    },
+    "CLIPVisionLoader": {
+      "title": "CLIP 视觉加载器",
+      "widgets": {
+        "clip_name": "视觉模型名称"
+      },
+      "outputs": {
+        "CLIP_VISION": "CLIP视觉"
+      }
+    },
+    "ControlNetLoader": {
+      "title": "ControlNet 加载器",
+      "widgets": {
+        "control_net_name": "ControlNet 名称"
+      },
+      "outputs": {
+        "CONTROL_NET": "ControlNet"
+      }
+    },
+    "ControlNetApply": {
+      "title": "ControlNet 应用",
+      "inputs": {
+        "conditioning": "条件",
+        "control_net": "ControlNet",
+        "image": "图像"
+      },
+      "widgets": {
+        "strength": "强度"
+      },
+      "outputs": {
+        "CONDITIONING": "条件"
+      }
+    },
+    "ImageScale": {
+      "title": "图像缩放",
+      "inputs": {
+        "image": "图像"
+      },
+      "widgets": {
+        "upscale_method": "缩放算法",
+        "width": "宽度",
+        "height": "高度",
+        "crop": "裁剪"
+      },
+      "outputs": {
+        "IMAGE": "图像"
+      }
+    },
+    "VAELoader": {
+      "title": "VAE 加载器",
+      "widgets": {
+        "vae_name": "VAE 名称"
+      },
+      "outputs": {
+        "VAE": "VAE"
+      }
+    },
+    "LatentUpscale": {
+      "title": "Latent 放大",
+      "inputs": {
+        "samples": "Latent采样"
+      },
+      "widgets": {
+        "upscale_method": "缩放算法",
+        "width": "宽度",
+        "height": "高度",
+        "crop": "裁剪"
+      },
+      "outputs": {
+        "LATENT": "Latent"
+      }
+    }
+  }
+}

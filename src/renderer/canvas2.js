@@ -14,6 +14,7 @@ import { createRenderer, TYPE_COLORS } from './graph/render.js';
 import { attach } from './graph/interact.js';
 import { createHistory } from './graph/history.js';
 import { extractWorkflowMeta, isPng } from './graph/pngmeta.js';
+import { i18n } from './graph/i18n.js';
 
 const IMG_RE = /\.(png|jpe?g|gif|webp)$/i;
 const AIGC_TERMINAL = new Set(['done', 'fail', 'timeout', 'interrupted']);
@@ -367,13 +368,14 @@ function openSearchMenu(worldPt, clientX, clientY) {
   const input = box.querySelector('input');
   const entries = () => {
     const q = input.value.trim().toLowerCase();
+    // 双语命中:英文逻辑键(classType/type)与 i18n 中文标题都可检索
     const native = Object.entries(registry || {}).filter(([, t]) => !t.unsupported)
-      .filter(([k]) => !q || typeLabel(k).toLowerCase().includes(q) || k.includes(q))
+      .filter(([k]) => !q || typeLabel(k).toLowerCase().includes(q) || k.includes(q) || i18n.tNodeTitle(k, '').toLowerCase().includes(q))
       .map(([k]) => ({ kind: 'native', key: k, label: `${typeIco(k)} ${typeLabel(k)}` }));
     const ext = catalogEntries()
-      .filter(({ node }) => !q || `${node.displayName} ${node.classType}`.toLowerCase().includes(q))
+      .filter(({ node }) => !q || `${node.displayName} ${node.classType} ${i18n.tNodeTitle(node.classType, '')}`.toLowerCase().includes(q))
       .slice(0, 30)
-      .map(({ connectionId, node }) => ({ kind: 'external', connectionId, key: node.classType, label: `☁ ${node.displayName}` }));
+      .map(({ connectionId, node }) => ({ kind: 'external', connectionId, key: node.classType, label: `☁ ${i18n.tNodeTitle(node.classType, node.displayName)}` }));
     return [...native, ...ext];
   };
   const render = () => {
@@ -412,9 +414,12 @@ function renderCatalogBrowser(query = '') {
   const box = $('cv-node-categories');
   if (!box) return;
   const q = query.trim().toLowerCase();
-  const entries = catalogEntries().filter(({ node }) => (catalogMode !== 'favorites' || favoriteNodes.has(node.classType)) && (!q || `${node.displayName} ${node.classType} ${node.category}`.toLowerCase().includes(q)));
+  // 双语命中:displayName / classType / 原始分类路径 / i18n 中文标题与分类
+  const entries = catalogEntries().filter(({ node }) => (catalogMode !== 'favorites' || favoriteNodes.has(node.classType))
+    && (!q || `${node.displayName} ${node.classType} ${node.category} ${i18n.tNodeTitle(node.classType, '')} ${i18n.tCategory(node.category)}`.toLowerCase().includes(q)));
   if (!entries.length) { box.innerHTML = '<div class="cv-catalog-empty">未找到节点。请启用高级 ComfyUI 模式并刷新节点目录。</div>'; return; }
   // 两级分组:大类(category「/」前) → 子类(「/」后),避免全路径平铺刷屏
+  // 分组键用原始路径(稳定),显示标签走 i18n 翻译
   const roots = new Map(); // root → Map(sub → entries)
   for (const entry of entries) {
     const cat = entry.node.category || '其他';
@@ -425,13 +430,13 @@ function renderCatalogBrowser(query = '') {
     if (!subs.has(sub)) subs.set(sub, []);
     subs.get(sub).push(entry);
   }
-  const btnHtml = ({ connectionId, node }) => `<button class="cv-cat-node" data-comfy-connection="${escapeHtml(connectionId)}" data-comfy-class="${escapeHtml(node.classType)}" title="${escapeHtml(node.classType)}">${escapeHtml(node.displayName)}</button>`;
+  const btnHtml = ({ connectionId, node }) => `<button class="cv-cat-node" data-comfy-connection="${escapeHtml(connectionId)}" data-comfy-class="${escapeHtml(node.classType)}" title="${escapeHtml(node.classType)}">${escapeHtml(i18n.tNodeTitle(node.classType, node.displayName))}</button>`;
   box.innerHTML = [...roots.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([root, subs]) => {
     const total = [...subs.values()].reduce((n, l) => n + l.length, 0);
     const inner = [...subs.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([sub, list]) =>
-      (sub ? `<div class="cv-cat-sub">${escapeHtml(sub)} · ${list.length}</div>` : '') +
+      (sub ? `<div class="cv-cat-sub">${escapeHtml(i18n.tCategory(sub))} · ${list.length}</div>` : '') +
       `<div class="cv-cat-list">${list.map(btnHtml).join('')}</div>`).join('');
-    return `<details class="cv-cat" ${q ? 'open' : ''}><summary>${escapeHtml(root)} · ${total}</summary>${inner}</details>`;
+    return `<details class="cv-cat" ${q ? 'open' : ''}><summary>${escapeHtml(i18n.tCategory(root))} · ${total}</summary>${inner}</details>`;
   }).join('');
   for (const button of box.querySelectorAll('[data-comfy-class]')) button.onclick = () => addExternalAt(button.dataset.comfyConnection, button.dataset.comfyClass);
 }

@@ -11,6 +11,7 @@
 //   group  = { id, title, color, rect:{x,y,w,h} }   // 几何归属(中心点判定),非树状父子
 
 import { snapToGrid } from './geom.js';
+import { i18n } from './i18n.js';
 
 // 排版常量(md「几何尺寸自适应布局算法」,数值取 LiteGraph/ComfyUI 惯例)
 export const LAYOUT = {
@@ -62,8 +63,12 @@ export function addNativeNode(model, type, pos = { x: 0, y: 0 }, data = null) {
     id, kind: 'native', type, classType: 'drafter/' + type, title: '',
     pos: { x: pos.x, y: pos.y }, size: { w: LAYOUT.MIN_W, h: LAYOUT.TITLE_H },
     collapsed: false, color: null, locked: false,
-    inputs: (t.inTypes || []).map((slotType, i) => ({ name: INPUT_NAME[i + 1] || 'input_' + (i + 1), type: slotType, link: null })),
-    outputs: t.outType ? [{ name: 'output', type: t.outType }] : [],
+    // name/type 是逻辑键(英文,进 API 序列化与连接校验);label 只是 UI 显示名(i18n)
+    inputs: (t.inTypes || []).map((slotType, i) => {
+      const name = INPUT_NAME[i + 1] || 'input_' + (i + 1);
+      return { name, type: slotType, label: i18n.tInput(type, name), link: null };
+    }),
+    outputs: t.outType ? [{ name: 'output', type: t.outType, label: i18n.tType(t.outType) }] : [],
     widgets: [],
     data: data || defaultData(type),
   };
@@ -91,7 +96,7 @@ export function addExternalNode(model, { connectionId, connectionName = '', sche
     if (WIDGET_KINDS.has(w.kind)) {
       // 标量 → 原生 widget(md: 字符串数组→combo;INT/FLOAT/BOOLEAN/STRING→数值/文本控件)
       widgets.push({
-        name: input.name, kind: w.kind,
+        name: input.name, kind: w.kind, label: i18n.tWidget(schema.classType, input.name),
         value: w.default ?? (w.kind === 'BOOLEAN' ? false : w.kind === 'INT' || w.kind === 'FLOAT' ? 0 : ''),
         options: w.values || [], min: w.min, max: w.max, step: w.step,
         multiline: !!w.multiline, tooltip: w.tooltip || '', remote: w.remote || null,
@@ -101,14 +106,17 @@ export function addExternalNode(model, { connectionId, connectionName = '', sche
     } else {
       // 高阶复合类型 → 输入插槽
       slotNames.push(input.name);
-      inputs.push({ name: input.name, type: input.type, link: null });
+      inputs.push({ name: input.name, type: input.type, label: i18n.tInput(schema.classType, input.name), link: null });
     }
   }
-  const outputs = (schema.outputs || []).map((type, i) => ({ name: (schema.outputNames || [])[i] || type, type }));
-  if (!outputs.length) outputs.push({ name: 'output', type: '*' });
+  const outputs = (schema.outputs || []).map((type, i) => {
+    const name = (schema.outputNames || [])[i] || type;
+    return { name, type, label: i18n.tOutput(schema.classType, name) };
+  });
+  if (!outputs.length) outputs.push({ name: 'output', type: '*', label: i18n.tType('*') });
   const node = {
     id, kind: 'external', type: 'external', classType: schema.classType,
-    title: schema.displayName || schema.classType,
+    title: i18n.tNodeTitle(schema.classType, schema.displayName || schema.classType),
     pos: { x: pos.x, y: pos.y }, size: { w: LAYOUT.MIN_W, h: LAYOUT.TITLE_H },
     collapsed: false, color: null, locked: false,
     inputs, outputs, widgets,
@@ -258,13 +266,14 @@ export function computeSize(node, measure = defaultMeasure) {
     const outLabel = node.outputs[i] ? slotLabel(node.outputs[i]) : '';
     w = Math.max(w, measure(inLabel) + measure(outLabel) + LAYOUT.PAD_X * 2 + 60);
   }
-  for (const wd of node.widgets) w = Math.max(w, measure(wd.name, 12) + LAYOUT.PAD_X * 2 + 60);
+  for (const wd of node.widgets) w = Math.max(w, measure(wd.label || wd.name, 12) + LAYOUT.PAD_X * 2 + 60);
   node.size = { w: Math.min(Math.round(w), LAYOUT.MAX_W), h: Math.round(h) };
   return node.size;
 }
 
 export function slotLabel(slot) {
-  return SLOT_LABEL[slot.name] || slot.name;
+  // 显示名优先级:工厂注入的 i18n label → 原生槽位中文表 → 原始逻辑键
+  return slot.label || SLOT_LABEL[slot.name] || slot.name;
 }
 
 // 插槽相对节点左上角的局部坐标(圆心)。输入在左边界,输出在右边界。

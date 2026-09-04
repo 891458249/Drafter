@@ -224,6 +224,9 @@ export function createRenderer(host, model, viewport, hooks = {}) {
   }
 
   // 单节点 8 层:投影→底板→背景钩子→标题栏→端口→控件→前景钩子→轮廓选框
+  // LOD 分级(迭代规范):level 0 细节完整;level 1 性能模式(关阴影/藏把手,骨架全保留);
+  // level 2 微缩骨架(跳 fillText 降级 Greeking 细线,底板/标题界/插槽点/凹槽强制绘制)。
+  // 严禁早退——任何缩放级别都必须画出可辨识的节点骨架。
   function drawNode(node, level, t) {
     const { x, y } = node.pos;
     const { w, h } = node.size;
@@ -235,11 +238,13 @@ export function createRenderer(host, model, viewport, hooks = {}) {
     fgCtx.save();
     if (muted) fgCtx.globalAlpha = 0.4; // Mute:全局透明度降 40%
 
-    // 1. 投影层
-    fgCtx.shadowColor = C.nodeShadow;
-    fgCtx.shadowBlur = level === 0 ? 12 * viewport.scale : 0;
-    fgCtx.shadowOffsetY = 3 * viewport.scale;
-    // 2. 底板层
+    // 1. 投影层(仅细节模式;低质量强制关闭,削减 GPU 填充率)
+    if (level === 0) {
+      fgCtx.shadowColor = C.nodeShadow;
+      fgCtx.shadowBlur = 12 * viewport.scale;
+      fgCtx.shadowOffsetY = 3 * viewport.scale;
+    }
+    // 2. 底板层(无论缩放到多小,始终绘制)
     roundRect(fgCtx, x, y, w, h, 8);
     fgCtx.fillStyle = C.nodeBody;
     fgCtx.fill();
@@ -247,17 +252,8 @@ export function createRenderer(host, model, viewport, hooks = {}) {
     fgCtx.shadowBlur = 0;
     fgCtx.shadowOffsetY = 0;
 
-    if (level === 2) {
-      // 极简宏观:纯色外壳 + 标题色条,跳过一切文字测量与绘制
-      fgCtx.fillStyle = hexAlpha(color, 0.55);
-      roundRect(fgCtx, x, y, w, Math.min(10, h), 5);
-      fgCtx.fill();
-      fgCtx.restore();
-      return;
-    }
-
-    // 3. 背景钩子:媒体预览(Letterbox 等比居中)
-    const img = r.previewImages.get(node.id);
+    // 3. 背景钩子:媒体预览(Letterbox 等比居中;微缩模式跳过图像采样)
+    const img = level === 0 ? r.previewImages.get(node.id) : null;
     const previewH = node.collapsed ? 0 : (Number(node.previewH) || 0);
     if (previewH > 0) {
       const py = y + h - LAYOUT.PAD_BOTTOM - previewH;
@@ -270,17 +266,23 @@ export function createRenderer(host, model, viewport, hooks = {}) {
       }
     }
 
-    // 4. 标题栏:色块 + 折叠指示 + 标题文本 + 模式标示
+    // 4. 标题栏:色块 + 下缘界线始终绘制;微缩态文字降级为 Greeking 占位线
     fgCtx.fillStyle = hexAlpha(color, 0.85);
     roundRect(fgCtx, x, y, w, LAYOUT.TITLE_H, 8);
     fgCtx.fill();
     fgCtx.fillRect(x, y + LAYOUT.TITLE_H - 8, w, 8); // 标题下缘补方角
-    fgCtx.fillStyle = C.titleText;
-    fgCtx.font = '600 13px system-ui, sans-serif';
-    fgCtx.textBaseline = 'middle';
-    const title = node.title || node.data?.comfyDisplayName || TYPE_LABEL[node.type] || node.classType;
-    fgCtx.fillText((node.collapsed ? '▸ ' : '▾ ') + title, x + LAYOUT.PAD_X, y + LAYOUT.TITLE_H / 2, w - LAYOUT.PAD_X * 2 - 20);
-    if (bypass) {
+    if (level < 2) {
+      fgCtx.fillStyle = C.titleText;
+      fgCtx.font = '600 13px system-ui, "PingFang SC", "Microsoft YaHei", sans-serif';
+      fgCtx.textBaseline = 'middle';
+      const title = node.title || node.data?.comfyDisplayName || TYPE_LABEL[node.type] || node.classType;
+      fgCtx.fillText((node.collapsed ? '▸ ' : '▾ ') + title, x + LAYOUT.PAD_X, y + LAYOUT.TITLE_H / 2, w - LAYOUT.PAD_X * 2 - 20);
+    } else {
+      // Greeking:标题印刷占位细线
+      fgCtx.fillStyle = 'rgba(240,243,246,0.45)';
+      fgCtx.fillRect(x + LAYOUT.PAD_X, y + LAYOUT.TITLE_H / 2 - 1.5, Math.min(w - 60, 70), 3);
+    }
+    if (bypass && level < 2) {
       fgCtx.fillStyle = C.bypass;
       fgCtx.font = '11px system-ui, sans-serif';
       fgCtx.textAlign = 'right';
@@ -289,31 +291,28 @@ export function createRenderer(host, model, viewport, hooks = {}) {
     }
 
     if (!node.collapsed) {
-      if (level === 0) {
-        drawSlots(node);   // 5. 端口插槽层
-        drawWidgets(node); // 6. 组件内容层
-      } else {
-        // 概览:只画端口圆点,跳控件
-        for (let i = 0; i < node.inputs.length; i++) drawSlotDot(node, 'input', i);
-        for (let i = 0; i < node.outputs.length; i++) drawSlotDot(node, 'output', i);
-      }
+      // 5/6. 端口插槽 + 组件凹槽:所有级别强制绘制(远景结构感);文本逐级精简
+      drawSlots(node, level < 2);
+      drawWidgets(node, level === 0, level === 2);
     }
 
-    // 7. 前景钩子:执行脉冲 + 进度条 + 错误角标
+    // 7. 前景钩子:执行脉冲 + 进度条 + 错误角标(微缩态跳过脉冲,进度条保留)
     const exec = r.execState.get(node.id);
     if (exec && exec.status === 'running') {
-      const pulse = 0.5 + 0.5 * Math.sin(t / 280); // md:正弦调制周期性脉冲发光框
-      fgCtx.strokeStyle = hexAlpha('#3fb950', 0.35 + 0.55 * pulse);
-      fgCtx.lineWidth = (2.5 + 1.5 * pulse) / viewport.scale;
-      roundRect(fgCtx, x - 2, y - 2, w + 4, h + 4, 10);
-      fgCtx.stroke();
+      if (level < 2) {
+        const pulse = 0.5 + 0.5 * Math.sin(t / 280); // md:正弦调制周期性脉冲发光框
+        fgCtx.strokeStyle = hexAlpha('#3fb950', 0.35 + 0.55 * pulse);
+        fgCtx.lineWidth = (2.5 + 1.5 * pulse) / viewport.scale;
+        roundRect(fgCtx, x - 2, y - 2, w + 4, h + 4, 10);
+        fgCtx.stroke();
+      }
       if (typeof exec.progress === 'number') {
         fgCtx.fillStyle = hexAlpha(C.progress, 0.9);
         fgCtx.fillRect(x + 6, y + h - LAYOUT.PAD_BOTTOM - 4, (w - 12) * Math.min(1, Math.max(0, exec.progress)), 4);
       }
     }
     const errs = r.errors.get(node.id);
-    if (errs && errs.length) {
+    if (errs && errs.length && level < 2) {
       fgCtx.fillStyle = C.error;
       fgCtx.beginPath();
       fgCtx.arc(x + w - 10, y - 2, 8 / viewport.scale > 1 ? 8 : 8 / viewport.scale, 0, Math.PI * 2);
@@ -325,7 +324,7 @@ export function createRenderer(host, model, viewport, hooks = {}) {
       fgCtx.textAlign = 'left';
     }
 
-    // 8. 外层轮廓与选框
+    // 8. 外层轮廓与选框(所有级别保留圆角边框)
     fgCtx.lineWidth = (r.selection.has(node.id) ? 2 : 1) / viewport.scale;
     if (bypass) {
       fgCtx.strokeStyle = C.bypass; // Bypass:紫粉醒目边框
@@ -353,7 +352,7 @@ export function createRenderer(host, model, viewport, hooks = {}) {
       }
       fgCtx.setLineDash([]);
     }
-    // 选中态尺寸调整抓手(右下角)
+    // 选中态尺寸调整抓手(仅细节模式)
     if (r.selection.has(node.id) && level === 0 && !node.collapsed) {
       fgCtx.fillStyle = C.select;
       fgCtx.beginPath();
@@ -366,24 +365,35 @@ export function createRenderer(host, model, viewport, hooks = {}) {
     fgCtx.restore();
   }
 
-  function drawSlots(node) {
+  function drawSlots(node, withLabels) {
     for (let i = 0; i < node.inputs.length; i++) {
       drawSlotDot(node, 'input', i);
       const slot = node.inputs[i];
       const p = slotPos(node, 'input', i);
-      fgCtx.fillStyle = slot.link != null ? C.slotText : hexAlpha('#c9d1d9', 0.55);
-      fgCtx.font = '12px system-ui, sans-serif';
-      fgCtx.textAlign = 'left';
-      fgCtx.fillText(slotLabel(slot), node.pos.x + 12, node.pos.y + p.y);
+      if (withLabels) {
+        fgCtx.fillStyle = slot.link != null ? C.slotText : hexAlpha('#c9d1d9', 0.55);
+        fgCtx.font = '12px system-ui, "PingFang SC", "Microsoft YaHei", sans-serif';
+        fgCtx.textAlign = 'left';
+        fgCtx.fillText(slotLabel(slot), node.pos.x + 12, node.pos.y + p.y);
+      } else {
+        // Greeking:插槽文本占位细线
+        fgCtx.fillStyle = 'rgba(201,209,217,0.3)';
+        fgCtx.fillRect(node.pos.x + 12, node.pos.y + p.y - 1, 24, 2);
+      }
     }
     for (let i = 0; i < node.outputs.length; i++) {
       drawSlotDot(node, 'output', i);
       const p = slotPos(node, 'output', i);
-      fgCtx.fillStyle = C.slotText;
-      fgCtx.font = '12px system-ui, sans-serif';
-      fgCtx.textAlign = 'right';
-      fgCtx.fillText(slotLabel(node.outputs[i]), node.pos.x + p.x - 12, node.pos.y + p.y);
-      fgCtx.textAlign = 'left';
+      if (withLabels) {
+        fgCtx.fillStyle = C.slotText;
+        fgCtx.font = '12px system-ui, "PingFang SC", "Microsoft YaHei", sans-serif';
+        fgCtx.textAlign = 'right';
+        fgCtx.fillText(slotLabel(node.outputs[i]), node.pos.x + p.x - 12, node.pos.y + p.y);
+        fgCtx.textAlign = 'left';
+      } else {
+        fgCtx.fillStyle = 'rgba(201,209,217,0.3)';
+        fgCtx.fillRect(node.pos.x + p.x - 36, node.pos.y + p.y - 1, 24, 2);
+      }
     }
   }
 
@@ -402,7 +412,8 @@ export function createRenderer(host, model, viewport, hooks = {}) {
     }
   }
 
-  function drawWidgets(node) {
+  // withText:细节模式绘制标签与值;greek:微缩骨架模式画占位细线(规范:凹槽底板强制绘制)
+  function drawWidgets(node, withText, greek) {
     node.widgets.forEach((wd, i) => {
       const b = widgetBounds(node, i);
       const x = node.pos.x + b.x, y = node.pos.y + b.y;
@@ -412,10 +423,19 @@ export function createRenderer(host, model, viewport, hooks = {}) {
       fgCtx.strokeStyle = C.widgetBorder;
       fgCtx.lineWidth = 1 / viewport.scale;
       fgCtx.stroke();
+      if (greek) {
+        // 微缩:Greeking 骨架线(标签 + 值两段)
+        fgCtx.fillStyle = 'rgba(107,114,128,0.3)';
+        fgCtx.fillRect(x + 6, y + b.h / 2 - 1, 24, 2);
+        fgCtx.fillStyle = 'rgba(209,213,219,0.3)';
+        fgCtx.fillRect(x + b.w - 36, y + b.h / 2 - 1, 30, 2);
+        return;
+      }
+      if (!withText) return; // 性能模式:只画凹槽底板
       fgCtx.fillStyle = hexAlpha('#c9d1d9', 0.8);
-      fgCtx.font = '11px system-ui, sans-serif';
+      fgCtx.font = '11px system-ui, "PingFang SC", "Microsoft YaHei", sans-serif';
       fgCtx.textBaseline = 'middle';
-      fgCtx.fillText(wd.name, x + 8, y + b.h / 2, b.w * 0.45);
+      fgCtx.fillText(wd.label || wd.name, x + 8, y + b.h / 2, b.w * 0.45);
       fgCtx.textAlign = 'right';
       fgCtx.fillStyle = C.titleText;
       if (wd.kind === 'BOOLEAN') {

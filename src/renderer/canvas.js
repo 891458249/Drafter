@@ -6,6 +6,7 @@
 // 变更防抖自动保存到 userData/canvases/<id>.json;产物落 AIGC_DIR 自动进素材库。
 import { api, state, $, escapeHtml, ensureGroups, parseModelValue, modelLabel, showCtxMenu } from './state.js';
 import { openViewer } from './msgmenu.js';
+import { i18n } from './graph/i18n.js';
 
 // ---------------------------------------------------------------------------
 // 节点类型注册表(连线类型槽:inTypes[i] 对应 input_{i+1} 接受的来源类型)
@@ -81,7 +82,7 @@ function renderCatalogBrowser(query = '') {
   const box = $('cv-node-categories');
   if (!box) return;
   const q = query.trim().toLowerCase();
-  const entries = catalogEntries().filter(({ node }) => (catalogMode !== 'favorites' || favoriteNodes.has(node.classType)) && (!q || `${node.displayName} ${node.classType} ${node.category}`.toLowerCase().includes(q)));
+  const entries = catalogEntries().filter(({ node }) => (catalogMode !== 'favorites' || favoriteNodes.has(node.classType)) && (!q || `${node.displayName} ${node.classType} ${node.category} ${i18n.tNodeTitle(node.classType, '')} ${i18n.tCategory(node.category)}`.toLowerCase().includes(q)));
   if (!entries.length) { box.innerHTML = '<div class="cv-catalog-empty">未找到节点。请启用高级 ComfyUI 模式并刷新节点目录。</div>'; return; }
   // 两级分组:大类(category「/」前) → 子类(「/」后),避免全路径平铺刷屏
   const roots = new Map(); // root → Map(sub → entries)
@@ -94,13 +95,13 @@ function renderCatalogBrowser(query = '') {
     if (!subs.has(sub)) subs.set(sub, []);
     subs.get(sub).push(entry);
   }
-  const btnHtml = ({ connectionId, node }) => `<button class="cv-cat-node" data-comfy-connection="${escapeHtml(connectionId)}" data-comfy-class="${escapeHtml(node.classType)}" title="${escapeHtml(node.classType)}">${escapeHtml(node.displayName)}</button>`;
+  const btnHtml = ({ connectionId, node }) => `<button class="cv-cat-node" data-comfy-connection="${escapeHtml(connectionId)}" data-comfy-class="${escapeHtml(node.classType)}" title="${escapeHtml(node.classType)}">${escapeHtml(i18n.tNodeTitle(node.classType, node.displayName))}</button>`;
   box.innerHTML = [...roots.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([root, subs]) => {
     const total = [...subs.values()].reduce((n, l) => n + l.length, 0);
     const inner = [...subs.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([sub, list]) =>
-      (sub ? `<div class="cv-cat-sub">${escapeHtml(sub)} · ${list.length}</div>` : '') +
+      (sub ? `<div class="cv-cat-sub">${escapeHtml(i18n.tCategory(sub))} · ${list.length}</div>` : '') +
       `<div class="cv-cat-list">${list.map(btnHtml).join('')}</div>`).join('');
-    return `<details class="cv-cat" ${q ? 'open' : ''}><summary>${escapeHtml(root)} · ${total}</summary>${inner}</details>`;
+    return `<details class="cv-cat" ${q ? 'open' : ''}><summary>${escapeHtml(i18n.tCategory(root))} · ${total}</summary>${inner}</details>`;
   }).join('');
   for (const button of box.querySelectorAll('[data-comfy-class]')) button.onclick = () => {
     if (!cvId) { alert('请先新建或打开一个画布，再添加节点。'); return; }

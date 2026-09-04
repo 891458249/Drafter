@@ -48,12 +48,12 @@ export function viewAABB(vp, cssW, cssH) {
   return { x: tl.x, y: tl.y, w: cssW / vp.scale, h: cssH / vp.scale };
 }
 
-// LOD 三级决策(md「视口分级渲染策略」):
-// 0=细节精细(全量插槽/文本/控件/平滑曲率);1=结构概览(跳控件,收紧控制点);
-// 2=极简宏观(纯色外壳,连线降级为直线)
+// LOD 三级决策(md「视口分级渲染策略」+ 迭代规范 LOD 阈值表):
+// 0=细节完整(S≥0.6);1=性能模式(0.25≤S<0.6:关阴影/藏次级把手,骨架全保留);
+// 2=微缩骨架(S<0.25:跳 fillText 降级 Greeking 细线,底板/标题界/插槽点/凹槽强制绘制)
 export function lod(vp) {
-  if (vp.scale >= 0.8) return 0;
-  if (vp.scale >= 0.4) return 1;
+  if (vp.scale >= 0.6) return 0;
+  if (vp.scale >= 0.25) return 1;
   return 2;
 }
 

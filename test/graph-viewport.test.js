@@ -48,12 +48,13 @@ test('viewAABB:视口世界包围盒随平移缩放正确逆解', () => {
   assert.deepStrictEqual(r2, { x: 100, y: -50, w: 400, h: 300 });
 });
 
-test('LOD 三级:≥0.8 细节,0.4~0.8 概览,<0.4 宏观', () => {
+test('LOD 三级:≥0.6 细节完整,0.25~0.6 性能模式,<0.25 微缩骨架(迭代规范阈值)', () => {
   const v = vp.createViewport();
   v.scale = 1; assert.strictEqual(vp.lod(v), 0);
-  v.scale = 0.8; assert.strictEqual(vp.lod(v), 0);
+  v.scale = 0.6; assert.strictEqual(vp.lod(v), 0);
   v.scale = 0.5; assert.strictEqual(vp.lod(v), 1);
-  v.scale = 0.3; assert.strictEqual(vp.lod(v), 2);
+  v.scale = 0.25; assert.strictEqual(vp.lod(v), 1);
+  v.scale = 0.15; assert.strictEqual(vp.lod(v), 2);
 });
 
 test('贝塞尔:控制点水平外推,端点切向水平', () => {
