@@ -505,7 +505,7 @@ function askAdoptDir(dir) {
     if (sectionOfKind(s && s.meta.kind) !== state.section) return; // 板块/会话不匹配时不写模型(v0.9.5)
     const sel = parseModelValue($('model-sel').value);
     const prevModel = s && s.meta.model, prevKeyId = s && s.meta.keyId;
-    // v0.11.x:sess:setModel 返回 false(媒体守卫拦截或会话未运行)时不落本地 meta,
+    // 主进程拒绝(会话不存在或模型类型与会话不兼容)时不落本地 meta,
     // 避免 UI 显示的模型与实际绑定凭据脱节(脱节会在发送时以 403「模型未配置」爆发)
     const ok = await api.sessSetModel(state.activeSid, sel.model, sel.keyId);
     if (ok === false) {
@@ -515,7 +515,12 @@ function askAdoptDir(dir) {
       addUserMessage(state.activeSid, `(模型切换失败:该模型不可用于当前会话类型)`);
       return;
     }
-    if (s) { s.meta.model = sel.model; s.meta.keyId = sel.keyId; }
+    if (s) {
+      s.meta.model = sel.model;
+      s.meta.keyId = sel.keyId;
+      s.meta.agentModels = (s.meta.agentModels || [])
+        .filter((item) => item.keyId === sel.keyId && item.model !== sel.model);
+    }
     updateKeyChips(); // 同步 Key chip
     updateTopbarForSession(state.activeSid); // 同步 placeholder 的模型身份与 board class(创作板块)
     emit('session-status', { sid: state.activeSid });

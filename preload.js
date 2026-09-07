@@ -94,6 +94,7 @@ contextBridge.exposeInMainWorld('api', {
   sessPermission: invoke('sess:permission'),
   sessSetMode: (sid, mode) => ipcRenderer.invoke('sess:setMode', { sid, mode }),
   sessSetModel: (sid, model, keyId) => ipcRenderer.invoke('sess:setModel', { sid, model, keyId }),
+  sessSetAgentModels: (sid, agentModels) => ipcRenderer.invoke('sess:setAgentModels', { sid, agentModels }),
   sessSetEffort: (sid, effort) => ipcRenderer.invoke('sess:setEffort', { sid, effort }),
   sessHistory: (sid) => ipcRenderer.invoke('sess:history', sid),
   sessEditRegenerate: invoke('sess:editRegenerate'),

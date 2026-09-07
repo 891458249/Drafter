@@ -796,6 +796,25 @@ ipcMain.handle('sess:setModel', (_e, { sid, model, keyId }) => {
   }
   return s.setModel(model, keyId);
 });
+// 会话级子 Agent 模型:同一 query 共享主模型的 Key/Base URL,故只接受同 Key 对话模型。
+ipcMain.handle('sess:setAgentModels', async (_e, { sid, agentModels }) => {
+  const s = sessions.get(sid);
+  if (!s) return { ok: false, error: '会话不存在' };
+  if (s.meta.kind && s.meta.kind !== 'code' && s.meta.kind !== 'chat') {
+    return { ok: false, error: '创作会话不支持子 Agent' };
+  }
+  if (!Array.isArray(agentModels)) return { ok: false, error: '子 Agent 模型格式无效' };
+  for (const item of agentModels) {
+    if (!item || typeof item.model !== 'string' || item.keyId !== s.meta.keyId) {
+      return { ok: false, error: '子 Agent 必须使用主模型所属的同一个 Key' };
+    }
+    if (keys.modelType(item.keyId, item.model) !== 'chat') {
+      return { ok: false, error: `模型 ${item.model} 不是对话模型` };
+    }
+  }
+  const clean = await s.setAgentModels(agentModels);
+  return { ok: true, agentModels: clean };
+});
 ipcMain.handle('sess:setEffort', (_e, { sid, effort }) => {
   const s = sessions.get(sid);
   return s ? s.setEffort(effort) : false;

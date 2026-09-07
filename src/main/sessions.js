@@ -18,6 +18,59 @@ const gems = require('./gems');
 // 编辑类工具:只读硬拦截与 acceptEdits 本地放行共用
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
+// 会话级子 Agent 模型(vNext):SDK 的一个 query 进程只注入一套 Key/Base URL,
+// 因此子 Agent 必须与主模型同 Key。完整模型 ID 原样交给 AgentDefinition.model,
+// 兼容同一网关下的 Claude/GPT 等对话模型。
+function normalizeAgentModels(list, keyId, { requireEnabled = false, excludeModel = null } = {}) {
+  const enabled = requireEnabled ? (keys.enabledModels() || []) : null;
+  const seen = new Set();
+  const out = [];
+  for (const item of (Array.isArray(list) ? list : [])) {
+    if (!item || typeof item.model !== 'string') continue;
+    const model = item.model.trim();
+    const itemKeyId = typeof item.keyId === 'string' ? item.keyId : null;
+    if (!model || model === excludeModel || !keyId || itemKeyId !== keyId) continue;
+    if (keys.modelType(itemKeyId, model) !== 'chat') continue;
+    if (enabled && !enabled.some((e) => e.keyId === itemKeyId && e.model === model)) continue;
+    const id = `${itemKeyId}\u0000${model}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ keyId: itemKeyId, model });
+  }
+  return out;
+}
+
+function agentName(model, used) {
+  const base = ('model-' + String(model || 'agent'))
+    .toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 56) || 'model-agent';
+  let name = base;
+  for (let n = 2; used.has(name); n++) name = `${base.slice(0, 52)}-${n}`;
+  used.add(name);
+  return name;
+}
+
+function buildSessionAgents(meta) {
+  const list = normalizeAgentModels(meta && meta.agentModels, meta && meta.keyId, {
+    requireEnabled: true,
+    excludeModel: meta && meta.model,
+  });
+  if (!list.length) {
+    // Task 是 Agent 的旧工具名/兼容别名;两者同时禁用,防项目级 agent 定义重新暴露入口。
+    return { disallowedTools: ['Agent', 'Task'] };
+  }
+  const used = new Set();
+  const agents = {};
+  for (const item of list) {
+    const name = agentName(item.model, used);
+    agents[name] = {
+      description: `使用 ${item.model} 独立处理适合该模型的子任务。需要并行调查、独立验证或专门能力时调用。`,
+      prompt: `你是主会话派生的子 Agent,模型为 ${item.model}。严格完成父任务交给你的范围,核实结果后简明回报;不要扩展未要求的工作。`,
+      model: item.model,
+    };
+  }
+  return { agents };
+}
+
 // 极速问答的系统提示(v0.10.2):整体替换 claude_code preset——默认提示+全工具 schema
 // 首轮实测要 ~26k tokens 输入,纯问答场景全是浪费;对齐 Codex CLI 思路(极简提示+
 // 强简洁指令、零工具面),压到百字量级,首轮输入降到 ~2-4k,TTFT 与网页版同量级。
@@ -257,6 +310,9 @@ class Session {
       canUseTool: (toolName, input, opts) => this._onPermission(toolName, input, opts),
     };
     if (this.meta.model) options.model = this.meta.model;
+    // AgentDefinitions/disallowedTools 只在 query 启动时读取。极速问答已有 tools:[],
+    // 完整 Agent 模式则按会话多选模型显式提供;空列表彻底禁用子 Agent。
+    if (!fastOv) Object.assign(options, buildSessionAgents(this.meta));
     // 极速模式跳过会话级 effort(v0.10.3):effort 是思考深度调节,fast 已固定
     // thinking:'disabled';--effort max 等标志在 Kimi 类模型上会重新放大推理耗时
     if (this.meta.effort && !fastOv) options.effort = this.meta.effort;
@@ -655,10 +711,20 @@ class Session {
     const prevKeyId = this.meta.keyId;
     this.meta.model = model;
     if (keyId !== undefined) this.meta.keyId = keyId || null;
-    store.upsertSession({ id: this.id, model, keyId: this.meta.keyId });
     const keyChanged = keyId !== undefined && (this.meta.keyId || null) !== (prevKeyId || null);
+    let removedAgents = 0;
+    if (Array.isArray(this.meta.agentModels)) {
+      const kept = normalizeAgentModels(this.meta.agentModels, this.meta.keyId, { excludeModel: model });
+      removedAgents = this.meta.agentModels.length - kept.length;
+      this.meta.agentModels = kept;
+    }
+    store.upsertSession({ id: this.id, model, keyId: this.meta.keyId, agentModels: this.meta.agentModels || [] });
+    if (removedAgents > 0) {
+      const why = keyChanged ? '主模型 Key 已切换' : '该模型已成为主模型';
+      this._emit({ type: 'ui_aux', message: `${why},已移除 ${removedAgents} 个不再适用的子 Agent 模型` });
+    }
     if (this.q && this.running) {
-      if (keyChanged) {
+      if (keyChanged || removedAgents > 0) {
         if (this.busy) { this.needRestart = true; return true; }
         this.stop();
         await this.start({ resume: !!this.meta.sdkSessionId });
@@ -666,7 +732,20 @@ class Session {
       }
       try { await this.q.setModel(model || undefined); return true; } catch {}
     }
-    return false;
+    // 未运行的会话无需热切:模型与 Key 已持久化,下次 start() 会直接使用新配置。
+    return !this.running;
+  }
+
+  // 子 Agent 模型只在 query 启动时读取;配置改变沿用 Gem/ChatMode 的安全重启语义。
+  async setAgentModels(list) {
+    const clean = normalizeAgentModels(list, this.meta.keyId, { requireEnabled: true, excludeModel: this.meta.model });
+    this.meta.agentModels = clean;
+    store.upsertSession({ id: this.id, agentModels: clean });
+    if (!this.running) return clean;
+    if (this.busy) { this.needRestart = true; return clean; }
+    this.stop();
+    await this.start({ resume: !!this.meta.sdkSessionId });
+    return clean;
   }
 
   // effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null(默认)
@@ -801,7 +880,7 @@ class SessionManager {
     });
   }
 
-  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId, gemId, chatMode }) {
+  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId, gemId, chatMode, agentModels }) {
     const id = 's_' + crypto.randomUUID().slice(0, 12);
     const meta = {
       id, cwd, model: model || null,
@@ -814,6 +893,7 @@ class SessionManager {
       standalone: !!standalone, // 独立会话:不属于任何项目组(v0.5.0 起新会话默认)
       kind: kind || null, // 板块标记:'chat'(v0.6.0)/'media'(v0.9.38 起);null = code
       keyId: keyId || null, // 创建时活跃的 API key(额度归账,v0.8.0)
+      agentModels: normalizeAgentModels(agentModels, keyId || null), // 同 Key 子 Agent 模型;空数组 = 禁用 Agent 工具
       gemId: gemId || null, // 绑定的 Gem 自定义助手(v0.9.11)
       // 极速问答(v0.10.2):chat 会话默认 fast(零工具/SDK 隔离配置);'agent' = 完整 Agent
       chatMode: kind === 'chat' ? (chatMode === 'agent' ? 'agent' : 'fast') : undefined,
@@ -840,7 +920,7 @@ class SessionManager {
     const canFork = !!(anchorUuid && m.sdkSessionId);
     const meta = this.create({
       cwd: m.cwd, model: m.model, keyId: m.keyId || null, permissionMode: m.permissionMode,
-      effort: m.effort || null,
+      effort: m.effort || null, agentModels: m.agentModels || [],
       title: (m.title || '会话') + ' · 分支',
       projectId: m.projectId,
       forkFrom: canFork ? m.sdkSessionId : null,
@@ -945,4 +1025,4 @@ function safeJson(obj) {
   try { return JSON.parse(JSON.stringify(obj)); } catch { return String(obj); }
 }
 
-module.exports = { SessionManager, Session, resolveClaudeExe, encodeCwdForProjects, transcriptPath, isTranscriptResumable, migrateTranscript, fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT };
+module.exports = { SessionManager, Session, resolveClaudeExe, encodeCwdForProjects, transcriptPath, isTranscriptResumable, migrateTranscript, fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT, normalizeAgentModels, buildSessionAgents };

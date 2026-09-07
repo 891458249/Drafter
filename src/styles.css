@@ -654,6 +654,16 @@ kbd {
 .gem-menu .gem-tool-row:hover { background: var(--bg-input); }
 .gem-menu .gem-tool-check { margin-left: auto; color: var(--accent); }
 #gem-sel-btn.active { border-color: var(--accent); color: var(--accent); }
+#agent-models-btn.active { border-color: var(--accent); color: var(--accent); }
+.agent-models-menu { min-width: 280px; padding: 6px 0; }
+.agent-menu-title, .agent-menu-note, .agent-menu-empty { padding: 7px 12px; font-size: 11px; color: var(--text-dim); }
+.agent-menu-title { color: var(--text); font-weight: 600; border-bottom: 1px solid var(--border); }
+.agent-menu-title span { float: right; color: var(--text-dim); font-weight: 400; }
+.agent-menu-note { border-top: 1px solid var(--border); line-height: 1.4; }
+.agent-models-menu .agent-model-row { display: flex; align-items: center; gap: 8px; }
+.agent-models-menu .agent-model-row.active { color: var(--accent); }
+.agent-model-check { width: 14px; color: var(--accent); font-weight: 700; }
+.agent-model-row span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge-gem {
   font-size: 10px; color: var(--accent); border: 1px solid var(--accent);
   border-radius: 4px; padding: 0 4px; margin-left: 6px; flex-shrink: 0;

@@ -233,6 +233,7 @@ async function sideChat(m) {
   const meta = await api.sessCreate({
     cwd: m.cwd, model: m.model, keyId: m.keyId || null, permissionMode: m.permissionMode,
     effort: m.effort || null, // side chat 继承父会话的推理深度设置
+    agentModels: m.agentModels || [], // side chat 继承会话级子 Agent 模型
     title: (m.title || '会话') + ' · side', parentId: m.id,
     projectId: m.projectId, forkFrom: m.sdkSessionId || null,
     gemId: m.gemId || null, // side chat 继承 Gem 绑定(v0.9.11)

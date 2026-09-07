@@ -11,6 +11,7 @@ import * as preview from './preview.js';
 import * as tasks from './tasks.js';
 import * as term from './term.js';
 import * as gems from './gems.js';
+import * as agentsUi from './agents-ui.js';
 import * as codeblock from './codeblock.js';
 import * as canvas from './canvas.js';
 import * as canvas2 from './canvas2.js'; // 原生引擎画布(v0.13.0,默认);settings.canvasEngine='drawflow' 回退旧引擎
@@ -1209,6 +1210,7 @@ on('open-project-memory', async (pid) => {
 
 // --- Gem 自定义助手(v0.9.11) ---
 gems.init();
+agentsUi.init();
 gems.refreshGems();
 codeblock.initCodeCopy(); // 代码卡片复制按钮(#messages 事件委托,v0.9.12)
 // 管理页「开始对话」:按当前板块建会话并绑定 Gem;Gem 带默认模型且下拉未选模型时套用

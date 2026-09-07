@@ -208,6 +208,7 @@
               </select>
             </label>
             <span id="model-key-chip" class="key-chip hidden" title="当前模型所属的 API Key"></span>
+            <button id="agent-models-btn" class="btn btn-sm sdk-only" title="未启用子 Agent,当前会话只使用主模型">🤖 <span id="agent-models-name">子 Agent</span></button>
             <label class="ctrl composer-effort sdk-only" title="约束本会话的推理深度(档位越低思考越少、token 越省);默认=跟随模型/SDK(高)">推理深度
               <select id="effort-sel-composer">
                 <option value="">默认</option>
@@ -546,6 +547,7 @@
   </div>
   <!-- Gem 选择器/默认工具 共用小下拉(动态填充) -->
   <div id="gem-menu" class="more-menu gem-menu hidden"></div>
+  <div id="agent-models-menu" class="more-menu gem-menu agent-models-menu hidden"></div>
 
   <!-- 设置面板(v0.9.31):原「⋯」菜单全部入口并入 -->
   <div id="settings-modal" class="modal-mask hidden">
