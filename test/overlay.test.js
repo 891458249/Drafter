@@ -10,8 +10,8 @@ installElectronStub(tmp);
 const { SessionManager } = require('../src/main/sessions');
 test.after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
 const {
-  PREDICT_ASYMPTOTE, predictedPct, isTrackableKind, SNAP_THRESHOLD,
-  snapshotToMap, reduceSessEvent, snapTarget, snapWindow, springStep, clamp,
+  PREDICT_ASYMPTOTE, predictedPct, isTrackableKind, SNAP_THRESHOLD, BALL_RECT,
+  snapshotToMap, reduceSessEvent, clampWindowToWorkArea, snapTarget, snapWindow, springStep, clamp,
 } = require('../src/main/overlayMath');
 
 const T0 = 1_000_000;
@@ -88,6 +88,24 @@ test('reduceSessEvent: 快照+事件竞态(busy 快照后会话已结束)', () =
   reduceSessEvent(map, { sid: 's_a', ev: { type: 'ui_status', busy: false, running: false } }, T0 + 90000);
   // 未完成且进程已停:不残留假进度球
   assert.ok(!map.has('s_a'));
+});
+
+test('clampWindowToWorkArea: 拖拽时主球不进入各方向任务栏', () => {
+  // 底部任务栏:只约束主球,允许 340px 高窗口的透明/任务球部分伸出工作区。
+  const bottom = { x: 0, y: 0, width: 1920, height: 1040 };
+  assert.deepStrictEqual(
+    clampWindowToWorkArea({ x: 900, y: 1100 }, BALL_RECT, bottom),
+    { x: 900, y: 1040 - BALL_RECT.oy - BALL_RECT.h },
+  );
+  // 顶部+左侧任务栏及负坐标副屏。
+  const shifted = { x: -1920 + 62, y: 40, width: 1858, height: 1040 };
+  assert.deepStrictEqual(
+    clampWindowToWorkArea({ x: -2500, y: -100 }, BALL_RECT, shifted),
+    { x: shifted.x - BALL_RECT.ox, y: shifted.y - BALL_RECT.oy },
+  );
+  // 右边界按球 rect 而非 96px 窗口宽度夹取。
+  const right = clampWindowToWorkArea({ x: 2000, y: 200 }, BALL_RECT, bottom);
+  assert.strictEqual(right.x + BALL_RECT.ox + BALL_RECT.w, bottom.x + bottom.width);
 });
 
 test('snapTarget: 返回球心到边缘的距离 dist(吸附阈值判定用)', () => {

@@ -24,6 +24,7 @@ let regions = [{ x: 16, y: 4, w: 64, h: 64 }]; // 可交互区域(窗口相对�
 let asking = false;
 let runtimeEnabled = null;   // 用户未勾「记住」时,仅本次进程生效
 let interactive = false;     // 悬停交互态:true=窗口收鼠标事件(仅悬停在球体上时)
+let activeMenu = null;       // 原生菜单存续期间临时让无焦点悬浮窗可聚焦
 let deps = {};               // { sessions, getMainWindow, showMainWindow }
 // 完成待查看集合归主进程所有:悬浮窗可能懒创建/重建,绿球语义不能随窗丢
 const pendingDone = new Map(); // sid -> { error }
@@ -70,6 +71,7 @@ function createWindow() {
   });
   // 渲染进程崩溃:置空引用,下次 maybeShow 懒重建
   win.webContents.on('render-process-gone', () => {
+    closeMenu();
     try { win.destroy(); } catch {}
     win = null;
   });
@@ -93,6 +95,32 @@ function setInteractive(v) {
   return interactive;
 }
 
+function cursorHitsRegion() {
+  if (!isUsable() || !win.isVisible()) return false;
+  const c = screen.getCursorScreenPoint();
+  const [wx, wy] = win.getPosition();
+  const lx = c.x - wx, ly = c.y - wy;
+  return regions.some((r) => lx >= r.x && lx <= r.x + r.w && ly >= r.y && ly <= r.y + r.h);
+}
+
+function finishMenu(menu) {
+  if (!activeMenu || activeMenu.menu !== menu) return;
+  activeMenu = null;
+  if (!isUsable()) return;
+  try { win.setFocusable(false); } catch {}
+  setInteractive(dragActive || cursorHitsRegion());
+}
+
+function closeMenu() {
+  if (!activeMenu) return;
+  const { menu } = activeMenu;
+  activeMenu = null; // closePopup 的 callback 可能同步触发,先使其失效
+  try { menu.closePopup(win); } catch {}
+  if (!isUsable()) return;
+  try { win.setFocusable(false); } catch {}
+  setInteractive(dragActive || cursorHitsRegion());
+}
+
 function startHoverPoll() {
   stopHoverPoll();
   hoverTimer = setInterval(() => {
@@ -100,7 +128,7 @@ function startHoverPoll() {
     const c = screen.getCursorScreenPoint();
     const [wx, wy] = win.getPosition();
     const lx = c.x - wx, ly = c.y - wy;
-    const hover = dragActive || regions.some((r) => lx >= r.x && lx <= r.x + r.w && ly >= r.y && ly <= r.y + r.h);
+    const hover = dragActive || !!activeMenu || regions.some((r) => lx >= r.x && lx <= r.x + r.w && ly >= r.y && ly <= r.y + r.h);
     setInteractive(hover);
   }, 50);
 }
@@ -120,9 +148,11 @@ function pushPending() {
   win.webContents.send('overlay:pending', { items: [...pendingDone.entries()].map(([sid, v]) => ({ sid, error: !!v.error })) });
 }
 
-// 球心(x,y)所在屏的 workArea;不在任何屏内则取最近屏
+// 主球中心所在屏的 workArea;不在任何屏内则取最近屏。
+// 主球位于高悬浮窗顶部,不能使用整窗中心判断(上下排列显示器时会选错屏)。
 function workAreaFor(x, y) {
-  const cx = x + WIN_W / 2, cy = y + WIN_H / 2;
+  const ball = math.BALL_RECT;
+  const cx = x + ball.ox + ball.w / 2, cy = y + ball.oy + ball.h / 2;
   let best = null, bestD = Infinity;
   for (const d of screen.getAllDisplays()) {
     const wa = d.workArea;
@@ -133,6 +163,15 @@ function workAreaFor(x, y) {
     if (dist < bestD) { bestD = dist; best = d; }
   }
   return { display: best, wa: best.workArea };
+}
+
+// 光标所在屏(含任务栏);落在显示器间隙时交给 Electron 选最近屏。
+function displayForPoint(p) {
+  const displays = screen.getAllDisplays();
+  return displays.find((d) => {
+    const b = d.bounds;
+    return p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height;
+  }) || screen.getDisplayNearestPoint(p);
 }
 
 function defaultPosition() {
@@ -167,7 +206,8 @@ function restorePosition() {
     else if (fb.edge === 'bottom') y = wa.y + wa.height - WIN_H;
     win.setPosition(Math.round(x), Math.round(y));
   } else if (ok) {
-    win.setPosition(Math.round(fb.x), Math.round(fb.y));
+    const p = math.clampWindowToWorkArea({ x: fb.x, y: fb.y }, math.BALL_RECT, d.workArea);
+    win.setPosition(Math.round(p.x), Math.round(p.y));
   } else {
     const p = defaultPosition();
     win.setPosition(p.x, p.y);
@@ -186,6 +226,7 @@ function show() {
 }
 
 function hide() {
+  closeMenu();
   stopDrag();
   stopHoverPoll();
   setInteractive(false);
@@ -233,25 +274,29 @@ async function askOnce() {
 
 // --- 拖拽(主进程轮询光标,setPosition 只能主进程做) --------------------------
 
-function startDrag({ dx, dy }) {
+function startDrag({ dx, dy, offset }) {
   if (!isUsable()) return;
   stopDrag();
   console.log('[overlay] dragStart', dx, dy); // 排障探针
-  dragOffset = { dx: dx || 0, dy: dy || 0 };
+  dragOffset = {
+    dx: dx || 0, dy: dy || 0,
+    x: Number.isFinite(offset && offset.x) ? math.clamp(offset.x, -16, 16) : 0,
+    y: Number.isFinite(offset && offset.y) ? math.clamp(offset.y, -4, 272) : 0,
+  };
   dragActive = true; // 拖拽中强制可交互,松手后由轮询接管
   dragTimer = setInterval(() => {
     if (!isUsable() || !dragOffset) return;
     const c = screen.getCursorScreenPoint();
-    // 夹到所有屏幕的联合包围盒内,球不被拖丢
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const d of screen.getAllDisplays()) {
-      const b = d.bounds;
-      minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
-      maxX = Math.max(maxX, b.x + b.width); maxY = Math.max(maxY, b.y + b.height);
-    }
-    const x = Math.round(math.clamp(c.x - dragOffset.dx, minX - WIN_W + 24, maxX - 24));
-    const y = Math.round(math.clamp(c.y - dragOffset.dy, minY, maxY - 40));
-    win.setPosition(x, y);
+    const display = displayForPoint(c);
+    if (!display) return;
+    // 拖拽阶段就按光标所在屏的 workArea 夹取主球,与松手后的吸附口径一致。
+    // 只约束主球 rect,允许窗口下方的任务球容器自然延伸到屏幕外。
+    const p = math.clampWindowToWorkArea(
+      { x: c.x - dragOffset.dx, y: c.y - dragOffset.dy },
+      { ...math.BALL_RECT, ox: math.BALL_RECT.ox + dragOffset.x, oy: math.BALL_RECT.oy + dragOffset.y },
+      display.workArea,
+    );
+    win.setPosition(Math.round(p.x), Math.round(p.y));
   }, 12);
 }
 
@@ -263,11 +308,16 @@ function stopDrag() {
 
 // 拖拽结束:停轮询,持久化位置,返回球心所在屏 workArea 供渲染端跑吸附弹簧
 function endDrag() {
+  const offset = dragOffset;
   stopDrag();
   if (!isUsable()) return null;
-  const [x, y] = win.getPosition();
+  const [wx, wy] = win.getPosition();
+  const x = Math.round(wx + (offset ? offset.x : 0));
+  const y = Math.round(wy + (offset ? offset.y : 0));
+  // 归一窗口原点,抵消渲染端即将移除的停靠平移(底部为 272px)。
+  win.setPosition(x, y);
   const { display, wa } = workAreaFor(x, y);
-  saveSetting({ x, y, displayId: display ? display.id : undefined });
+  saveSetting({ x, y, edge: null, displayId: display ? display.id : undefined });
   return { x, y, workArea: { id: display ? display.id : undefined, ...wa } };
 }
 
@@ -276,13 +326,12 @@ function endDrag() {
 function setPos({ x, y, edge }) {
   if (!isUsable()) return;
   const { wa } = workAreaFor(x, y);
-  let cx = Math.round(x), cy = Math.round(y);
+  const free = math.clampWindowToWorkArea({ x: Math.round(x), y: Math.round(y) }, math.BALL_RECT, wa, EDGE_MARGIN);
+  let cx = free.x, cy = free.y;
   if (edge === 'left') cx = wa.x;
   else if (edge === 'right') cx = wa.x + wa.width - WIN_W;
-  else cx = math.clamp(cx, wa.x + EDGE_MARGIN, wa.x + wa.width - WIN_W - EDGE_MARGIN);
   if (edge === 'top') cy = wa.y;
   else if (edge === 'bottom') cy = wa.y + wa.height - WIN_H;
-  else cy = math.clamp(cy, wa.y + EDGE_MARGIN, wa.y + wa.height - WIN_H - EDGE_MARGIN);
   win.setPosition(cx, cy);
 }
 
@@ -293,12 +342,17 @@ function setDock({ x, y, edge, displayId }) {
   const d = displays.find((v) => v.id === displayId) || workAreaFor(x, y).display;
   const wa = d ? d.workArea : workAreaFor(x, y).wa;
   let px = Math.round(x), py = Math.round(y);
-  if (edge === 'left') px = wa.x;
-  else if (edge === 'right') px = wa.x + wa.width - WIN_W;
-  else px = math.clamp(px, wa.x, wa.x + wa.width - WIN_W);
-  if (edge === 'top') py = wa.y;
-  else if (edge === 'bottom') py = wa.y + wa.height - WIN_H;
-  else py = math.clamp(py, wa.y, wa.y + wa.height - WIN_H);
+  if (!edge) {
+    const free = math.clampWindowToWorkArea({ x: px, y: py }, math.BALL_RECT, wa, EDGE_MARGIN);
+    px = free.x; py = free.y;
+  } else {
+    if (edge === 'left') px = wa.x;
+    else if (edge === 'right') px = wa.x + wa.width - WIN_W;
+    else px = math.clamp(px, wa.x, wa.x + wa.width - WIN_W);
+    if (edge === 'top') py = wa.y;
+    else if (edge === 'bottom') py = wa.y + wa.height - WIN_H;
+    else py = math.clamp(py, wa.y, wa.y + wa.height - WIN_H);
+  }
   saveSetting({ x: px, y: py, edge: edge || null, displayId });
 }
 
@@ -339,6 +393,7 @@ function setEnabled(enabled) {
 
 function openMenu({ sid } = {}) {
   if (!isUsable()) return;
+  closeMenu();
   const items = [{ label: '显示 Drafter', click: showMain }];
   if (sid && pendingDone.has(sid)) {
     items.push({ label: '标记已查看', click: () => { pendingDone.delete(sid); pushPending(); } });
@@ -348,7 +403,24 @@ function openMenu({ sid } = {}) {
     { type: 'separator' },
     { label: '关闭悬浮球', click: () => setEnabled(false) },
   );
-  Menu.buildFromTemplate(items).popup({ window: win });
+  const menu = Menu.buildFromTemplate(items);
+  activeMenu = { menu };
+  // Windows 原生菜单依赖 owner window 的焦点来侦测外部点击。悬浮窗平时不可
+  // 聚焦,这里只在 popup 生命周期内临时启用,关闭后立即恢复鼠标穿透状态。
+  setInteractive(true);
+  try {
+    win.setFocusable(true);
+    // showInactive 创建的窗口在 Windows 上仅 setFocusable+focus 仍可能不成为原生菜单
+    // 的活动 owner；show() 激活一次，popup 关闭后再恢复不可聚焦。
+    win.show();
+    win.focus();
+  } catch {}
+  try {
+    menu.popup({ window: win, callback: () => finishMenu(menu) });
+  } catch (e) {
+    finishMenu(menu);
+    console.error('[overlay] 打开菜单失败:', e.message);
+  }
 }
 
 // --- 初始化 -----------------------------------------------------------------
@@ -364,6 +436,7 @@ function registerIpc() {
     return {
       x, y,
       interactive,
+      menuActive: !!activeMenu,
       dragging: dragActive,
       edge: getSetting().edge || null,
       size: [WIN_W, WIN_H],

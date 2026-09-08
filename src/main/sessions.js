@@ -49,26 +49,36 @@ function agentName(model, used) {
   return name;
 }
 
-function buildSessionAgents(meta) {
-  const list = normalizeAgentModels(meta && meta.agentModels, meta && meta.keyId, {
+// 当前实际可用的子 Agent 模型(每次读取最新勾选,取消勾选立即生效)
+function currentAgentModels(meta) {
+  return normalizeAgentModels(meta && meta.agentModels, meta && meta.keyId, {
     requireEnabled: true,
     excludeModel: meta && meta.model,
   });
+}
+
+function buildSessionAgents(meta) {
+  const list = currentAgentModels(meta);
+  const allowedAgents = new Map(); // agent 定义名 -> 固定模型 ID(委派守卫用)
   if (!list.length) {
     // Task 是 Agent 的旧工具名/兼容别名;两者同时禁用,防项目级 agent 定义重新暴露入口。
-    return { disallowedTools: ['Agent', 'Task'] };
+    // Workflow/SendMessage 同样可派生/驱动子任务,一并禁用。
+    return { disallowedTools: ['Agent', 'Task', 'Workflow', 'SendMessage'], allowedAgents };
   }
   const used = new Set();
   const agents = {};
   for (const item of list) {
     const name = agentName(item.model, used);
+    allowedAgents.set(name, item.model);
     agents[name] = {
-      description: `使用 ${item.model} 独立处理适合该模型的子任务。需要并行调查、独立验证或专门能力时调用。`,
+      description: `使用 ${item.model} 独立处理适合该模型的子任务。需要并行调查、独立验证或专门能力时调用。调用时不要指定 model 参数,该 Agent 固定使用此模型。`,
       prompt: `你是主会话派生的子 Agent,模型为 ${item.model}。严格完成父任务交给你的范围,核实结果后简明回报;不要扩展未要求的工作。`,
       model: item.model,
+      // 子 Agent 不得再派生下级/给其他任务发消息——嵌套委派绕开主会话的模型白名单
+      disallowedTools: ['Agent', 'Task', 'Workflow', 'SendMessage'],
     };
   }
-  return { agents };
+  return { agents, allowedAgents };
 }
 
 // 极速问答的系统提示(v0.10.2):整体替换 claude_code preset——默认提示+全工具 schema
@@ -257,6 +267,7 @@ class Session {
     this.lastUsage = null;
     this.cumCostUsd = 0;
     this._resumeQuery = null; // query started with SDK resume; used for targeted recovery
+    this._agentRoute = null;  // 本次 query 的委派守卫状态 { allowed: Map(name->model), spawned: Map(id->model) }
   }
 
   _resetBrokenResume(message) {
@@ -312,7 +323,22 @@ class Session {
     if (this.meta.model) options.model = this.meta.model;
     // AgentDefinitions/disallowedTools 只在 query 启动时读取。极速问答已有 tools:[],
     // 完整 Agent 模式则按会话多选模型显式提供;空列表彻底禁用子 Agent。
-    if (!fastOv) Object.assign(options, buildSessionAgents(this.meta));
+    if (!fastOv) {
+      const built = buildSessionAgents(this.meta);
+      if (built.agents) options.agents = built.agents;
+      if (built.disallowedTools) options.disallowedTools = built.disallowedTools;
+      this._agentRoute = { allowed: built.allowedAgents, spawned: new Map() };
+      // 模型路由加固(v0.14.x,实测 HARU 会话被路由到未勾选的 sonnet):
+      // - CLAUDE_CODE_SUBAGENT_MODEL 环境变量优先级高于 AgentDefinition.model,必须清除;
+      // - 有勾选时禁用 SDK 内置 Agent(Explore/Plan/general-purpose),只保留显式注册的;
+      // - 主/子模型不可用时显式报错,禁止静默 fallback 到未选模型继续计费。
+      delete options.env.CLAUDE_CODE_SUBAGENT_MODEL;
+      options.env.CLAUDE_CODE_NO_MODEL_FALLBACK = '1';
+      if (built.allowedAgents.size) {
+        options.env.CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS = '1';
+        options.disallowedTools = [...(options.disallowedTools || []), 'Workflow'];
+      }
+    }
     // 极速模式跳过会话级 effort(v0.10.3):effort 是思考深度调节,fast 已固定
     // thinking:'disabled';--effort max 等标志在 Kimi 类模型上会重新放大推理耗时
     if (this.meta.effort && !fastOv) options.effort = this.meta.effort;
@@ -402,6 +428,20 @@ class Session {
       // 无项目组(v0.9.2 起独立会话也可 /add-dir):只挂附加目录
       options.additionalDirectories = this.meta.extraDirs;
     }
+    // 委派守卫挂到所有完整 Agent 会话,与项目组只读 hook 合并共存(hooks 不受权限
+    // 模式影响,bypass/dontAsk 下依然执行;canUseTool 在旁路模式下反而不会被调用)。
+    if (!fastOv) {
+      const hooks = options.hooks || {};
+      hooks.PreToolUse = [...(hooks.PreToolUse || []), {
+        matcher: '^(Agent|Task|SendMessage|Workflow)$',
+        hooks: [async (hookInput) => this._guardDelegation(hookInput)],
+      }];
+      hooks.PostToolUse = [...(hooks.PostToolUse || []), {
+        matcher: '^(Agent|Task)$',
+        hooks: [async (hookInput) => this._trackSpawnedAgent(hookInput)],
+      }];
+      options.hooks = hooks;
+    }
     }
     try {
       this.q = sdk.query({ prompt: this.queue, options });
@@ -489,9 +529,24 @@ class Session {
         const vals = Object.values(mu);
         if (vals.length) contextWindow = Math.max(...vals.map((v) => v.contextWindow || 0)) || null;
       } catch {}
-      // 累计各模型 token 消耗(用量弹层)
+      // 累计各模型 token 消耗(用量弹层):result.modelUsage 按真实执行模型给出明细
+      //(子 Agent 消耗单列),优先按明细拆账;无明细才回退到主模型,避免混合会话
+      // 把子 Agent 的消耗全记到主模型名下。Key 总账仍按回合只记一次。
       try {
-        if (msg.usage) store.addModelUsage(this.meta.model || this.lastInitModel || 'default', msg.usage, cost || 0);
+        const mu = msg.modelUsage || {};
+        const entries = Object.entries(mu);
+        if (entries.length) {
+          for (const [model, u] of entries) {
+            store.addModelUsage(model, {
+              input_tokens: u.inputTokens || 0,
+              output_tokens: u.outputTokens || 0,
+              cache_read_input_tokens: u.cacheReadInputTokens || 0,
+              cache_creation_input_tokens: u.cacheCreationInputTokens || 0,
+            }, u.costUSD || 0);
+          }
+        } else if (msg.usage) {
+          store.addModelUsage(this.meta.model || this.lastInitModel || 'default', msg.usage, cost || 0);
+        }
         if (msg.usage || cost != null) store.addKeyUsage(this.meta.keyId, cost || 0, msg.usage || {}); // 按 key 归账(v0.8.0)
       } catch {}
       const ev = {
@@ -531,6 +586,114 @@ class Session {
   _emit(ev, persist = false) {
     if (persist) store.appendSessionEvent(this.id, ev);
     this.m.send('sess:event', { sid: this.id, ev });
+  }
+
+  // --- 子 Agent 委派守卫(PreToolUse hook) ---
+  // agents 选项只是「新增」自定义定义,内置 Explore/Plan/general-purpose 依然可调,
+  // 且 Agent 工具的 input.model 可另行指定任意模型——两者都曾把会话路由到未勾选的
+  // Claude 模型。这里在工具执行前强制校验:只允许当前勾选模型注册的 Agent,拒绝
+  // 显式模型覆盖与无法核实模型的恢复/续聊。
+  _denyDelegation(toolName, reason, extra = {}) {
+    this._emit({ type: 'ui_aux', message: '⛔ 已拦截超出子 Agent 白名单的调用:' + reason }, true);
+    this._emit({ type: 'ui_agent_route', action: 'deny', tool: toolName, reason, ...extra }, true);
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: reason + '。只能调用会话「子 Agent」菜单中勾选的模型,需要调整请先修改勾选。',
+      },
+    };
+  }
+
+  async _guardDelegation(hookInput) {
+    const route = this._agentRoute;
+    if (!route) return {};
+    const toolName = hookInput && hookInput.tool_name;
+    const input = (hookInput && hookInput.tool_input) || {};
+    const toolUseId = hookInput && hookInput.tool_use_id;
+    // 最新勾选(取消勾选立即对新调用生效,不等回合结束后的重启)
+    const current = new Set(currentAgentModels(this.meta).map((i) => i.model));
+    const available = [...route.allowed].filter(([, m]) => current.has(m)).map(([n]) => n);
+
+    if (toolName === 'Workflow') {
+      return this._denyDelegation(toolName, 'Workflow 编排会在脚本内部派生子任务、绕开模型白名单,当前会话未启用');
+    }
+    if (toolName === 'SendMessage') {
+      const to = String(input.to || '');
+      if (!to) return {};
+      const model = await this._resolveAgentModel(to);
+      if (model == null) {
+        return this._denyDelegation(toolName, `无法核实子任务 ${to} 的模型(可能来自旧配置),请新建已勾选的子 Agent`, { target: to });
+      }
+      if (!current.has(model)) {
+        return this._denyDelegation(toolName, `子任务 ${to} 使用未勾选的模型 ${model}`, { target: to, resolvedModel: model });
+      }
+      return {};
+    }
+    if (toolName !== 'Agent' && toolName !== 'Task') return {};
+
+    const type = String(input.subagent_type || '').trim();
+    const requested = typeof input.model === 'string' ? input.model.trim() : '';
+    const defModel = type ? route.allowed.get(type) : undefined;
+    if (!type || !defModel || !current.has(defModel)) {
+      return this._denyDelegation(toolName,
+        `子 Agent 类型 ${type || '(未指定,走内置默认)'} 不在已启用列表;可用:${available.join(', ') || '(无)'}`,
+        { agentType: type || null, requestedModel: requested || null, available });
+    }
+    if (requested && requested !== defModel) {
+      return this._denyDelegation(toolName,
+        `不允许为子 Agent ${type} 另行指定模型 ${requested};它固定使用 ${defModel}`,
+        { agentType: type, requestedModel: requested });
+    }
+    if (input.resume) {
+      const target = String(input.resume);
+      const model = await this._resolveAgentModel(target);
+      if (model == null) {
+        return this._denyDelegation(toolName, `无法核实恢复的子任务 ${target} 的模型,请新建子 Agent`, { target });
+      }
+      if (model !== defModel) {
+        return this._denyDelegation(toolName, `恢复的子任务 ${target} 实际模型为 ${model},与 ${type} 固定的 ${defModel} 不一致`, { target, resolvedModel: model });
+      }
+    }
+    if (toolUseId) route.spawned.set(toolUseId, defModel);
+    this._emit({ type: 'ui_agent_route', action: 'allow', tool: toolName, agentType: type, model: defModel }, true);
+    return {}; // 不代行放行,正常权限流程继续
+  }
+
+  // Agent 工具结果里带 agentId;记录 agentId → 模型,供 SendMessage/resume 核实
+  async _trackSpawnedAgent(hookInput) {
+    const route = this._agentRoute;
+    if (!route) return {};
+    try {
+      const model = route.spawned.get(hookInput && hookInput.tool_use_id);
+      if (!model) return {};
+      const res = hookInput && hookInput.tool_response;
+      const text = typeof res === 'string' ? res
+        : Array.isArray(res) ? res.map((b) => (b && b.text) || '').join('\n')
+          : res && res.content != null
+            ? (typeof res.content === 'string' ? res.content : JSON.stringify(res.content))
+            : '';
+      const m = text && text.match(/agentId:\s*([A-Za-z0-9_-]+)/);
+      if (m) route.spawned.set(m[1], model);
+    } catch {}
+    return {};
+  }
+
+  // 核实子任务实际使用的模型:先查本 query 的派发记录,再读本会话的子 Agent
+  // transcript(跨重启恢复场景);都查不到返回 null(调用方必须拒绝,fail closed)。
+  async _resolveAgentModel(target) {
+    const route = this._agentRoute;
+    const id = String(target || '').replace(/^agent-/, '');
+    if (!id) return null;
+    if (route && route.spawned.has(id)) return route.spawned.get(id);
+    try {
+      const base = transcriptPath(this.meta.sdkSessionId, this.meta.cwd);
+      if (!base) return null;
+      const f = path.join(path.dirname(base), 'subagents', 'agent-' + id + '.jsonl');
+      const head = fs.readFileSync(f, 'utf8').slice(0, 262144);
+      const m = head.match(/"model"\s*:\s*"([^"<][^"]*)"/); // 跳过 <synthetic> 占位
+      return m ? m[1] : null;
+    } catch { return null; }
   }
 
   // --- permission flow (canUseTool) ---

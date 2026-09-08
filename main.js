@@ -813,7 +813,9 @@ ipcMain.handle('sess:setAgentModels', async (_e, { sid, agentModels }) => {
     }
   }
   const clean = await s.setAgentModels(agentModels);
-  return { ok: true, agentModels: clean };
+  // pending:回合进行中只标记了 needRestart,新配置要等回合结束重启后才生效
+  //(守卫已按最新勾选拦截新调用,但新增模型在重启注册前不可用,旧子任务仍在跑)
+  return { ok: true, agentModels: clean, pending: !!s.needRestart };
 });
 ipcMain.handle('sess:setEffort', (_e, { sid, effort }) => {
   const s = sessions.get(sid);

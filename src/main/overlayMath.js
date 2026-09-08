@@ -84,6 +84,16 @@ function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
 }
 
+// 主球在固定悬浮窗内的几何;主进程拖拽边界与渲染端吸附共用,避免两端口径漂移。
+const BALL_RECT = { ox: 16, oy: 4, w: 64, h: 64 };
+
+function clampWindowToWorkArea(win, ball, wa, margin = 0) {
+  return {
+    x: clamp(win.x, wa.x + margin - ball.ox, wa.x + wa.width - margin - ball.ox - ball.w),
+    y: clamp(win.y, wa.y + margin - ball.oy, wa.y + wa.height - margin - ball.oy - ball.h),
+  };
+}
+
 // 边缘吸附:取球心到 workArea 四边的最小距离(必须用 workArea 而非 display.bounds,
 // 排除任务栏);返回 {edge, x, y, dist},坐标已沿边 clamp 保证整球不出 workArea。
 // dist = 球心到该边缘的距离,调用方据此决定是否吸附(仅靠近边缘时才吸)。
@@ -139,10 +149,12 @@ const M = {
   PREDICT_ASYMPTOTE,
   PREDICT_HALF_MS,
   SNAP_THRESHOLD,
+  BALL_RECT,
   predictedPct,
   isTrackableKind,
   snapshotToMap,
   reduceSessEvent,
+  clampWindowToWorkArea,
   snapTarget,
   snapWindow,
   springStep,

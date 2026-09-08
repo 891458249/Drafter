@@ -3,10 +3,10 @@
 // (由 overlay.html 以经典脚本引入,挂 window.overlayMath;Chromium ESM 不认 CJS)。
 const math = window.overlayMath;
 
-const { predictedPct, snapshotToMap, reduceSessEvent, snapWindow, springStep, clamp, SNAP_THRESHOLD } = math;
+const { predictedPct, snapshotToMap, reduceSessEvent, snapWindow, springStep, clamp, SNAP_THRESHOLD, BALL_RECT } = math;
 
-// 球在窗口内的 rect(与 overlay.html #ball 布局一致;reportRegions/snapWindow 共用)
-const BALL = { ox: 16, oy: 4, w: 64, h: 64 };
+// 主进程拖拽边界与渲染端吸附共享同一主球几何。
+const BALL = BALL_RECT;
 
 const ball = document.getElementById('ball');
 const orbsEl = document.getElementById('orbs');
@@ -120,6 +120,8 @@ function onOrbClick(sid) {
 let dockedEdge = null;
 let morphP = 0;
 let squash = { sx: 1, sy: 1 };
+let dragVisualOffset = null; // 拖拽期间保持球体平移不变,圆角动画不改变抓取点
+let undockRAF = null;
 
 function morphOffset(p) {
   switch (dockedEdge) {
@@ -141,7 +143,7 @@ function morphRadius(p) {
   }
 }
 function applyBallVisual() {
-  const m = morphOffset(morphP);
+  const m = dragVisualOffset || morphOffset(morphP);
   ball.style.transform = `translate(${m.x}px, ${m.y}px) scale(${squash.sx}, ${squash.sy})`;
   ball.style.borderRadius = morphRadius(morphP);
 }
@@ -152,6 +154,7 @@ function applyDockClass() {
 }
 // 从贴边态拖起:220ms 圆回整圆球
 function animateUndock() {
+  if (undockRAF) { cancelAnimationFrame(undockRAF); undockRAF = null; }
   if (morphP <= 0) { dockedEdge = null; applyDockClass(); reportRegions(); return; }
   const from = morphP;
   const t0 = performance.now();
@@ -159,10 +162,10 @@ function animateUndock() {
     const k = Math.min(1, (now - t0) / 220);
     morphP = from * (1 - k);
     applyBallVisual();
-    if (k < 1) requestAnimationFrame(tick);
-    else { dockedEdge = null; applyDockClass(); reportRegions(); }
+    if (k < 1) undockRAF = requestAnimationFrame(tick);
+    else { undockRAF = null; dockedEdge = null; applyDockClass(); reportRegions(); }
   };
-  requestAnimationFrame(tick);
+  undockRAF = requestAnimationFrame(tick);
 }
 
 // --- 可交互区域上报 -----------------------------------------------------------
@@ -173,7 +176,7 @@ function animateUndock() {
 function reportRegions() {
   const n = visibleTasks().slice(0, 6).length;
   // 贴边时球在窗口内向边缘平移(见 morphOffset),区域随之调整
-  const m = morphOffset(morphP >= 0.5 ? 1 : 0);
+  const m = dragVisualOffset || morphOffset(morphP);
   const ballRect = { x: BALL.ox + m.x, y: BALL.oy + m.y, w: BALL.w, h: BALL.h };
   const regions = [ballRect];
   for (let i = 0; i < n; i++) regions.push({ x: 28, y: 76 + i * 46, w: 40, h: 40 });
@@ -196,16 +199,18 @@ function setSquash(vx, vy, dominantAxis) {
 }
 
 ball.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || dragging || dragVisualOffset) return;
   e.preventDefault();
   dragging = true;
   if (springRAF) { cancelAnimationFrame(springRAF); springRAF = null; }
-  animateUndock();          // 从贴边态拖起:圆平滑变回整圆球
+  dragVisualOffset = morphOffset(morphP);
+  animateUndock();          // 只圆回形状,保持球体在窗口内的偏移
   ball.classList.add('dragging');
   try { ball.setPointerCapture(e.pointerId); } catch (err) { window.__orbErr = String(err); }
   window.__orbDragStart = true; // 冒烟/排障探针
   lastMove = { x: e.clientX, y: e.clientY, t: performance.now() };
   dragVel = { x: 0, y: 0 };
-  api.overlayDragStart({ dx: e.clientX, dy: e.clientY }); // 主进程轮询光标 setPosition
+  api.overlayDragStart({ dx: e.clientX, dy: e.clientY, offset: dragVisualOffset });
 });
 
 ball.addEventListener('pointermove', (e) => {
@@ -235,9 +240,17 @@ async function endDrag(e) {
   if (!dragging) return;
   dragging = false;
   ball.classList.remove('dragging');
+  if (undockRAF) { cancelAnimationFrame(undockRAF); undockRAF = null; }
   squash = { sx: 1, sy: 1 };
   applyBallVisual();
-  const res = await api.overlayDragEnd(); // {x, y, workArea} 主进程已停轮询并持久化位置
+  // 主进程把窗口平移补偿回普通球坐标;随后去掉同一视觉偏移,屏幕落点不变。
+  const res = await api.overlayDragEnd();
+  dragVisualOffset = null;
+  morphP = 0;
+  dockedEdge = null;
+  applyBallVisual();
+  applyDockClass();
+  reportRegions();
   if (res && res.workArea) springTo(res.x, res.y, res.workArea);
 }
 

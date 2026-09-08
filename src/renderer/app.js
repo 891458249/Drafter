@@ -543,7 +543,7 @@ const KEY_PRESETS = {
   kimi: { name: 'Kimi', baseUrl: 'https://api.kimi.com/coding/v1', kind: 'authToken' },
   deepseek: { name: 'Deepseek', baseUrl: 'https://api.deepseek.com/anthropic', kind: 'authToken' },
   gemini: { name: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com', kind: 'apiKey' },
-  chatgpt: { name: 'ChatGPT', baseUrl: 'https://api.openai.com', kind: 'apiKey' },
+  chatgpt: { name: 'ChatGPT', baseUrl: 'https://api.openai.com', kind: 'authToken' }, // OpenAI 只认 Bearer,x-api-key 必 401
 };
 for (const btn of document.querySelectorAll('#apikey-modal [data-preset]')) {
   btn.onclick = () => {

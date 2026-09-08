@@ -135,6 +135,32 @@ function apiRoot(baseUrl) {
 }
 
 // --- model discovery --------------------------------------------------------
+// /v1/models 平铺列表的主流过滤(OpenAI 官方会返回 119+ 个:whisper/tts/嵌入/davinci/
+// babbage/图像生成/moderation/realtime,以及大量日期快照)。规则:
+//   1) 剔除非对话族(明确的前缀/特征匹配)
+//   2) 剔除有同名别名的日期快照(gpt-3.5-turbo-0125 → gpt-3.5-turbo 在列则弃快照)
+// 仅作用于平铺回退路径;Kuro 分组接口(/my-models/api)自带类别,不过滤。
+// 全部命中过滤(小众网关误伤)时回退原列表,保证不出空列表。
+const NON_CHAT_RE = /^(whisper|tts|dall-e|sora|gpt-image|text-embedding|omni-moderation|davinci|babbage)|-instruct(-\d+)?$|moderation|computer-use|realtime|transcribe|-audio(-|$)/i;
+const SNAPSHOT_RE = /-(\d{4}|\d{4}-\d{2}-\d{2})$/;
+function filterMainstreamModels(ids) {
+  const set = new Set(ids);
+  const out = ids.filter((id) => {
+    if (NON_CHAT_RE.test(id)) return false;
+    const m = id.match(SNAPSHOT_RE);
+    if (m && set.has(id.slice(0, -m[0].length))) return false;
+    return true;
+  });
+  return out.length ? out : ids;
+}
+
+// 刷新后修剪勾选白名单:已被过滤/下架的模型移出白名单;全空则回退 null(= 全部显示)
+function pruneEnabled(enabled, models) {
+  if (!Array.isArray(enabled) || !enabled.length) return enabled ?? null;
+  const kept = enabled.filter((m) => models.includes(m));
+  return kept.length ? kept : null;
+}
+
 async function fetchModels(entry) {
   const base = apiRoot(entry.baseUrl);
   const headers = { 'anthropic-version': '2023-06-01' };
@@ -146,9 +172,9 @@ async function fetchModels(entry) {
     const res = await fetch(`${base}/v1/models?limit=100`, { headers, signal: ctrl.signal });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     const json = await res.json();
-    const ids = (json.data || json.models || []).map((m) => m.id).filter(Boolean);
-    if (!ids.length) return { ok: false, error: '接口返回空模型列表' };
-    return { ok: true, models: ids };
+    const raw = (json.data || json.models || []).map((m) => m.id).filter(Boolean);
+    if (!raw.length) return { ok: false, error: '接口返回空模型列表' };
+    return { ok: true, models: filterMainstreamModels(raw) };
   } catch (e) {
     return { ok: false, error: e.name === 'AbortError' ? '请求超时' : e.message };
   } finally {
@@ -191,7 +217,7 @@ async function refreshModels(id) {
     const models = [...new Set(g.groups.flatMap((x) => x.models))];
     const list = listRaw();
     const i = list.findIndex((x) => x.id === id);
-    list[i] = { ...list[i], models, modelsAt: Date.now(), modelGroups: g.groups };
+    list[i] = { ...list[i], models, modelsAt: Date.now(), modelGroups: g.groups, modelsEnabled: pruneEnabled(list[i].modelsEnabled, models) };
     store.setSetting('apiKeys', list);
     return { ok: true, models };
   }
@@ -199,7 +225,7 @@ async function refreshModels(id) {
   if (!r.ok) return r;
   const list = listRaw();
   const i = list.findIndex((x) => x.id === id);
-  list[i] = { ...list[i], models: r.models, modelsAt: Date.now(), modelGroups: null }; // 回退路径无分组信息
+  list[i] = { ...list[i], models: r.models, modelsAt: Date.now(), modelGroups: null, modelsEnabled: pruneEnabled(list[i].modelsEnabled, r.models) }; // 回退路径无分组信息
   store.setSetting('apiKeys', list);
   return { ok: true, models: r.models };
 }
@@ -296,4 +322,4 @@ function setModelsEnabled(id, enabled) {
   return { ok: true };
 }
 
-module.exports = { list, save, remove, setActive, setEnabled, activeKey, byId, activeModels, enabledModels, refreshModels, setModelsEnabled, queryBalance, balanceProvider, modelType, apiRoot };
+module.exports = { list, save, remove, setActive, setEnabled, activeKey, byId, activeModels, enabledModels, refreshModels, setModelsEnabled, queryBalance, balanceProvider, modelType, apiRoot, filterMainstreamModels };

@@ -294,6 +294,50 @@ test('refreshModels: 优先 /my-models/api,存 modelGroups 并平铺 models(mock
   }
 });
 
+test('filterMainstreamModels: 剔除非对话族与有同名别名的日期快照', () => {
+  const raw = [
+    'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'gpt-3.5-turbo',
+    'whisper-1', 'tts-1', 'tts-1-hd-1106', 'davinci-002', 'babbage-002', 'text-embedding-3-small',
+    'dall-e-3', 'gpt-image-1', 'sora-2', 'omni-moderation-latest', 'gpt-3.5-turbo-instruct', 'gpt-3.5-turbo-instruct-0914',
+    'gpt-4o-audio-preview', 'gpt-4o-realtime-preview', 'computer-use-preview',
+    'gpt-3.5-turbo-0125', 'gpt-3.5-turbo-1106', 'gpt-4o-2024-08-06', // 别名在列 → 弃
+    'gpt-5.5-pro-2026-03-01', // 别名 gpt-5.5-pro 不在列 → 保留
+    'chatgpt-4o-latest', 'gpt-4o-search-preview', 'codex-mini-latest',
+  ];
+  assert.deepStrictEqual(keys.filterMainstreamModels(raw), [
+    'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'gpt-3.5-turbo',
+    'gpt-5.5-pro-2026-03-01', 'chatgpt-4o-latest', 'gpt-4o-search-preview', 'codex-mini-latest',
+  ]);
+});
+
+test('filterMainstreamModels: 全部命中过滤时回退原列表(防小众网关空列表)', () => {
+  const raw = ['whisper-1', 'tts-1'];
+  assert.deepStrictEqual(keys.filterMainstreamModels(raw), raw);
+});
+
+test('refreshModels: /v1/models 回退路径应用主流过滤并修剪勾选白名单(mock fetch)', async () => {
+  const r0 = keys.save({ name: 'OpenAI官方', key: 'sk-openai-1111', baseUrl: 'https://api.openai.com', kind: 'authToken' });
+  assert.strictEqual(r0.ok, true);
+  const oai = keys.list().find((k) => k.name === 'OpenAI官方');
+  keys.setModelsEnabled(oai.id, ['gpt-4o', 'whisper-1']); // 白名单含将被过滤的模型
+  const origFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (url.includes('/my-models/api')) return { ok: false, status: 404, json: async () => ({}) };
+    return { ok: true, json: async () => ({ data: [
+      { id: 'gpt-4o' }, { id: 'gpt-4o-2024-08-06' }, { id: 'whisper-1' }, { id: 'text-embedding-3-large' },
+    ] }) };
+  };
+  try {
+    const r = await keys.refreshModels(oai.id);
+    assert.strictEqual(r.ok, true);
+    assert.deepStrictEqual(r.models, ['gpt-4o'], '非对话模型与有同名别名的快照应被过滤');
+    assert.deepStrictEqual(keys.byId(oai.id).modelsEnabled, ['gpt-4o'], '白名单中被过滤的模型应被修剪');
+  } finally {
+    global.fetch = origFetch;
+  }
+  keys.remove(oai.id);
+});
+
 test('refreshModels: /my-models/api 404 时回退 /v1/models 且 modelGroups 置 null(mock fetch)', async () => {
   const kuro = keys.list().find((k) => k.name === '库洛网关');
   const origFetch = global.fetch;

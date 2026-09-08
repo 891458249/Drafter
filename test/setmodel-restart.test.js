@@ -36,6 +36,25 @@ function makeSession(mgr, cwd, { keyId, model } = {}) {
   return live;
 }
 
+test('未运行会话换模型:持久化成功,下次 start 生效', async () => {
+  const { mgr, cwd } = makeMgr();
+  const s = makeSession(mgr, cwd, { keyId: 'k_a', model: 'm1' });
+  s.running = false;
+  s.q = null;
+  let stopped = 0, started = 0;
+  s.stop = () => { stopped++; };
+  s.start = async () => { started++; };
+  const r = await s.setModel('m2', 'k_b');
+  assert.strictEqual(r, true, '已持久化的离线模型切换应视为成功');
+  assert.strictEqual(s.meta.model, 'm2');
+  assert.strictEqual(s.meta.keyId, 'k_b');
+  assert.strictEqual(stopped, 0, '未运行会话不应为了切模型启动或重启');
+  assert.strictEqual(started, 0);
+  const saved = mgr.list().find((v) => v.id === s.id);
+  assert.strictEqual(saved.model, 'm2');
+  assert.strictEqual(saved.keyId, 'k_b');
+});
+
 test('同 Key 换模型:走 q.setModel,不重启', async () => {
   const { mgr, cwd } = makeMgr();
   const s = makeSession(mgr, cwd, { keyId: 'k_a', model: 'm1' });

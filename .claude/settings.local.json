@@ -35,7 +35,15 @@
       "Bash(break)",
       "Bash(tasklist)",
       "Bash(node --check src/main/harness/harness-bridge.js)",
-      "Bash(node /tmp/test-harness-boot2.js)"
+      "Bash(node /tmp/test-harness-boot2.js)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{try{const j=JSON.parse\\(d\\);console.log\\('=== apiKeys\\(脱敏\\) ==='\\);\\(j.settings.apiKeys||[]\\).forEach\\(k=>console.log\\({id:k.id,name:k.name,baseUrl:k.baseUrl,kind:k.kind,enabled:k.enabled,modelsEnabled:k.modelsEnabled,models:k.models}\\)\\);console.log\\('=== activeKeyId ===',j.settings.activeKeyId\\);}catch\\(e\\){console.log\\('parse fail',e.message\\)}}\\)\")",
+      "WebFetch(domain:docs.claude.com)",
+      "Read(//c/Users/dingyongzhen/AppData/Roaming/Drafter/**)",
+      "Read(//tmp/**)",
+      "Read(//c/Users/dingyongzhen/.claude/**)"
     ]
   }
 }

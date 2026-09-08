@@ -662,6 +662,7 @@ kbd {
 .agent-menu-note { border-top: 1px solid var(--border); line-height: 1.4; }
 .agent-models-menu .agent-model-row { display: flex; align-items: center; gap: 8px; }
 .agent-models-menu .agent-model-row.active { color: var(--accent); }
+.agent-model-stop { color: var(--red); border-top: 1px solid var(--border); }
 .agent-model-check { width: 14px; color: var(--accent); font-weight: 700; }
 .agent-model-row span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge-gem {

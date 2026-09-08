@@ -2,6 +2,7 @@
 import { api, state, $, escapeHtml, ensureGroups } from './state.js';
 
 let entriesCache = [];
+let toggling = false; // 防快速连点并发提交导致勾选互相覆盖
 
 function isFastChat(s) {
   return !!s && s.meta.kind === 'chat' && s.meta.chatMode !== 'agent';
@@ -38,9 +39,11 @@ export function updateAgentModelsSelector() {
         : !s.meta.keyId ? '请先选择带 API Key 的主模型'
           : null;
   btn.disabled = !!disabledReason;
-  btn.title = disabledReason || (count
-    ? `已启用 ${count} 个子 Agent 模型;主模型会按任务自动选择调用`
-    : '未启用子 Agent,当前会话只使用主模型');
+  btn.title = disabledReason || (s.meta.agentModelsPending
+    ? `已启用 ${count} 个子 Agent 模型(新配置待当前回合结束后生效)`
+    : count
+      ? `已启用 ${count} 个子 Agent 模型;主模型会按任务自动选择调用`
+      : '未启用子 Agent,当前会话只使用主模型');
   if (btn.disabled) hideAgentModelsMenu();
 }
 
@@ -61,20 +64,31 @@ function positionMenu(menu, anchor) {
 
 async function toggleModel(item) {
   const s = state.sessions.get(state.activeSid);
-  if (!s) return;
-  const before = selected(s);
-  const key = selectedKey(item);
-  const next = before.some((x) => selectedKey(x) === key)
-    ? before.filter((x) => selectedKey(x) !== key)
-    : [...before, { keyId: item.keyId, model: item.model }];
-  const result = await api.sessSetAgentModels(s.meta.id, next);
-  if (!result || !result.ok) {
-    alert((result && result.error) || '子 Agent 模型设置失败');
-    return;
+  if (!s || toggling) return;
+  toggling = true;
+  const sid = s.meta.id;
+  try {
+    const before = selected(s);
+    const key = selectedKey(item);
+    const next = before.some((x) => selectedKey(x) === key)
+      ? before.filter((x) => selectedKey(x) !== key)
+      : [...before, { keyId: item.keyId, model: item.model }];
+    const result = await api.sessSetAgentModels(sid, next);
+    if (!result || !result.ok) {
+      alert((result && result.error) || '子 Agent 模型设置失败');
+      return;
+    }
+    const cur = state.sessions.get(sid);
+    if (!cur) return;
+    cur.meta.agentModels = result.agentModels || [];
+    // 回合进行中:新配置待重启生效;取消勾选已由守卫立即拦截新调用,
+    // 但新增模型要等重启注册,旧子任务也仍在按启动配置运行——如实提示
+    cur.meta.agentModelsPending = !!result.pending;
+    updateAgentModelsSelector();
+    if (state.activeSid === sid) renderMenu(cur);
+  } finally {
+    toggling = false;
   }
-  s.meta.agentModels = result.agentModels || [];
-  updateAgentModelsSelector();
-  renderMenu(s);
 }
 
 function renderMenu(s) {
@@ -99,8 +113,21 @@ function renderMenu(s) {
   }
   const note = document.createElement('div');
   note.className = 'agent-menu-note';
-  note.textContent = current.size ? `已选择 ${current.size} 个;仅在主模型决定委派时调用` : '未选择时禁用 Agent 工具,只消耗主模型';
+  note.textContent = s.meta.agentModelsPending
+    ? `已保存 ${current.size} 个,当前回合结束后生效;守卫已立即按最新勾选拦截新调用,但运行中的子任务仍按旧配置执行`
+    : current.size ? `已选择 ${current.size} 个;仅在主模型决定委派时调用` : '未选择时禁用 Agent 工具,只消耗主模型';
   menu.appendChild(note);
+  if (s.meta.agentModelsPending) {
+    const stop = document.createElement('button');
+    stop.className = 'agent-model-row agent-model-stop';
+    stop.innerHTML = '<span class="agent-model-check">⏹</span><span>停止当前回合并立即应用新配置</span>';
+    stop.onclick = (event) => {
+      event.stopPropagation();
+      api.sessInterrupt(s.meta.id); // 回合结束后 needRestart 自动 resume 重启
+      hideAgentModelsMenu();
+    };
+    menu.appendChild(stop);
+  }
   positionMenu(menu, $('agent-models-btn'));
 }
 
@@ -122,6 +149,14 @@ export function hideAgentModelsMenu() {
 export function init() {
   const btn = $('agent-models-btn');
   if (!btn) return;
+  // 回合结束(needRestart 重启)后清除「待生效」状态
+  api.on('sess:event', ({ sid, ev } = {}) => {
+    if (!sid || !ev || ev.type !== 'ui_status' || ev.busy) return;
+    const s = state.sessions.get(sid);
+    if (!s || !s.meta.agentModelsPending) return;
+    s.meta.agentModelsPending = false;
+    if (sid === state.activeSid) updateAgentModelsSelector();
+  });
   btn.onclick = (event) => {
     event.stopPropagation();
     const menu = $('agent-models-menu');
