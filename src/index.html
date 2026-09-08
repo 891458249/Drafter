@@ -330,6 +330,11 @@
           <option value="apiKey">API Key(sk-ant-…)</option>
           <option value="authToken">Auth Token(网关 Bearer)</option>
         </select>
+        <select id="key-protocol" class="input-sm" title="会话运行时协议:OpenAI 协议的端点(如 api.openai.com)经本地翻译层驱动会话">
+          <option value="">协议:自动</option>
+          <option value="anthropic">Anthropic Messages</option>
+          <option value="openai">OpenAI Chat(翻译)</option>
+        </select>
       </div>
       <div class="form-row">
         <input id="key-secret" class="input-sm grow" type="password" placeholder="Key 内容" autocomplete="off" />

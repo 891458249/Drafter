@@ -294,6 +294,28 @@ test('refreshModels: 优先 /my-models/api,存 modelGroups 并平铺 models(mock
   }
 });
 
+test('protocol:guessProtocol 按 host 判定,save 支持显式覆盖与「自动」重猜', () => {
+  assert.strictEqual(keys.guessProtocol('https://api.openai.com'), 'openai');
+  assert.strictEqual(keys.guessProtocol('https://api.openai.com/v1'), 'openai');
+  assert.strictEqual(keys.guessProtocol('https://ai-gateway.kurogames.com'), 'anthropic');
+  assert.strictEqual(keys.guessProtocol(''), 'anthropic');
+  assert.strictEqual(keys.guessProtocol('not-a-url'), 'anthropic', '非法 URL 应回退 anthropic');
+  // 新建:不填 → 按 baseUrl 猜
+  const r = keys.save({ name: '协议测试', key: 'sk-proto-1234', baseUrl: 'https://api.openai.com' });
+  assert.strictEqual(r.ok, true);
+  const k = keys.list().find((x) => x.name === '协议测试');
+  assert.strictEqual(k.protocol, 'openai', 'api.openai.com 应自动判为 openai');
+  assert.strictEqual(keys.endpointOf(keys.byId(k.id)).viaProxy, true);
+  // 显式覆盖为 anthropic(协议下拉手动改)
+  keys.save({ id: k.id, protocol: 'anthropic' });
+  assert.strictEqual(keys.byId(k.id).protocol, 'anthropic');
+  // 显式 openai 用在自定义网关
+  const r2 = keys.save({ name: '协议测试2', key: 'sk-proto-5678', baseUrl: 'https://gw.example.com', protocol: 'openai' });
+  assert.strictEqual(keys.list().find((x) => x.id === r2.id).protocol, 'openai');
+  keys.remove(k.id);
+  keys.remove(r2.id);
+});
+
 test('filterMainstreamModels: 剔除非对话族与有同名别名的日期快照', () => {
   const raw = [
     'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'gpt-3.5-turbo',

@@ -49,6 +49,7 @@ const canvases = require('./src/main/canvases');
 const canvasJobs = require('./src/main/canvasJobs');
 const canvasGraph = require('./src/main/canvasGraph');
 const llmtext = require('./src/main/llmtext');
+const oaiProxy = require('./src/main/oai-proxy');
 const comfyConnections = require('./src/main/comfy/connection-store');
 const comfyClient = require('./src/main/comfy/client');
 const comfySchema = require('./src/main/comfy/schema');
@@ -115,6 +116,7 @@ function cleanup() {
   try { sessions.stopAll(); } catch {}
   try { terms.closeAll(); } catch {}
   try { scheduler.stop(); } catch {}
+  try { oaiProxy.stop(); } catch {}
 }
 
 function showMainWindow() {
@@ -195,7 +197,9 @@ function buildEnv(extra = {}, keyId = null) {
     }
     // claude.exe 会在 BASE_URL 后再拼 /v1/messages,这里必须归一到不含 /v1 的根
     // (与 keys.js fetchModels 同一规则),否则 Kimi 预设的 …/coding/v1 会变成 /v1/v1 → 404
-    env.ANTHROPIC_BASE_URL = keys.apiRoot(k.baseUrl);
+    // OpenAI 协议的 Key(v0.15.0):claude.exe 只讲 Anthropic Messages,
+    // 经本地翻译代理(127.0.0.1 回环)走 OpenAI Chat Completions
+    env.ANTHROPIC_BASE_URL = keys.endpointOf(k).viaProxy ? oaiProxy.baseUrlFor(k.id) : keys.apiRoot(k.baseUrl);
   }
   return env;
 }
@@ -265,7 +269,10 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // OpenAI 协议翻译代理(v0.15.0):会话启动晚于 boot,await 后端口同步可读,buildEnv 无竞态;
+  // 失败不阻塞——仅 protocol=openai 的 Key 会话受影响(buildEnv 抛错,回合报代理未启动)
+  try { await oaiProxy.start(); } catch (e) { console.error('[oai-proxy] 启动失败:', e.message); }
   // harness 桥 IPC(harness:fetch / harness:loadBundle / harness:openSse)
   try { harnessBridge.registerHarnessIpc(); } catch (e) { console.error('[harness] IPC 注册失败:', e); }
   // 数据迁移与自愈(v0.9.17):版本升级后对全部存量会话统一迭代修复

@@ -464,3 +464,12 @@ Git 工作流:
 - 引擎开关 settings.canvasEngine(默认 native,可回退 drawflow);存量 drawflow 形画布 JSON 打开自动归一
 - 已知缺口:节点内任务画廊翻页/单节点执行按钮、widget 滑块拖拽、reroute 点待补
 - 测试:npm test 224/224(新增 22 例);CDP 冒烟 smoke-canvas2-native.js 16 断言全过(隔离 userData)
+
+### v0.15.0(未发布)— 原生 OpenAI 协议支持:Anthropic↔OpenAI 本地翻译代理
+- 背景:claude.exe 只讲 Anthropic Messages,api.openai.com/v1/messages 404,OpenAI 官方 Key 此前只能列模型不能跑会话,报错文案误导(「模型不存在」)
+- 新模块 oai-translate.js(纯函数):system 块合并/tool_use↔tool_calls/tool_result→role:tool(含图片追加 user 消息)/max_tokens→max_completion_tokens/tool_choice 四态/流式 SSE 双向映射(按 tc.index 归属 content block,末尾 usage chunk 回填 message_delta)/错误透传保留上游原文(429 余额不足可见)
+- 新模块 oai-proxy.js:127.0.0.1 回环服务,boot 时启动;路由 /<keyId>/v1/messages(+count_tokens 粗估);入站 Bearer/x-api-key 须与存储 key 一致否则 401/403;main.js buildEnv 按 keys.endpointOf 路由(viaProxy 走代理,否则直连);cleanup 幂等 stop
+- keys.js 新增 protocol 字段(anthropic|openai,guessProtocol 按 host 猜,仅 api.openai.com→openai,存量零迁移);渲染端协议下拉(自动/Anthropic/OpenAI)+行内「OpenAI 协议」徽标;ChatGPT 预设带 protocol:'openai'
+- 测试:oai-translate 10 例 + oai-proxy 5 例(认证/路由/流式/count_tokens/429 透传)+ oai-proxy-live 1 例(真实 claude.exe 经代理打假 OpenAI 后端,工具回路 Bash echo 真实执行+usage 记账)+ keys protocol 1 例;npm test 303/303
+- 坑:①server.close 回调被 undici keep-alive 长连挡住,stop() 须先 closeAllConnections;②Claude Code 首轮并行发标题生成请求(无工具表),live 断言要按「带 tools」定位主循环请求
+- 明确不做:Gemini 原生协议(protocol 字段可扩展,后续单开)、Responses API、prompt caching/thinking 映射(丢弃即可)

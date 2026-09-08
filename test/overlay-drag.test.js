@@ -20,7 +20,7 @@ function harness(edge = 'bottom', progress = 1) {
   function element(id) {
     const listeners = new Map(), classes = new Set();
     return {
-      id, style: {}, addEventListener: (name, cb) => listeners.set(name, cb),
+      id, style: {}, childElementCount: 0, addEventListener: (name, cb) => listeners.set(name, cb),
       dispatch: (name, ev) => listeners.get(name)?.(ev),
       classList: { add: (...v) => v.forEach(c => classes.add(c)), remove: (...v) => v.forEach(c => classes.delete(c)), toggle: () => {} },
       setPointerCapture() {}, appendChild() {}, remove() {}, querySelector: () => ({ textContent: '' }),
@@ -48,6 +48,7 @@ function harness(edge = 'bottom', progress = 1) {
   main.module.exports.registerIpc();
   main.module.exports.show();
   const invoke = async (name, p) => handlers.get(name)(null, p);
+  let showMainCalls = 0;
   const renderer = vm.createContext({
     window: { overlayMath: math }, document: { getElementById: id => elements.get(id), createElement: () => element('') },
     performance: { now: () => now }, setInterval: () => 0,
@@ -58,6 +59,7 @@ function harness(edge = 'bottom', progress = 1) {
       overlayDragStart: p => invoke('overlay:dragStart', p), overlayDragEnd: () => invoke('overlay:dragEnd'),
       overlaySetPos: p => invoke('overlay:setPos', p), overlaySetDock: p => invoke('overlay:setDock', p),
       overlaySetRegions: regions => invoke('overlay:setRegions', regions),
+      overlayJump: () => {}, overlayMenu: () => {}, overlayShowMain: () => { showMainCalls++; },
     },
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/renderer/overlay.js'), 'utf8'), renderer);
@@ -84,7 +86,14 @@ function harness(edge = 'bottom', progress = 1) {
   return {
     async ready() { await flush(); run(`dockedEdge = ${JSON.stringify(edge)}; morphP = ${progress}; applyBallVisual();`); },
     press, tick, center, run, flush,
-    move: (dx, dy) => { cursor = { x: cursor.x + dx, y: cursor.y + dy }; tick(16); },
+    el: (id) => elements.get(id),
+    showMainCalls: () => showMainCalls,
+    // 移动真实光标并向球派发 pointermove(渲染端 6px 死区后才会启动主进程拖拽)
+    move: (dx, dy) => {
+      cursor = { x: cursor.x + dx, y: cursor.y + dy };
+      elements.get('ball').dispatch('pointermove', { clientX: cursor.x - position[0], clientY: cursor.y - position[1] });
+      tick(16);
+    },
     release: (type = 'pointerup') => elements.get('ball').dispatch(type, {}),
     state: () => handlers.get('overlay:getState')(),
     setting: () => setting,
@@ -142,4 +151,53 @@ test('右键不启动拖拽或解除底部吸附', async () => {
   assert.equal(h.state().dragging, false);
   assert.equal(h.run('morphP'), 1);
   assert.deepEqual(h.center(), before);
+});
+
+test('底部吸附弹簧:形变实时折算进窗口坐标,球体不瞬移不出屏', async () => {
+  const h = harness(null, 0); await h.ready();
+  h.press();
+  h.move(0, 280); // 拖向底边:球心被夹到 1368,距底 32px ≤ 阈值 → 触发吸附
+  const drop = h.center();
+  assert.ok(1400 - drop.y <= 80, '松手点应在吸附阈值内');
+  await h.release();
+  // 逐帧检查:球体视觉底边永不出屏,且相邻帧间不得出现大位移(旧实现首帧上跳 264px)
+  let prev = null, maxJump = 0, overshoot = 0;
+  for (let i = 0; i < 240; i++) {
+    h.tick(16);
+    const c = h.center();
+    const visualBottom = c.y + 32;
+    if (prev != null) maxJump = Math.max(maxJump, Math.abs(visualBottom - prev));
+    overshoot = Math.max(overshoot, visualBottom - 1400);
+    prev = visualBottom;
+    if (h.setting().edge === 'bottom' && !h.run('springRAF')) break;
+  }
+  assert.ok(maxJump <= 24, `弹簧期间相邻帧最大位移 ${maxJump}px,不应瞬移`);
+  assert.ok(overshoot <= 1, `球体底边不得超出屏幕底边(超出 ${overshoot}px)`);
+  assert.equal(h.setting().edge, 'bottom');
+  assert.equal(h.state().y, 1060, '吸附完成后窗口钉到底边(1400-340)');
+  assert.equal(h.center().y + 32, 1400, '球体底边与屏幕底边齐平');
+});
+
+test('纯点击(不移动)保持吸附形态,dblclick 可展开主窗', async () => {
+  const h = harness(); await h.ready();
+  const before = h.center();
+  h.press();
+  await h.release(); // 未移动:纯点击,不应启动拖拽/重吸附
+  assert.equal(h.state().dragging, false, '纯点击不得启动主进程拖拽轮询');
+  assert.equal(h.run('morphP'), 1, '吸附形态保持');
+  assert.equal(h.run('dockedEdge'), 'bottom');
+  assert.deepEqual(h.center(), before);
+  h.press(); await h.release();
+  h.el('ball').dispatch('dblclick', {});
+  assert.equal(h.showMainCalls(), 1, '双击吸附态主球应展开主窗');
+  assert.deepEqual(h.center(), before, '双击全程球体不得移动');
+});
+
+test('底边吸附时任务小球堆叠到主球上方(不再悬空 200px 外)', async () => {
+  const h = harness();
+  h.el('orbs').childElementCount = 2; // 两个任务小球
+  await h.ready(); // bottom 完全吸附:morphP=1
+  const transform = h.el('orbs').style.transform;
+  // stack=2*46-6=86 → y=192-86=106:小球堆底边(76+86+106=268)紧贴主球顶(276)
+  assert.equal(transform, 'translate(0px, 106px)');
 });

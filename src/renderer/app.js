@@ -543,7 +543,7 @@ const KEY_PRESETS = {
   kimi: { name: 'Kimi', baseUrl: 'https://api.kimi.com/coding/v1', kind: 'authToken' },
   deepseek: { name: 'Deepseek', baseUrl: 'https://api.deepseek.com/anthropic', kind: 'authToken' },
   gemini: { name: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com', kind: 'apiKey' },
-  chatgpt: { name: 'ChatGPT', baseUrl: 'https://api.openai.com', kind: 'authToken' }, // OpenAI 只认 Bearer,x-api-key 必 401
+  chatgpt: { name: 'ChatGPT', baseUrl: 'https://api.openai.com', kind: 'authToken', protocol: 'openai' }, // OpenAI 只认 Bearer,x-api-key 必 401;会话走翻译代理
 };
 for (const btn of document.querySelectorAll('#apikey-modal [data-preset]')) {
   btn.onclick = () => {
@@ -552,6 +552,7 @@ for (const btn of document.querySelectorAll('#apikey-modal [data-preset]')) {
     $('key-name').value = p.name;
     $('key-baseurl').value = p.baseUrl;
     $('key-kind').value = p.kind;
+    $('key-protocol').value = p.protocol || '';
   };
 }
 
@@ -564,6 +565,7 @@ function resetKeyForm() {
   $('key-secret').placeholder = 'Key 内容';
   for (const id of ['key-name', 'key-secret', 'key-baseurl', 'key-usageurl']) $(id).value = '';
   $('key-kind').value = '';
+  $('key-protocol').value = '';
 }
 
 // 进入编辑态:预填该 Key 的字段;secret 留空(保存时不修改),额度在行内编辑、保存时自动保留
@@ -573,6 +575,7 @@ function startEditKey(k) {
   $('key-secret').placeholder = '留空则不修改';
   $('key-name').value = k.name || '';
   $('key-kind').value = k.kind || '';
+  $('key-protocol').value = k.protocol || '';
   $('key-secret').value = '';
   $('key-baseurl').value = k.baseUrl || '';
   $('key-usageurl').value = k.usageUrl || '';
@@ -617,7 +620,7 @@ async function renderKeysList() {
       <input type="checkbox" class="key-enabled" data-id="${k.id}" ${k.enabled ? 'checked' : ''} title="启用:该 Key 的模型加入会话下拉,可多选" />
       <input type="radio" name="active-key" data-id="${k.id}" ${k.id === activeId ? 'checked' : ''} title="设为默认(「默认」模型与回退额度归账用)" />
       <span class="name">${escapeHtml(k.name)}</span>
-      <span class="scope">${escapeHtml(k.keyHint)}${k.baseUrl ? ' · ' + escapeHtml(k.baseUrl) : ''} · ${k.kind === 'authToken' ? 'Token' : 'Key'}${k.models && k.models.length ? ' · ' + k.models.length + ' 模型' : ''}${k.modelsEnabled ? '(已勾选 ' + k.modelsEnabled.length + ')' : ''}</span>
+      <span class="scope">${escapeHtml(k.keyHint)}${k.baseUrl ? ' · ' + escapeHtml(k.baseUrl) : ''} · ${k.kind === 'authToken' ? 'Token' : 'Key'}${k.protocol === 'openai' ? ' · OpenAI 协议' : ''}${k.models && k.models.length ? ' · ' + k.models.length + ' 模型' : ''}${k.modelsEnabled ? '(已勾选 ' + k.modelsEnabled.length + ')' : ''}</span>
       <span class="ops">
         ${k.models && k.models.length ? `<button class="btn btn-sm" data-op="models" data-id="${k.id}">模型勾选</button>` : ''}
         ${k.canBalance ? `<button class="btn btn-sm" data-op="balance" data-id="${k.id}" title="按 Base URL 自动查询余额">查余额</button>` : ''}
@@ -869,6 +872,7 @@ $('apikey-save').onclick = async () => {
     key: $('key-secret').value.trim(),
     baseUrl: $('key-baseurl').value.trim(),
     kind: $('key-kind').value || undefined,
+    protocol: $('key-protocol').value || undefined,
     usageUrl: $('key-usageurl').value.trim(),
   };
   if (editingKeyId) entry.id = editingKeyId; // 编辑态带 id 走更新;secret 留空由主进程保留原值

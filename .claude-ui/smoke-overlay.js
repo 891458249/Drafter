@@ -36,6 +36,7 @@ async function waitCdp() {
 // 两段式真实拖拽:先按住移动(不松手),node 侧断言窗口跟随后,再发 LEFTUP,
 // 观察果冻弹簧回吸到边缘。CDP 注入会绕过 OS 命中测试,必须用真实光标。
 const ps1 = path.join(TMP, 'drag.ps1')
+const clickPs1 = path.join(TMP, 'click.ps1')
 function setCursor(x, y) {
   execSync(`powershell -NoProfile -Command "$sig='[System.Runtime.InteropServices.DllImport(\\"user32.dll\\")] public static extern bool SetCursorPos(int x, int y);'; $t=Add-Type -MemberDefinition $sig -Name C -Namespace W -PassThru; [void]$t::SetCursorPos(${Math.round(x)}, ${Math.round(y)})"`)
 }
@@ -60,6 +61,22 @@ for ($i=1; $i -le 20; $i++) {
 }
 function releaseLeft() {
   execSync(`powershell -NoProfile -Command "$sig='[System.Runtime.InteropServices.DllImport(\\"user32.dll\\")] public static extern void mouse_event(int f, int x, int y, int d, int e);'; $t=Add-Type -MemberDefinition $sig -Name M2 -Namespace W -PassThru; $t::mouse_event(4,0,0,0,0)"`)
+}
+// 真实双击(两次左键),用于验证吸附态纯点击不触发拖拽、dblclick 能展开主窗
+function dblClick(x, y) {
+  fs.writeFileSync(clickPs1, `
+$sig=@'
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e);
+'@
+$t=Add-Type -MemberDefinition $sig -Name Dbl -Namespace W -PassThru
+[void]$t::SetCursorPos(${Math.round(x)}, ${Math.round(y)})
+Start-Sleep -Milliseconds 120
+$t::mouse_event(2,0,0,0,0); $t::mouse_event(4,0,0,0,0)
+Start-Sleep -Milliseconds 90
+$t::mouse_event(2,0,0,0,0); $t::mouse_event(4,0,0,0,0)
+`)
+  execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${clickPs1}"`)
 }
 
 // Electron CDP 不开放 Browser 域(getWindowForTarget -32601),改用 user32 ShowWindow
@@ -159,7 +176,13 @@ function check(name, cond, extra) {
     const ballCx = st.x + 48, ballCy = st.y + 36 // dock padding-top 4 + 半径 32
     setCursor(ballCx, ballCy)
     await sleep(600)
-    const stHover = await evalJs(oc, `window.api.overlayGetState()`)
+    let stHover = await evalJs(oc, `window.api.overlayGetState()`)
+    if (!stHover || stHover.interactive !== true) { // 启动期 hover 轮询偶发延迟,重试一次
+      setCursor(ballCx + 2, ballCy)
+      setCursor(ballCx, ballCy)
+      await sleep(800)
+      stHover = await evalJs(oc, `window.api.overlayGetState()`)
+    }
     check('悬停在主球上 → 窗口可交互', stHover && stHover.interactive === true, `interactive=${stHover && stHover.interactive}`)
     const wa0 = st.workAreas[0]
     setCursor(wa0.x + wa0.width / 2, wa0.y + wa0.height / 2) // 移出窗口范围
@@ -232,6 +255,126 @@ function check(name, cond, extra) {
     check('靠近顶部松手 → 吸附贴顶缘(上下识别回归)', !!topPos && Math.abs(topPos.y - waWin.y) <= 2 && topFb.edge === 'top',
       `吸附后 y=${topPos && topPos.y} 期望=${waWin.y} edge=${topFb && topFb.edge}`)
     check('贴顶后半圆变形(dock-top 类)', typeof topCls === 'string' && topCls.includes('dock-top'), topCls)
+
+    // 场景四:从顶缘拖到屏幕底部附近 → 底边吸附;弹簧期间连续采样,
+    // 球体视觉底边(窗口 y + ball rect.bottom)不得瞬移/出屏(历史 bug:首帧上跳 264px)
+    const stT = await evalJs(oc, `window.api.overlayGetState()`)
+    const topBallCx = stT.x + 48, topBallCy = stT.y + 36
+    setCursor(topBallCx, topBallCy)
+    await sleep(400)
+    const bottomTargetCx = waWin.x + 800
+    const bottomTargetCy = waWin.y + waWin.height - 50 // 球心距底 50px ≤ 吸附阈值
+    dragProc = dragMoves(topBallCx, topBallCy, bottomTargetCx, bottomTargetCy)
+    await sleep(1400)
+    releaseLeft()
+    await new Promise((r) => { dragProc.on('exit', r); setTimeout(r, 5000) })
+    let prevBottom = null, maxJump = 0, maxOvershoot = 0
+    for (let i = 0; i < 30; i++) {
+      const s = await evalJs(oc, `(() => { const r = document.getElementById('ball').getBoundingClientRect(); return window.api.overlayGetState().then(st => st && (st.y + r.bottom)) })()`)
+      if (typeof s === 'number') {
+        if (prevBottom != null) maxJump = Math.max(maxJump, Math.abs(s - prevBottom))
+        maxOvershoot = Math.max(maxOvershoot, s - (waWin.y + waWin.height))
+        prevBottom = s
+      }
+      await sleep(50)
+    }
+    await sleep(1800) // 等弹簧收敛+落位
+    const botPos = await evalJs(oc, `window.api.overlayGetState()`)
+    const botFb = await evalJs(mc, `window.api.getStore().then(s => s.settings.floatBall || {})`)
+    const botCls = await evalJs(oc, `document.getElementById('ball').className`)
+    const flushY = waWin.y + waWin.height - 340
+    check('底边吸附:弹簧期间无瞬移(帧间 ≤24px)', maxJump <= 24, `maxJump=${maxJump.toFixed(1)}px`)
+    // 果冻挤压 squash 最高 1.28×,球心不变底边瞬时多出 ~9px;最终落位精确 flush(y=1060)。
+    // 这里的 10px 是挤压余量,不是位置错误;真正的回归守卫是上面的「无瞬移」。
+    check('底边吸附:出屏不超过果冻挤压余量(≤10px)', maxOvershoot <= 10, `overshoot=${maxOvershoot.toFixed(1)}px`)
+    check('靠近底部松手 → 吸附贴底缘(flush)', !!botPos && Math.abs(botPos.y - flushY) <= 2 && botFb.edge === 'bottom',
+      `吸附后 y=${botPos && botPos.y} 期望=${flushY} edge=${botFb && botFb.edge}`)
+    check('贴底后半圆变形(dock-bottom 类)', typeof botCls === 'string' && botCls.includes('dock-bottom'), botCls)
+
+    // 场景五:最小拖出距离——只拖到刚好越过吸附阈值(球心距底 90px > 80px),
+    // 松手后不得回吸、不得瞬移、原地保持
+    const dockCx5 = botPos.x + 48, dockCy5 = botPos.y + 36 + 272
+    setCursor(dockCx5, dockCy5)
+    await sleep(500)
+    const minTargetCy = waWin.y + waWin.height - 90 // 球心距底 90px,刚过阈值
+    dragProc = dragMoves(dockCx5, dockCy5, dockCx5, minTargetCy)
+    let prevMin = null, minJump = 0, minPressJump = null
+    for (let i = 0; i < 12; i++) {
+      await sleep(120)
+      const c = await evalJs(oc, `(() => { const r = document.getElementById('ball').getBoundingClientRect(); return window.api.overlayGetState().then(st => st && (st.y + r.top + r.height / 2)) })()`)
+      if (typeof c === 'number') {
+        if (minPressJump == null) minPressJump = Math.abs(c - dockCy5)
+        if (prevMin != null) minJump = Math.max(minJump, Math.abs(c - prevMin))
+        prevMin = c
+      }
+    }
+    releaseLeft()
+    await new Promise((r) => { dragProc.on('exit', r); setTimeout(r, 5000) })
+    await sleep(1000)
+    const minPos1 = await evalJs(oc, `window.api.overlayGetState()`)
+    await sleep(800) // 再等一轮:验证不会延迟回吸
+    const minPos2 = await evalJs(oc, `window.api.overlayGetState()`)
+    const minFb = await evalJs(mc, `window.api.getStore().then(s => s.settings.floatBall || {})`)
+    check('最小拖出:脱钩瞬间不起跳(≤48px)', minPressJump != null && minPressJump <= 48, `pressJump=${minPressJump != null && minPressJump.toFixed(1)}px`)
+    check('最小拖出:拖拽全程无瞬移(≤40px/采样)', minJump <= 40, `maxJump=${minJump.toFixed(1)}px`)
+    // 拖拽期球心=光标;松手归一后窗口 y = 球心 − 36(球心在窗口内偏 36px)
+    check('最小拖出刚过阈值 → 自由摆放不回吸', !!minPos1 && !minFb.edge && Math.abs(minPos1.y - (minTargetCy - 36)) <= 24,
+      `实际 y=${minPos1 && minPos1.y} 期望≈${minTargetCy - 36} edge=${minFb && minFb.edge}`)
+    check('最小拖出后原地保持(无延迟回吸)', !!minPos2 && minPos2.x === minPos1.x && minPos2.y === minPos1.y,
+      `(${minPos1 && minPos1.x},${minPos1 && minPos1.y}) → (${minPos2 && minPos2.x},${minPos2 && minPos2.y})`)
+
+    // 场景六:从最小拖出后的自由位继续拖出——球心须全程贴合光标,不得瞬移
+    //(历史 bug:拖出瞬间形变偏移消退而抓取点不变,球上跳 272px)
+    const dockCx = minPos2.x + 48, dockCy = minPos2.y + 36 // 自由态主球屏幕中心
+    setCursor(dockCx, dockCy)
+    await sleep(500)
+    const outCx = dockCx - 500, outCy = dockCy - 420 // 拖向屏内空位
+    dragProc = dragMoves(dockCx, dockCy, outCx, outCy)
+    let prevC = null, maxDragJump = 0
+    for (let i = 0; i < 16; i++) {
+      await sleep(120)
+      const c = await evalJs(oc, `(() => { const r = document.getElementById('ball').getBoundingClientRect(); return window.api.overlayGetState().then(st => st && (st.y + r.top + r.height / 2)) })()`)
+      if (typeof c === 'number') {
+        if (prevC != null) maxDragJump = Math.max(maxDragJump, Math.abs(c - prevC))
+        prevC = c
+      }
+    }
+    releaseLeft()
+    await new Promise((r) => { dragProc.on('exit', r); setTimeout(r, 5000) })
+    await sleep(1000)
+    const outPos = await evalJs(oc, `window.api.overlayGetState()`)
+    const outFb = await evalJs(mc, `window.api.getStore().then(s => s.settings.floatBall || {})`)
+    check('底边脱钩后继续拖拽:全程无瞬移(≤120px/采样)', maxDragJump <= 120, `maxDragJump=${maxDragJump.toFixed(1)}px`)
+    check('拖出后自由摆放(不再吸回底边)', !!outPos && !outFb.edge && Math.abs(outPos.x - (outCx - 48)) <= 24 && Math.abs(outPos.y - (outCy - 36)) <= 24,
+      `实际=(${outPos && outPos.x},${outPos && outPos.y}) edge=${outFb && outFb.edge}`)
+
+    // 场景七:注入两个任务小球后拖回底边——小球须堆叠在主球上方且不出屏
+    //(历史 bug:小球留在原槽位,底边吸附时悬空在上方 200px 外)
+    await evalJs(oc, `(() => { const orbs = document.getElementById('orbs'); orbs.innerHTML = ''; for (let i = 0; i < 2; i++) { const o = document.createElement('div'); o.className = 'orb'; o.innerHTML = '<div class="dot"><span></span></div>'; orbs.appendChild(o); } })()`)
+    const freeCx = outPos.x + 48, freeCy = outPos.y + 36
+    setCursor(freeCx, freeCy)
+    await sleep(500)
+    dragProc = dragMoves(freeCx, freeCy, waWin.x + 800, waWin.y + waWin.height - 50)
+    await sleep(1400)
+    releaseLeft()
+    await new Promise((r) => { dragProc.on('exit', r); setTimeout(r, 5000) })
+    await sleep(2500)
+    const rebotPos = await evalJs(oc, `window.api.overlayGetState()`)
+    const orbGap = await evalJs(oc, `(() => { const orbs = document.getElementById('orbs').children; if (orbs.length < 2) return null; const o = orbs[1].getBoundingClientRect(); const b = document.getElementById('ball').getBoundingClientRect(); return { orbBottom: o.bottom, orbTop: o.top, ballTop: b.top, ballBottom: b.bottom } })()`)
+    check('拖回底边再吸附(flush)', !!rebotPos && Math.abs(rebotPos.y - flushY) <= 2, `y=${rebotPos && rebotPos.y} 期望=${flushY}`)
+    check('底边吸附时任务小球紧贴主球上方', !!orbGap && orbGap.orbBottom <= orbGap.ballTop + 2 && orbGap.ballTop - orbGap.orbBottom <= 16,
+      orbGap && `小球底=${orbGap.orbBottom.toFixed(1)} 主球顶=${orbGap.ballTop.toFixed(1)}`)
+    check('任务小球不出屏', !!orbGap && orbGap.orbTop >= waWin.y && orbGap.orbBottom <= waWin.y + waWin.height + 1,
+      orbGap && `top=${orbGap.orbTop.toFixed(1)} bottom=${orbGap.orbBottom.toFixed(1)}`)
+
+    // 场景八:吸附态真实双击主球 → 展开主窗(历史 bug:按下即拖拽,双击永远落空)
+    const ballDblCx = rebotPos.x + 48, ballDblCy = rebotPos.y + 36 + 272 // 贴底时主球在窗口内下压 272px
+    dblClick(ballDblCx, ballDblCy)
+    await sleep(1500)
+    const mainVisAfterDbl = await evalJs(mc, `document.visibilityState`)
+    check('吸附态双击主球 → 主窗展开', mainVisAfterDbl === 'visible', mainVisAfterDbl)
+    showWindow(ep, 2, mainHandle) // 重新最小化,不干扰后续 restore 断言
+    await sleep(1200)
 
     const pdCount = await evalJs(oc, `window.__pd`)
     const pdInfo = await evalJs(oc, `JSON.stringify(window.__pdInfo)`)

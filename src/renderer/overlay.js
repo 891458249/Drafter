@@ -142,10 +142,24 @@ function morphRadius(p) {
     default:       return `32px 32px ${q}px ${q}px`;
   }
 }
+// 任务小球的贴边跟随:底边停靠时主球已下压 272px,任务球要堆叠到主球上方,
+// 否则悬在原槽位半空(实测底边吸附时小球距主球 200+px);拖拽中整体跟随主球
+// 偏移,松手时随 dragVisualOffset 一起归一,与主球的窗口补偿同帧完成。
+function orbsOffset(m) {
+  if (dragVisualOffset) return m;
+  if (dockedEdge === 'bottom' && m.y > 0) {
+    const n = orbsEl.childElementCount;
+    const stack = n ? n * 46 - 6 : 0; // .orb 40px + 6px 间距
+    return { x: 0, y: Math.max(192 - stack, -72) * (m.y / 272) };
+  }
+  return m;
+}
 function applyBallVisual() {
   const m = dragVisualOffset || morphOffset(morphP);
   ball.style.transform = `translate(${m.x}px, ${m.y}px) scale(${squash.sx}, ${squash.sy})`;
   ball.style.borderRadius = morphRadius(morphP);
+  const o = orbsOffset(m);
+  orbsEl.style.transform = (o.x || o.y) ? `translate(${o.x}px, ${o.y}px)` : '';
 }
 function applyDockClass() {
   // .dock-* 仅作状态标记(冒烟断言/样式兜底),视觉由 applyBallVisual 逐帧驱动
@@ -178,8 +192,9 @@ function reportRegions() {
   // 贴边时球在窗口内向边缘平移(见 morphOffset),区域随之调整
   const m = dragVisualOffset || morphOffset(morphP);
   const ballRect = { x: BALL.ox + m.x, y: BALL.oy + m.y, w: BALL.w, h: BALL.h };
+  const o = orbsOffset(m); // 与 orbsEl 的实际 transform 一致,命中区域才点得中
   const regions = [ballRect];
-  for (let i = 0; i < n; i++) regions.push({ x: 28, y: 76 + i * 46, w: 40, h: 40 });
+  for (let i = 0; i < n; i++) regions.push({ x: 28 + o.x, y: 76 + i * 46 + o.y, w: 40, h: 40 });
   api.overlaySetRegions({ regions });
 }
 
@@ -188,6 +203,9 @@ function reportRegions() {
 let dragging = false;
 let lastMove = null;      // {x, y, t} 指针速度估算
 let dragVel = { x: 0, y: 0 };
+let dragStarted = false;  // 移动超死区后才真正开始(此前不通知主进程,纯点击不重吸附)
+let grabStart = null;     // 按下时的窗口相对坐标
+let prevDock = null;      // 按下时的吸附形态;纯点击松手时恢复,保证 dblclick 目标静止
 
 function setSquash(vx, vy, dominantAxis) {
   const sp = Math.hypot(vx, vy);
@@ -202,6 +220,9 @@ ball.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || dragging || dragVisualOffset) return;
   e.preventDefault();
   dragging = true;
+  dragStarted = false;
+  grabStart = { x: e.clientX, y: e.clientY };
+  prevDock = { edge: dockedEdge, morphP };
   if (springRAF) { cancelAnimationFrame(springRAF); springRAF = null; }
   dragVisualOffset = morphOffset(morphP);
   animateUndock();          // 只圆回形状,保持球体在窗口内的偏移
@@ -210,11 +231,17 @@ ball.addEventListener('pointerdown', (e) => {
   window.__orbDragStart = true; // 冒烟/排障探针
   lastMove = { x: e.clientX, y: e.clientY, t: performance.now() };
   dragVel = { x: 0, y: 0 };
-  api.overlayDragStart({ dx: e.clientX, dy: e.clientY, offset: dragVisualOffset });
 });
 
 ball.addEventListener('pointermove', (e) => {
   if (!dragging || !lastMove) return;
+  // 6px 死区:纯点击(含 dblclick)不启动主进程拖拽轮询,吸附形态原地保持,
+  // 目标不移动才能凑齐双击;此前按下即启动,松开必触发一轮解除+重吸附动画。
+  if (!dragStarted) {
+    if (Math.hypot(e.clientX - grabStart.x, e.clientY - grabStart.y) <= 6) return;
+    dragStarted = true;
+    api.overlayDragStart({ dx: grabStart.x, dy: grabStart.y, offset: dragVisualOffset });
+  }
   const now = performance.now();
   const dt = Math.max(1, now - lastMove.t) / 1000;
   // 指数平滑限速,避免指针跳变
@@ -241,6 +268,18 @@ async function endDrag(e) {
   dragging = false;
   ball.classList.remove('dragging');
   if (undockRAF) { cancelAnimationFrame(undockRAF); undockRAF = null; }
+  if (!dragStarted) {
+    // 纯点击:未通知主进程,无需归一;恢复按下时的吸附形态(undock 只动了圆角),
+    // 球体全程静止,click/dblclick 才能落在同一目标上
+    dragVisualOffset = null;
+    if (prevDock && prevDock.edge) { dockedEdge = prevDock.edge; morphP = prevDock.morphP; }
+    prevDock = null;
+    squash = { sx: 1, sy: 1 };
+    applyBallVisual();
+    applyDockClass();
+    reportRegions();
+    return;
+  }
   squash = { sx: 1, sy: 1 };
   applyBallVisual();
   // 主进程把窗口平移补偿回普通球坐标;随后去掉同一视觉偏移,屏幕落点不变。
@@ -248,6 +287,7 @@ async function endDrag(e) {
   dragVisualOffset = null;
   morphP = 0;
   dockedEdge = null;
+  prevDock = null;
   applyBallVisual();
   applyDockClass();
   reportRegions();
@@ -296,7 +336,12 @@ function springTo(x, y, wa) {
       squash = dominantX ? { sx: s, sy: p } : { sx: p, sy: s };
     }
     applyBallVisual();
-    api.overlaySetPos({ x: px, y: py, edge: target.edge });
+    // 形变偏移必须实时折算进窗口坐标:球体视觉位置 = 窗口 + 槽位 + 形变,
+    // 不扣除的话「窗口沿弹簧路径移动 + 球体在窗口内下压」会叠加成瞬移/出屏
+    //(底部形变 272px,实测首帧上跳 264px 再吸回);edge 只在 dock 时给主进程,
+    // 弹簧期间走自由夹取,主进程不得提前把窗口钉到边缘。
+    const m = morphOffset(morphP);
+    api.overlaySetPos({ x: px - m.x, y: py - m.y });
     if (done) {
       squash = { sx: 1, sy: 1 };
       morphP = 1;

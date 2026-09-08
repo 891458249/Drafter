@@ -58,6 +58,22 @@ function guessKind(key) {
   return /^sk-ant-/i.test(key || '') ? 'apiKey' : 'authToken';
 }
 
+// 会话运行时协议(v0.15.0):anthropic = claude.exe 直连(默认);
+// openai = 经 oai-proxy 本地翻译层走 OpenAI Chat Completions。
+// 与 kind(认证头)正交。仅按 host 猜测,存疑一律 anthropic(现状行为)。
+function guessProtocol(baseUrl) {
+  try {
+    const host = new URL(baseUrl || '').hostname.toLowerCase();
+    if (host === 'api.openai.com') return 'openai';
+  } catch {}
+  return 'anthropic';
+}
+
+// buildEnv 路由判定:pure function,供 main.js 与单测
+function endpointOf(key) {
+  return { viaProxy: (key && key.protocol) === 'openai' };
+}
+
 // save: { id?, name, key, baseUrl?, kind?, usageUrl?, ... } → 保存后返回脱敏列表
 function save(entry) {
   ensureMigrated();
@@ -74,6 +90,7 @@ function save(entry) {
     key: entry.key !== undefined && String(entry.key).trim() !== '' ? String(entry.key).trim() : (prev.key || ''), // 编辑时留空 = 保留原 secret
     baseUrl: entry.baseUrl !== undefined ? String(entry.baseUrl || '').trim() : (prev.baseUrl || ''),
     kind: entry.kind || prev.kind || guessKind(entry.key || prev.key),
+    protocol: ['anthropic', 'openai'].includes(entry.protocol) ? entry.protocol : guessProtocol(entry.baseUrl !== undefined ? entry.baseUrl : prev.baseUrl), // 「自动」= 按当前 baseUrl 重新猜
     usageUrl,
     models: prev.models || [],
     modelsAt: prev.modelsAt || 0,
@@ -322,4 +339,4 @@ function setModelsEnabled(id, enabled) {
   return { ok: true };
 }
 
-module.exports = { list, save, remove, setActive, setEnabled, activeKey, byId, activeModels, enabledModels, refreshModels, setModelsEnabled, queryBalance, balanceProvider, modelType, apiRoot, filterMainstreamModels };
+module.exports = { list, save, remove, setActive, setEnabled, activeKey, byId, activeModels, enabledModels, refreshModels, setModelsEnabled, queryBalance, balanceProvider, modelType, apiRoot, filterMainstreamModels, guessProtocol, endpointOf };
