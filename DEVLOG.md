@@ -473,3 +473,9 @@ Git 工作流:
 - 测试:oai-translate 10 例 + oai-proxy 5 例(认证/路由/流式/count_tokens/429 透传)+ oai-proxy-live 1 例(真实 claude.exe 经代理打假 OpenAI 后端,工具回路 Bash echo 真实执行+usage 记账)+ keys protocol 1 例;npm test 303/303
 - 坑:①server.close 回调被 undici keep-alive 长连挡住,stop() 须先 closeAllConnections;②Claude Code 首轮并行发标题生成请求(无工具表),live 断言要按「带 tools」定位主循环请求
 - 明确不做:Gemini 原生协议(protocol 字段可扩展,后续单开)、Responses API、prompt caching/thinking 映射(丢弃即可)
+
+### v0.15.2(未发布)— API Key 预设扩充至 12 家主流提供方 + Gemini 预设修复
+- 预设:Anthropic 官方(baseUrl 留空)/Kuro/Kimi/Deepseek/GLM 智谱(open.bigmodel.cn/api/anthropic)/MiniMax(api.minimaxi.com/anthropic)/ChatGPT/Gemini/通义千问(dashscope compatible-mode)/OpenRouter/Grok(xAI)/硅基流动;OpenAI 协议家的预设带 protocol:'openai' 自动走翻译代理
+- Gemini 预设修复(遗留坑:原生 API 要 x-goog-api-key,x-api-key 必 401)——改走 OpenAI 兼容层 generativelanguage.googleapis.com/v1beta/openai + Bearer;配套 oai-translate 新增 oaiUrl():baseUrl 以 /openai 结尾直接拼 /<path>,其余归一 /v1/<path>;oai-proxy 与 aux-models 统一改用
+- keys.js guessProtocol 扩展:openrouter/x.ai/groq/mistral/siliconflow/dashscope/googleapis 自动 openai;api.deepseek.com 按 path 双协议(/anthropic→anthropic,根→openai)
+- 测试:guessProtocol 新主机 + oaiUrl 拼接各 1 例;npm test 305/305

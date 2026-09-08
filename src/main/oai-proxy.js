@@ -99,7 +99,7 @@ async function pipeStream(upstreamRes, res, model) {
 }
 
 async function handleMessages(req, res, keyEntry, body) {
-  const upstream = `${keys.apiRoot(keyEntry.baseUrl)}/v1/chat/completions`;
+  const upstream = tr.oaiUrl(keyEntry.baseUrl, 'chat/completions');
   const oaiBody = tr.translateRequest(body);
   let up;
   try {

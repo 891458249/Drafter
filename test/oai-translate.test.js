@@ -186,3 +186,14 @@ test('错误透传:余额类 429 改写 402(防 claude.exe 静默重试);真限�
   assert.strictEqual(e500.status, 500);
   assert.strictEqual(e500.body.error.message, 'HTTP 500', '无 body 时兜底状态码');
 });
+
+test('oaiUrl:标准端点补 /v1,Gemini OpenAI 兼容层(/openai 结尾)直接拼', () => {
+  assert.strictEqual(tr.oaiUrl('https://api.openai.com', 'chat/completions'), 'https://api.openai.com/v1/chat/completions');
+  assert.strictEqual(tr.oaiUrl('https://api.openai.com/v1', 'chat/completions'), 'https://api.openai.com/v1/chat/completions', '自带 /v1 不重复');
+  assert.strictEqual(tr.oaiUrl('https://openrouter.ai/api/v1/', 'models'), 'https://openrouter.ai/api/v1/models');
+  assert.strictEqual(tr.oaiUrl('https://generativelanguage.googleapis.com/v1beta/openai', 'chat/completions'),
+    'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', 'Gemini 兼容层不带 /v1');
+  assert.strictEqual(tr.oaiUrl('https://generativelanguage.googleapis.com/v1beta/openai/', 'models'),
+    'https://generativelanguage.googleapis.com/v1beta/openai/models');
+  assert.strictEqual(tr.oaiUrl('http://127.0.0.1:8080', 'models?limit=100'), 'http://127.0.0.1:8080/v1/models?limit=100');
+});

@@ -5,6 +5,7 @@
 // 本模块不依赖 electron(便于单测 mock fetch),key 解析由调用方注入(keysById)。
 const fs = require('fs');
 const path = require('path');
+const { oaiUrl } = require('./oai-translate');
 
 const MAX_MEDIA_BYTES = 20 * 1024 * 1024; // 媒体附件读取上限,超限不做分析
 const HTTP_TIMEOUT_MS = 90000; // 大体积 base64 上传 + 多模态推理较慢,超时放宽
@@ -83,7 +84,7 @@ async function analyzeMedia(keyEntry, model, { name, mediaKind, filePath, data, 
     ? '请详细描述这段音频的内容(语音内容请转写成文字),用于提供给另一个 AI 助手作为上下文。'
     : '请详细描述这张图片的内容,用于提供给另一个 AI 助手作为上下文。';
   try {
-    const { res, json } = await fetchJson(`${apiRoot(keyEntry.baseUrl)}/v1/chat/completions`, {
+    const { res, json } = await fetchJson(oaiUrl(keyEntry.baseUrl, 'chat/completions'), {
       headers: authHeaders(keyEntry),
       body: { model, messages: [{ role: 'user', content: [mediaBlock, { type: 'text', text: prompt }] }] },
     });

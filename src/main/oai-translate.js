@@ -293,8 +293,18 @@ function translateError(status, json) {
   return { status, body: { type: 'error', error: { type, message } } };
 }
 
+// --- OpenAI 兼容端点 URL 拼接 ---------------------------------------------------
+// 多数服务是 <root>/v1/<path>(root 可能自带 /v1 后缀,先归一);
+// Gemini OpenAI 兼容层等 baseUrl 已带版本段且以 /openai 结尾
+// (https://generativelanguage.googleapis.com/v1beta/openai),直接拼 /<path>。
+function oaiUrl(baseUrl, p) {
+  const root = (baseUrl || '').replace(/\/+$/, '').replace(/\/v1$/i, '');
+  if (/\/openai$/i.test(root)) return `${root}/${p}`;
+  return `${root}/v1/${p}`;
+}
+
 module.exports = {
-  translateRequest, translateResponse, createStreamTranslator, translateError,
+  translateRequest, translateResponse, createStreamTranslator, translateError, oaiUrl,
   // 暴露内部给单测细查
   systemText, contentToOpenAI, toolResultParts, translateMessages, translateTools, translateToolChoice,
 };

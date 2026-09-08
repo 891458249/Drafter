@@ -539,11 +539,18 @@ $('perms-close').onclick = () => $('perms-modal').classList.add('hidden');
 // ---------------------------------------------------------------------------
 // Key 预设:一键预填名称/Base URL/类型(secret 不预填,字段保持可编辑)
 const KEY_PRESETS = {
+  anthropic: { name: 'Anthropic 官方', baseUrl: '', kind: '' }, // 留空 baseUrl = api.anthropic.com;kind 自动(sk-ant→API Key)
   kuro: { name: 'Kuro', baseUrl: 'https://ai-gateway.kurogames.com', kind: 'authToken' },
   kimi: { name: 'Kimi', baseUrl: 'https://api.kimi.com/coding/v1', kind: 'authToken' },
   deepseek: { name: 'Deepseek', baseUrl: 'https://api.deepseek.com/anthropic', kind: 'authToken' },
-  gemini: { name: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com', kind: 'apiKey' },
+  glm: { name: 'GLM 智谱', baseUrl: 'https://open.bigmodel.cn/api/anthropic', kind: 'authToken' },
+  minimax: { name: 'MiniMax', baseUrl: 'https://api.minimaxi.com/anthropic', kind: 'authToken' },
   chatgpt: { name: 'ChatGPT', baseUrl: 'https://api.openai.com', kind: 'authToken', protocol: 'openai' }, // OpenAI 只认 Bearer,x-api-key 必 401;会话走翻译代理
+  gemini: { name: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', kind: 'authToken', protocol: 'openai' }, // OpenAI 兼容层;原生 API 的 x-goog-api-key 不支持
+  qwen: { name: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', kind: 'authToken', protocol: 'openai' },
+  openrouter: { name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', kind: 'authToken', protocol: 'openai' },
+  grok: { name: 'Grok (xAI)', baseUrl: 'https://api.x.ai/v1', kind: 'authToken', protocol: 'openai' },
+  siliconflow: { name: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', kind: 'authToken', protocol: 'openai' },
 };
 for (const btn of document.querySelectorAll('#apikey-modal [data-preset]')) {
   btn.onclick = () => {

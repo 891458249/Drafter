@@ -382,3 +382,19 @@ test('refreshModels: /my-models/api 404 时回退 /v1/models 且 modelGroups 置
     global.fetch = origFetch;
   }
 });
+
+test('protocol:主流 OpenAI 协议主机自动识别(v0.15.2 预设配套)', () => {
+  for (const u of [
+    'https://api.openai.com', 'https://openrouter.ai/api/v1', 'https://api.x.ai/v1',
+    'https://api.groq.com/openai/v1', 'https://api.mistral.ai/v1',
+    'https://api.siliconflow.cn/v1', 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    'https://generativelanguage.googleapis.com/v1beta/openai',
+  ]) assert.strictEqual(keys.guessProtocol(u), 'openai', u);
+  // Deepseek 双协议:/anthropic 直连,根路径 OpenAI 兼容
+  assert.strictEqual(keys.guessProtocol('https://api.deepseek.com/anthropic'), 'anthropic');
+  assert.strictEqual(keys.guessProtocol('https://api.deepseek.com'), 'openai');
+  assert.strictEqual(keys.guessProtocol('https://api.deepseek.com/v1'), 'openai');
+  // Anthropic 协议的国产 Coding 端点保持 anthropic
+  assert.strictEqual(keys.guessProtocol('https://open.bigmodel.cn/api/anthropic'), 'anthropic');
+  assert.strictEqual(keys.guessProtocol('https://api.minimaxi.com/anthropic'), 'anthropic');
+});

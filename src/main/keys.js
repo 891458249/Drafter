@@ -6,6 +6,7 @@
 // Renderer never receives full keys — only hints (…last4).
 const crypto = require('crypto');
 const store = require('./store');
+const { oaiUrl } = require('./oai-translate');
 
 const OFFICIAL_API = 'https://api.anthropic.com';
 
@@ -60,11 +61,18 @@ function guessKind(key) {
 
 // 会话运行时协议(v0.15.0):anthropic = claude.exe 直连(默认);
 // openai = 经 oai-proxy 本地翻译层走 OpenAI Chat Completions。
-// 与 kind(认证头)正交。仅按 host 猜测,存疑一律 anthropic(现状行为)。
+// 与 kind(认证头)正交。按 host(及个别 path)猜测,存疑一律 anthropic(现状行为)。
+const OPENAI_PROTOCOL_HOSTS = new Set([
+  'api.openai.com', 'openrouter.ai', 'api.x.ai', 'api.groq.com', 'api.mistral.ai',
+  'api.siliconflow.cn', 'dashscope.aliyuncs.com', 'generativelanguage.googleapis.com',
+]);
 function guessProtocol(baseUrl) {
   try {
-    const host = new URL(baseUrl || '').hostname.toLowerCase();
-    if (host === 'api.openai.com') return 'openai';
+    const u = new URL(baseUrl || '');
+    const host = u.hostname.toLowerCase();
+    // Deepseek 双协议:/anthropic 走 Anthropic 直连,根路径是 OpenAI 兼容
+    if (host === 'api.deepseek.com') return u.pathname.toLowerCase().includes('/anthropic') ? 'anthropic' : 'openai';
+    if (OPENAI_PROTOCOL_HOSTS.has(host)) return 'openai';
   } catch {}
   return 'anthropic';
 }
@@ -179,14 +187,13 @@ function pruneEnabled(enabled, models) {
 }
 
 async function fetchModels(entry) {
-  const base = apiRoot(entry.baseUrl);
   const headers = { 'anthropic-version': '2023-06-01' };
   if (entry.kind === 'authToken') headers['authorization'] = `Bearer ${entry.key}`;
   else headers['x-api-key'] = entry.key;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 12000);
   try {
-    const res = await fetch(`${base}/v1/models?limit=100`, { headers, signal: ctrl.signal });
+    const res = await fetch(oaiUrl(entry.baseUrl, 'models?limit=100'), { headers, signal: ctrl.signal });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     const json = await res.json();
     const raw = (json.data || json.models || []).map((m) => m.id).filter(Boolean);
