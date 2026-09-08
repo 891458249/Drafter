@@ -141,9 +141,9 @@ test('count_tokens:粗略估算,不打扰上游', async () => {
   assert.strictEqual(seenRequests.length, before, 'count_tokens 不应请求上游');
 });
 
-test('错误透传:上游 429 原文保留在 Anthropic 错误体里', async () => {
+test('错误透传:上游余额 429 改写 402,原文保留在 Anthropic 错误体里', async () => {
   const r = await call('/k_oai/v1/messages', { body: { model: 'err-429', max_tokens: 1, messages: [] } });
-  assert.strictEqual(r.status, 429);
+  assert.strictEqual(r.status, 402, '余额耗尽应映射 402,避免 claude.exe 静默重试');
   const json = await r.json();
   assert.strictEqual(json.type, 'error');
   assert.ok(json.error.message.includes('no credits remaining'));

@@ -274,18 +274,23 @@ function createStreamTranslator(model) {
 }
 
 // --- 错误透传:OpenAI 错误体 → Anthropic 错误格式(保留原始 message) -------------
+// 返回 { status, body };status 可能被改写:
+//  - 余额/配额类(429 insufficient_quota / credit_balance_exceeded)→ 402。
+//    claude.exe 对 HTTP 429 会静默指数退避重试数分钟(UI 表现为「已发送,等待响应」
+//    卡死),而余额耗尽重试无意义;402 不可重试,错误原文立即显示给用户。
 
 function translateError(status, json) {
   const src = (json && json.error) || {};
   const message = src.message || (json && json.message) || `HTTP ${status}`;
+  const isBilling = src.type === 'insufficient_quota' || src.code === 'credit_balance_exceeded' || src.code === 'billing_hard_limit_reached';
+  if (isBilling) return { status: 402, body: { type: 'error', error: { type: 'billing_error', message } } };
   let type = 'api_error';
   if (status === 401) type = 'authentication_error';
   else if (status === 403) type = 'permission_error';
   else if (status === 404) type = 'not_found_error';
   else if (status === 429) type = src.code === 'rate_limit_exceeded' ? 'rate_limit_error' : 'api_error';
   else if (status === 400) type = 'invalid_request_error';
-  else if (status >= 500) type = 'api_error';
-  return { type: 'error', error: { type, message } };
+  return { status, body: { type: 'error', error: { type, message } } };
 }
 
 module.exports = {

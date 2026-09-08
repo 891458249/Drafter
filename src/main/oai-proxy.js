@@ -114,7 +114,8 @@ async function handleMessages(req, res, keyEntry, body) {
   if (!up.ok) {
     let json = null;
     try { json = await up.json(); } catch {}
-    return sendJson(res, up.status, tr.translateError(up.status, json));
+    const terr = tr.translateError(up.status, json);
+    return sendJson(res, terr.status, terr.body);
   }
   if (body.stream) return pipeStream(up, res, body.model);
   try {

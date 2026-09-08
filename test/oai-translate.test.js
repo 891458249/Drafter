@@ -171,11 +171,18 @@ test('流式:多个并行 tool_calls 按 index 归属;stop finish → end_turn',
   assert.strictEqual(ev2.find((e) => e.type === 'message_delta').delta.stop_reason, 'end_turn');
 });
 
-test('错误透传:429 保留上游原文;401/404 归类', () => {
-  const e429 = tr.translateError(429, { error: { message: 'You have no credits remaining.', type: 'insufficient_quota', code: 'credit_balance_exhausted' } });
-  assert.strictEqual(e429.type, 'error');
-  assert.ok(e429.error.message.includes('no credits remaining'), '余额不足原文必须可见');
-  assert.strictEqual(tr.translateError(401, { error: { message: 'bad key' } }).error.type, 'authentication_error');
-  assert.strictEqual(tr.translateError(404, { error: { message: 'no model' } }).error.type, 'not_found_error');
-  assert.strictEqual(tr.translateError(500, null).error.message, 'HTTP 500', '无 body 时兜底状态码');
+test('错误透传:余额类 429 改写 402(防 claude.exe 静默重试);真限流保持 429', () => {
+  const e = tr.translateError(429, { error: { message: 'You have no credits remaining.', type: 'insufficient_quota', code: 'credit_balance_exceeded' } });
+  assert.strictEqual(e.status, 402, '余额耗尽须映射为不可重试的 402');
+  assert.strictEqual(e.body.type, 'error');
+  assert.strictEqual(e.body.error.type, 'billing_error');
+  assert.ok(e.body.error.message.includes('no credits remaining'), '余额不足原文必须可见');
+  const rl = tr.translateError(429, { error: { message: 'slow down', code: 'rate_limit_exceeded' } });
+  assert.strictEqual(rl.status, 429, '真限流保持 429 让客户端正常退避');
+  assert.strictEqual(rl.body.error.type, 'rate_limit_error');
+  assert.strictEqual(tr.translateError(401, { error: { message: 'bad key' } }).body.error.type, 'authentication_error');
+  assert.strictEqual(tr.translateError(404, { error: { message: 'no model' } }).body.error.type, 'not_found_error');
+  const e500 = tr.translateError(500, null);
+  assert.strictEqual(e500.status, 500);
+  assert.strictEqual(e500.body.error.message, 'HTTP 500', '无 body 时兜底状态码');
 });
