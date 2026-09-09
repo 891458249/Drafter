@@ -18,10 +18,11 @@ const CASES = [
   ['claude-opus-4-8', 1_000_000], ['claude-opus-4-6', 1_000_000], ['claude-opus-5', 1_000_000],
   ['claude-sonnet-5', 1_000_000], ['claude-sonnet-4-6', 1_000_000],
   ['claude-sonnet-4-5', 200_000], ['claude-haiku-4-5', 200_000], ['claude-3-5-sonnet-20241022', 200_000],
-  // Kimi 256K(实测 kimi-for-coding = 262144)
-  ['kimi-k3', 262_144], ['kimi-for-coding', 262_144], ['kimi-k2.5', 262_144], ['moonshot-v1', 262_144],
-  // DeepSeek 128K
-  ['deepseek-chat', 131_072], ['deepseek-reasoner', 131_072],
+  // Kimi:K3 = 1M(2026-07 官方);K2.x/kimi-for-coding = 256K(harness 实报验证)
+  ['kimi-k3', 1_048_576], ['kimi-k3-0716', 1_048_576], ['k3', 1_048_576],
+  ['kimi-for-coding', 262_144], ['kimi-k2.5', 262_144], ['moonshot-v1', 262_144],
+  // DeepSeek:V4 系 1M;V3.x 128K
+  ['deepseek-v4-flash', 1_048_576], ['deepseek-chat', 131_072], ['deepseek-reasoner', 131_072],
   // GLM:5.3+ 1M;4.6/5.0 200K
   ['glm-5.3', 1_000_000], ['glm-6', 1_000_000], ['glm-4.6', 204_800], ['glm-5', 204_800],
   // MiniMax:M1/M3 1M;M2 系 200K
@@ -47,7 +48,8 @@ test('modelCtxMax:各厂商模型窗口匹配', () => {
 // v0.15.5:result.modelUsage.contextWindow 是 claude.exe 本地注册表算的,
 // 对第三方网关模型一律回退默认 200000——effectiveCtxWindow 用实表纠正。
 test('effectiveCtxWindow:表命中纠正 claude.exe 的 200k 误报', () => {
-  assert.strictEqual(effectiveCtxWindow('kimi-k3', 200000), 262144, 'kimi-k3 实报 200k → 纠正为 256k');
+  assert.strictEqual(effectiveCtxWindow('kimi-k3', 200000), 1048576, 'kimi-k3 实报 200k → 纠正为官方 1M');
+  assert.strictEqual(effectiveCtxWindow('kimi-for-coding', 200000), 262144, 'kimi-for-coding 实报 200k → 纠正为 256k');
   assert.strictEqual(effectiveCtxWindow('deepseek-chat', 200000), 131072, 'deepseek 实报 200k → 纠正为 128k');
   assert.strictEqual(effectiveCtxWindow('claude-opus-4-8', 200000), 1000000, 'opus-4.8 旧实报 200k → 纠正为 1M(GA)');
   assert.strictEqual(effectiveCtxWindow('claude-sonnet-5', 1000000), 1000000);

@@ -12,8 +12,10 @@
 // 表值来源(2026-09-09 各厂商官方文档调研,详见 DEVLOG v0.15.4):
 // - Anthropic 官方:Fable 5 / Mythos 5 / Opus 4.6-4.8 / Sonnet 5 / Sonnet 4.6 = 1M(GA);
 //   Haiku 4.5 及更早模型 = 200K
-// - Moonshot Kimi:K2.x / K3 全系 = 256K(harness 实报 262144 交叉验证)
-// - DeepSeek:V3.x API(deepseek-chat/reasoner)= 128K(官方文档)
+// - Moonshot Kimi:K3 = 1M(2026-07 发布,KDA 混合线性注意力,官方 1,048,576);
+//   K2.x 系(含 kimi-for-coding)= 256K(harness 实报 262144 交叉验证);
+//   注意部分第三方宿主会截断(Databricks 205K / Bitdeer 262K),官方端才是 1M
+// - DeepSeek:V3.x API(deepseek-chat/reasoner)= 128K(官方文档);V4 系 = 1M
 // - 智谱 GLM:4.6 / 5.0-5.2 ≈ 200K;5.3 起 = 1M
 // - MiniMax:M2 系 = 200K;M1 / M3 = 1M
 // - OpenAI:GPT-5.5 起 = 1.05M;GPT-5 初代 / Codex 系 = 400K
@@ -30,9 +32,11 @@ var MODEL_CTX_TABLE = [
   [/gpt-5|codex|\bo[34]/i, 400000],
   // Google
   [/gemini/i, 1048576],
-  // Moonshot Kimi
+  // Moonshot Kimi:K3 = 1M 先于通用 kimi 规则
+  [/kimi-?k3|\bk3\b/i, 1048576],
   [/kimi|moonshot/i, 262144],
-  // DeepSeek
+  // DeepSeek:V4 系 1M 先于通用规则
+  [/deepseek-?v?4/i, 1048576],
   [/deepseek/i, 131072],
   // 智谱 GLM
   [/glm-?5\.[3-9]|glm-?[6-9]/i, 1000000],

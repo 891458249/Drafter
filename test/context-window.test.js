@@ -85,7 +85,7 @@ test('纠正 claude.exe 默认 200k:网关模型按实表', () => {
     },
   });
   const ev = sent.map((p) => p.ev).find((e) => e && e.type === 'result');
-  assert.strictEqual(ev.contextWindowMax, 262144, 'kimi-k3 的 200k 误报应纠正为 256k');
+  assert.strictEqual(ev.contextWindowMax, 1048576, 'kimi-k3 的 200k 误报应纠正为官方 1M');
 });
 
 test('纠正 claude.exe 默认 200k:Claude 新代模型按实表 1M', () => {
@@ -104,16 +104,16 @@ test('纠正 claude.exe 默认 200k:Claude 新代模型按实表 1M', () => {
 
 test('主模型条目优先:子 Agent 大窗口不污染主会话分母', () => {
   const { live, sent } = makeSession();
-  live.meta.model = 'kimi-k3';
+  live.meta.model = 'deepseek-chat';
   live._handleMessage({
     type: 'result',
     subtype: 'success',
     modelUsage: {
-      'kimi-k3': { contextWindow: 200000, inputTokens: 1, outputTokens: 1 },
+      'deepseek-chat': { contextWindow: 200000, inputTokens: 1, outputTokens: 1 },
       'claude-opus-4-8': { contextWindow: 1000000, inputTokens: 1, outputTokens: 1 },
     },
   });
   const ev = sent.map((p) => p.ev).find((e) => e && e.type === 'result');
-  assert.strictEqual(ev.contextWindowMax, 262144, '应取主模型 kimi-k3 的 256k 而非子 Agent 的 1M');
+  assert.strictEqual(ev.contextWindowMax, 131072, '应取主模型 deepseek-chat 的 128k 而非子 Agent 的 1M');
 });
 
