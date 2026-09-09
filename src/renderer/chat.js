@@ -1103,7 +1103,11 @@ export function renderEvent(sid, ev, { replay }) {
     // 注意:ev.usage 是整轮多次 API 调用的加总,不能覆盖 lastUsage(它是最近一次
     // API 调用的上下文占用快照)。真实窗口上限(contextWindowMax)才是这里要记的。
     const cwMax = ev.contextWindowMax || ev.contextWindow; // ev.contextWindow 兼容旧历史事件
-    if (cwMax) s.ui.contextWindowMax = cwMax;
+    if (cwMax) {
+      // 旧事件/v0.15.4 前的值可能是 claude.exe 对网关模型的默认 200000,按会话模型再纠正
+      const model = s.meta.model || s.ui.initModel || '';
+      s.ui.contextWindowMax = window.ctxwin.effectiveCtxWindow(model, cwMax);
+    }
     const parts = [];
     if (ev.duration_ms != null) parts.push((ev.duration_ms / 1000).toFixed(1) + 's');
     if (ev.num_turns != null) parts.push(ev.num_turns + ' 轮');

@@ -71,3 +71,49 @@ test('多模型回合(子 Agent):取各模型窗口上限的最大值', () => {
   const ev = sent.map((p) => p.ev).find((e) => e && e.type === 'result');
   assert.strictEqual(ev.contextWindowMax, 262144);
 });
+
+// v0.15.5:claude.exe 对第三方网关模型一律按默认 200000 报 contextWindow,
+// 必须用实表(modelUsage 的模型 id)纠正;主会话窗口优先取主模型条目(不被子 Agent 污染)。
+test('纠正 claude.exe 默认 200k:网关模型按实表', () => {
+  const { live, sent } = makeSession();
+  live.meta.model = 'kimi-k3';
+  live._handleMessage({
+    type: 'result',
+    subtype: 'success',
+    modelUsage: {
+      'kimi-k3': { contextWindow: 200000, inputTokens: 1, outputTokens: 1 },
+    },
+  });
+  const ev = sent.map((p) => p.ev).find((e) => e && e.type === 'result');
+  assert.strictEqual(ev.contextWindowMax, 262144, 'kimi-k3 的 200k 误报应纠正为 256k');
+});
+
+test('纠正 claude.exe 默认 200k:Claude 新代模型按实表 1M', () => {
+  const { live, sent } = makeSession();
+  live.meta.model = 'claude-opus-4-8';
+  live._handleMessage({
+    type: 'result',
+    subtype: 'success',
+    modelUsage: {
+      'claude-opus-4-8': { contextWindow: 200000, inputTokens: 1, outputTokens: 1 },
+    },
+  });
+  const ev = sent.map((p) => p.ev).find((e) => e && e.type === 'result');
+  assert.strictEqual(ev.contextWindowMax, 1000000);
+});
+
+test('主模型条目优先:子 Agent 大窗口不污染主会话分母', () => {
+  const { live, sent } = makeSession();
+  live.meta.model = 'kimi-k3';
+  live._handleMessage({
+    type: 'result',
+    subtype: 'success',
+    modelUsage: {
+      'kimi-k3': { contextWindow: 200000, inputTokens: 1, outputTokens: 1 },
+      'claude-opus-4-8': { contextWindow: 1000000, inputTokens: 1, outputTokens: 1 },
+    },
+  });
+  const ev = sent.map((p) => p.ev).find((e) => e && e.type === 'result');
+  assert.strictEqual(ev.contextWindowMax, 262144, '应取主模型 kimi-k3 的 256k 而非子 Agent 的 1M');
+});
+

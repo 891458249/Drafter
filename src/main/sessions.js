@@ -15,6 +15,9 @@ const perms = require('./perms');
 const keys = require('./keys');
 const gems = require('./gems');
 const modelGuard = require('./model-guard-proxy');
+// 模型上下文窗口实表(双环境模块):纠正 modelUsage.contextWindow——claude.exe 按自身
+// 注册表本地计算,对第三方网关模型(kimi-k3 等)一律回退默认 200000,并非提供方实报。
+const { effectiveCtxWindow } = require('../renderer/ctxwin.js');
 
 // 编辑类工具:只读硬拦截与 acceptEdits 本地放行共用
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -552,11 +555,24 @@ class Session {
       // Kimi 262144)——这是「上限」而非「已用」,渲染端据此做分母;已用上文以最近一次
       // assistant 消息的 usage(input+cache_read+cache_creation)为准,result.usage 是
       // 整轮多次 API 调用的加总,两者都不能当上下文占用。
+      // 且 modelUsage.contextWindow 是 claude.exe 按自身模型注册表算的,对第三方网关
+      // 模型一律回退 200000——按 modelUsage 的模型 id 用实表逐条纠正(v0.15.5)。
       let contextWindowMax = null;
       try {
         const mu = msg.modelUsage || {};
-        const vals = Object.values(mu);
-        if (vals.length) contextWindowMax = Math.max(...vals.map((v) => v.contextWindow || 0)) || null;
+        const entries = Object.entries(mu);
+        if (entries.length) {
+          // modelUsage 含子 Agent 模型:主会话窗口应取主模型条目,取不到再退化为最大值
+          const mainModel = this.meta.model || this.lastInitModel || '';
+          const hit = mainModel ? entries.find(([m]) => m === mainModel) : null;
+          if (hit) {
+            contextWindowMax = effectiveCtxWindow(hit[0], hit[1] && hit[1].contextWindow);
+          } else {
+            contextWindowMax = Math.max(
+              ...entries.map(([m, v]) => effectiveCtxWindow(m, v && v.contextWindow))
+            ) || null;
+          }
+        }
       } catch {}
       // 累计各模型 token 消耗(用量弹层):result.modelUsage 按真实执行模型给出明细
       //(子 Agent 消耗单列),优先按明细拆账;无明细才回退到主模型,避免混合会话

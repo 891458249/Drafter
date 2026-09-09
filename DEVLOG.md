@@ -491,3 +491,10 @@ Git 工作流:
 - 新增 src/renderer/ctxwin.js:MODEL_CTX_TABLE 按模型名正则查表,app.js 的 modelCtxMax 启发值(非 haiku 一律 1M)替换为实表;定位仅是**首个 result 前的显示兜底**——跑过一轮后永远以 SDK 实报 result.modelUsage.contextWindow 为准
 - 百万窗口链路核查:显示(fmtTokens 有 M 后缀)/弹层/oai-proxy 估算均无 200k 硬编码假设;Claude 侧 1M 已是 GA,claude.exe 按模型服务端生效,App 无需额外启用;网关模型以提供方实报为准
 - 测试:test/ctxwin.test.js 40+ 模型名用例;npm test 310/310
+
+### v0.15.5 — 修「SDK 实报窗口仍是错的」:claude.exe 对网关模型一律报默认 200k
+- 根因:result.modelUsage.contextWindow 并非提供方实报,而是 **claude.exe 按自身模型注册表本地计算**——对 kimi-k3/deepseek-chat 等第三方网关模型一律回退默认 200000(用户 K3 会话显示 281.7k/200.0k 即此;且 281.7k 已用超过 200k 会话仍存活,佐证服务端真实窗口不是 200k)
+- 修复:ctxwin.js 改**双环境模块**(经典 script 挂 window.ctxwin + module.exports;不能用 ESM export,Chromium ESM 不认 CJS interop——v0.13.4 教训),新增 lookupCtxWindow(未命中返回 null 以区分「表不知道」)/effectiveCtxWindow(表命中以表为准,否则实报,再兜底 200k);sessions.js 按 modelUsage 的模型 id 逐条纠正,且**主模型条目优先**(子 Agent 的 1M 不再污染主会话分母);chat.js 对旧历史事件按会话模型再纠正(回放旧 200k 事件也能修)
+- 效果:Kimi K3 会话分母 200k→256K;Claude 新代(Opus 4.6+/Sonnet 5)即使被 claude.exe 误报 200k 也纠正为 1M(GA)
+- 重要边界(已与用户说明):上下文窗口是提供方服务端硬上限,本地数据再多也不能突破——Kimi K3 真实窗口 256K 无法扩到 1M;要 1M 须换本身支持 1M 的模型;「本地数据超窗口利用」的正解是 RAG(检索注入),属独立功能
+- 测试:ctxwin.test.js 补 lookup/effective 用例,context-window.test.js 补 3 例(网关纠正/Claude 1M 纠正/主模型优先);npm test 318/318

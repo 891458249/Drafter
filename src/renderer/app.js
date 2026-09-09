@@ -1,6 +1,5 @@
 // App entry: boot, project open, topbar, panels, modals, shortcuts, wiring.
 import { api, state, $, escapeHtml, on, emit, fmtTokens, parseModelValue, updateKeyChips, MEDIA_TYPE_LABEL, sectionOfKind } from './state.js';
-import { modelCtxMax } from './ctxwin.js';
 import * as chat from './chat.js';
 import * as sessionsUi from './sessions-ui.js';
 import * as input from './input.js';
@@ -250,8 +249,9 @@ on('session-activated', (sid) => {
 // ---------------------------------------------------------------------------
 // Token 用量 / 上下文窗口弹层(输入框右下角)
 // ---------------------------------------------------------------------------
-// 兜底窗口估计(ctxwin.js):首个 result 之前 SDK 尚未给出真实窗口
-//(result.modelUsage.contextWindow,按模型实报:Claude 新代 1M / Kimi 256k 等)
+// 兜底窗口估计(ctxwin.js 实表,经经典 script 挂 window.ctxwin):
+// 首个 result 之前 SDK 尚未给出窗口实报时用。
+const modelCtxMax = (m) => window.ctxwin.modelCtxMax(m);
 
 function shortModelName(m) {
   if (/fable/i.test(m)) return 'Fable 5';

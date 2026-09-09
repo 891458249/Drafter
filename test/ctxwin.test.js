@@ -3,9 +3,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-let modelCtxMax;
+let modelCtxMax, lookupCtxWindow, effectiveCtxWindow;
 test('setup', async () => {
-  modelCtxMax = (await import('../src/renderer/ctxwin.js?v=' + Date.now())).modelCtxMax;
+  const m = await import('../src/renderer/ctxwin.js?v=' + Date.now());
+  const mod = m.modelCtxMax ? m : m.default; // CJS 双环境导出,import 经 lexer 取命名导出
+  modelCtxMax = mod.modelCtxMax;
+  lookupCtxWindow = mod.lookupCtxWindow;
+  effectiveCtxWindow = mod.effectiveCtxWindow;
 });
 
 const CASES = [
@@ -38,4 +42,19 @@ test('modelCtxMax:各厂商模型窗口匹配', () => {
   for (const [model, want] of CASES) {
     assert.strictEqual(modelCtxMax(model), want, `model=${model}`);
   }
+});
+
+// v0.15.5:result.modelUsage.contextWindow 是 claude.exe 本地注册表算的,
+// 对第三方网关模型一律回退默认 200000——effectiveCtxWindow 用实表纠正。
+test('effectiveCtxWindow:表命中纠正 claude.exe 的 200k 误报', () => {
+  assert.strictEqual(effectiveCtxWindow('kimi-k3', 200000), 262144, 'kimi-k3 实报 200k → 纠正为 256k');
+  assert.strictEqual(effectiveCtxWindow('deepseek-chat', 200000), 131072, 'deepseek 实报 200k → 纠正为 128k');
+  assert.strictEqual(effectiveCtxWindow('claude-opus-4-8', 200000), 1000000, 'opus-4.8 旧实报 200k → 纠正为 1M(GA)');
+  assert.strictEqual(effectiveCtxWindow('claude-sonnet-5', 1000000), 1000000);
+});
+
+test('effectiveCtxWindow:表外模型回退实报,实报缺失回退 200k', () => {
+  assert.strictEqual(effectiveCtxWindow('some-future-model', 512000), 512000);
+  assert.strictEqual(effectiveCtxWindow('some-future-model', null), 200000);
+  assert.strictEqual(lookupCtxWindow('some-future-model'), null, '未命中必须返回 null 而非默认值');
 });
