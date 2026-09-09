@@ -521,13 +521,15 @@ class Session {
         : (msg.cost && msg.cost.total_cost_usd != null ? msg.cost.total_cost_usd : null);
       if (cost != null) this.cumCostUsd += cost;
       this.lastUsage = msg.usage || null;
-      // 真实上下文窗口大小:result.modelUsage 按模型给出 contextWindow;
-      // usage 字段是整轮多次 API 调用的输入加总,不能当上下文大小用
-      let contextWindow = null;
+      // 真实上下文窗口上限:result.modelUsage 按模型给出 contextWindow(如 Claude 200k/
+      // Kimi 262144)——这是「上限」而非「已用」,渲染端据此做分母;已用上文以最近一次
+      // assistant 消息的 usage(input+cache_read+cache_creation)为准,result.usage 是
+      // 整轮多次 API 调用的加总,两者都不能当上下文占用。
+      let contextWindowMax = null;
       try {
         const mu = msg.modelUsage || {};
         const vals = Object.values(mu);
-        if (vals.length) contextWindow = Math.max(...vals.map((v) => v.contextWindow || 0)) || null;
+        if (vals.length) contextWindowMax = Math.max(...vals.map((v) => v.contextWindow || 0)) || null;
       } catch {}
       // 累计各模型 token 消耗(用量弹层):result.modelUsage 按真实执行模型给出明细
       //(子 Agent 消耗单列),优先按明细拆账;无明细才回退到主模型,避免混合会话
@@ -558,7 +560,7 @@ class Session {
         total_cost_usd: cost,
         cum_cost_usd: this.cumCostUsd,
         usage: msg.usage || null,
-        contextWindow,
+        contextWindowMax,
         result: typeof msg.result === 'string' ? msg.result.slice(0, 2000) : undefined,
       };
       this._emit(ev, true);

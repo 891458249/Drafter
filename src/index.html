@@ -498,6 +498,19 @@
   <!-- 图片查看模式(v0.9.8):双击消息内图片打开,滚轮缩放,Esc/点击空白关闭 -->
   <div id="img-viewer" class="modal-mask img-viewer hidden"><img alt="" /></div>
 
+  <!-- 新版本更新提醒弹窗:electron-updater 发现新版/下载完成时主动提醒 -->
+  <div id="update-modal" class="modal-mask hidden">
+    <div class="modal">
+      <h2 id="update-modal-title">发现新版本</h2>
+      <p id="update-modal-text" class="modal-hint"></p>
+      <div class="modal-actions">
+        <button id="update-modal-later" class="btn">稍后</button>
+        <button id="update-modal-notes" class="btn">查看更新说明</button>
+        <button id="update-modal-action" class="btn btn-primary">知道了</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Gem 自定义助手(v0.9.11):三栏——列表 | 编辑表单 | 预览,对齐 Gemini Gem 编辑器 -->
   <div id="gem-modal" class="modal-mask hidden">
     <div class="modal gem-modal">

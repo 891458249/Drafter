@@ -1100,8 +1100,10 @@ export function renderEvent(sid, ev, { replay }) {
     finalizeAssistant(s);
     if (ev.cum_cost_usd != null) s.ui.cumCost = ev.cum_cost_usd;
     else if (ev.total_cost_usd != null) s.ui.cumCost += ev.total_cost_usd;
-    if (ev.usage) s.ui.lastUsage = ev.usage;
-    if (ev.contextWindow) s.ui.contextWindow = ev.contextWindow;
+    // 注意:ev.usage 是整轮多次 API 调用的加总,不能覆盖 lastUsage(它是最近一次
+    // API 调用的上下文占用快照)。真实窗口上限(contextWindowMax)才是这里要记的。
+    const cwMax = ev.contextWindowMax || ev.contextWindow; // ev.contextWindow 兼容旧历史事件
+    if (cwMax) s.ui.contextWindowMax = cwMax;
     const parts = [];
     if (ev.duration_ms != null) parts.push((ev.duration_ms / 1000).toFixed(1) + 's');
     if (ev.num_turns != null) parts.push(ev.num_turns + ' 轮');
@@ -1185,14 +1187,20 @@ function handleAssistantMessage(s, parentId, message, replay) {
   // token/上下文兜底计数(v0.9.13):部分网关(如 Kimi)流式 message_delta 不带 usage,
   // 回合状态会一直显示 0 tokens——用 assistant 完整消息的 message.usage 补计;
   // 流式已计过的(msgDeltaCounted)不重复计。lastUsage 同步刷新,上下文 % 随回合推进。
-  if (!replay && message.usage) {
-    if (message.usage.output_tokens && !s.ui.msgDeltaCounted) {
-      s.ui.turnTokens = (s.ui.turnTokens || 0) + message.usage.output_tokens;
+  // lastUsage = 最近一次 API 调用的输入快照(input+cache_read+cache_creation),
+  // 即真实上下文占用;回放也记入,重启后无需新回合即可显示正确上下文 %。
+  if (message.usage) {
+    const u = message.usage;
+    const inToks = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+    if (!replay && u.output_tokens && !s.ui.msgDeltaCounted) {
+      s.ui.turnTokens = (s.ui.turnTokens || 0) + u.output_tokens;
       if (s.meta.id === state.activeSid) updateTurnStatus();
     }
-    s.ui.msgDeltaCounted = false;
-    s.ui.lastUsage = message.usage;
-    if (s.meta.id === state.activeSid) emit('usage-updated');
+    if (!replay) s.ui.msgDeltaCounted = false;
+    if (inToks > 0 || u.output_tokens > 0) { // 全零 usage(坏网关/旧事件)不覆盖已有快照
+      s.ui.lastUsage = u;
+      if (s.meta.id === state.activeSid) emit('usage-updated');
+    }
   }
   const content = message.content || [];
   for (const block of content) {

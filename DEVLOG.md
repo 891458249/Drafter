@@ -479,3 +479,9 @@ Git 工作流:
 - Gemini 预设修复(遗留坑:原生 API 要 x-goog-api-key,x-api-key 必 401)——改走 OpenAI 兼容层 generativelanguage.googleapis.com/v1beta/openai + Bearer;配套 oai-translate 新增 oaiUrl():baseUrl 以 /openai 结尾直接拼 /<path>,其余归一 /v1/<path>;oai-proxy 与 aux-models 统一改用
 - keys.js guessProtocol 扩展:openrouter/x.ai/groq/mistral/siliconflow/dashscope/googleapis 自动 openai;api.deepseek.com 按 path 双协议(/anthropic→anthropic,根→openai)
 - 测试:guessProtocol 新主机 + oaiUrl 拼接各 1 例;npm test 305/305
+
+### v0.15.3 — 修上下文 % 计算严重失准 + 新版本更新弹窗提醒
+- **上下文 % 严重失准根因(双重错误)**:①分子——`result.modelUsage[model].contextWindow` 是模型的窗口**上限**(Claude 200k/Kimi 262144,SDK d.ts ModelUsage 类型+真实事件日志双重实证),此前被当「已用」;②分母——启发值 `modelCtxMax` 对非 haiku 一律 1M。两错叠加:Claude 会话恒显示 20%(200k/1M),Kimi 恒 26%,与实际占用完全无关;旧事件回退分支再叠加 result.usage(整轮多次 API 调用加总,实测可达 4.6M)直接顶满 100%。
+- 修复:sessions.js result 事件改发 `contextWindowMax`(渲染端兼容旧历史事件的 `contextWindow` 字段);app.js ctxInfo 分子=最近一次 assistant 消息的 usage(input+cache_read+cache_creation,单次 API 调用输入快照=真实上下文占用),分母=contextWindowMax 优先、兜底启发值改 200k(gemini 1M);chat.js result 不再用整轮加总覆盖 lastUsage,assistant usage 全零(坏网关/旧事件)不覆盖已有快照,历史回放也记入 lastUsage(重启后无需新回合即正确);usage-ring 按 pct conic-gradient 填充,≥70% 黄 ≥90% 红
+- **更新弹窗**:update:status 的 available/downloaded 主动弹 modal(此前只有顶栏 chip 易被忽略);available 弹「发现新版本+后台下载中」可「不再提醒此版本」(持久化 settings.updatePromptDismissed,只压 available);downloaded 弹「已就绪·立即重启安装」每次启动提醒一次(更新已到本地不应被永久静音);均可跳 Release 页;updater.js 事件负载带 current 版本号
+- 测试:test/context-window.test.js 3 例(contextWindowMax 透传/无 modelUsage 兜底/多模型取最大);npm test 308/308

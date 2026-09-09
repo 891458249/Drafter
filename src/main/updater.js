@@ -23,13 +23,14 @@ function wireEvents(getWindow) {
   if (wired) return;
   wired = true;
   const autoUpdater = getAutoUpdater();
+  const current = () => { try { return require('electron').app.getVersion(); } catch { return null; } };
   autoUpdater.autoDownload = true;
   autoUpdater.logger = null;
   autoUpdater.on('checking-for-update', () => send(getWindow, { state: 'checking' }));
-  autoUpdater.on('update-available', (info) => send(getWindow, { state: 'available', version: info && info.version }));
+  autoUpdater.on('update-available', (info) => send(getWindow, { state: 'available', version: info && info.version, current: current() }));
   autoUpdater.on('update-not-available', () => send(getWindow, { state: 'latest' }));
   autoUpdater.on('download-progress', (p) => send(getWindow, { state: 'downloading', percent: Math.round((p && p.percent) || 0) }));
-  autoUpdater.on('update-downloaded', (info) => send(getWindow, { state: 'downloaded', version: info && info.version }));
+  autoUpdater.on('update-downloaded', (info) => send(getWindow, { state: 'downloaded', version: info && info.version, current: current() }));
   autoUpdater.on('error', () => send(getWindow, { state: 'idle' })); // 静默降级
 }
 

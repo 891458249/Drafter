@@ -50,6 +50,7 @@ window.addEventListener('unhandledrejection', (e) => {
 // ---------------------------------------------------------------------------
 api.on('update:status', (st) => {
   try { settingsUpdateProgress(st); } catch {} // 设置面板更新区联动(函数声明提升,定义在下方)
+  try { maybePromptUpdate(st); } catch {} // 新版本提醒弹窗(定义在下方)
   const chip = $('update-chip');
   if (!chip) return;
   if (!st || st.state === 'idle') { chip.classList.add('hidden'); return; }
@@ -75,6 +76,66 @@ $('update-chip').onclick = () => {
   if (chip.classList.contains('downloaded')) api.updateInstall(); // 重启并安装
   else api.updateCheck(); // 手动触发一次检查
 };
+
+// ---------------------------------------------------------------------------
+// 新版本提醒弹窗:发现新版(available)与下载完成(downloaded)时主动弹窗。
+// 「不再提醒此版本」只压 available 提示(持久化 settings.updatePromptDismissed);
+// downloaded(已就绪待安装)每次启动仍会提醒一次——更新已到本地,不该被永久静音。
+// ---------------------------------------------------------------------------
+let _updateDismissedVer = null; // settings.updatePromptDismissed
+const _downloadedPrompted = new Set(); // 本次启动已提醒「已就绪」的版本
+api.getStore().then((st) => {
+  _updateDismissedVer = (st && st.settings && st.settings.updatePromptDismissed) || null;
+}).catch(() => {});
+
+function maybePromptUpdate(st) {
+  if (!st || !st.version) return;
+  if (st.state === 'available') {
+    if (st.version === _updateDismissedVer) return;
+    showUpdateModal({
+      title: `🎉 发现新版本 v${st.version}`,
+      text: `当前版本 v${st.current || '?'}。新版本正在后台自动下载,完成后会提示你一键重启安装;也可点「查看更新说明」了解更新内容。`,
+      mode: 'available',
+      version: st.version,
+    });
+  } else if (st.state === 'downloaded') {
+    if (_downloadedPrompted.has(st.version)) return;
+    _downloadedPrompted.add(st.version);
+    showUpdateModal({
+      title: `✅ 新版本 v${st.version} 已就绪`,
+      text: '更新已下载完成,重启应用即可完成安装(未保存的对话内容不受影响,运行中的任务会先中断)。',
+      mode: 'downloaded',
+      version: st.version,
+    });
+  }
+}
+
+function showUpdateModal({ title, text, mode, version }) {
+  const modal = $('update-modal');
+  if (!modal) return;
+  $('update-modal-title').textContent = title;
+  $('update-modal-text').textContent = text;
+  const action = $('update-modal-action');
+  const later = $('update-modal-later');
+  if (mode === 'downloaded') {
+    action.textContent = '🔁 立即重启安装';
+    action.onclick = () => api.updateInstall();
+    later.textContent = '稍后';
+    later.onclick = () => modal.classList.add('hidden');
+  } else {
+    action.textContent = '知道了';
+    action.onclick = () => modal.classList.add('hidden');
+    later.textContent = '不再提醒此版本';
+    later.onclick = () => {
+      _updateDismissedVer = version;
+      api.setSetting('updatePromptDismissed', version);
+      modal.classList.add('hidden');
+    };
+  }
+  $('update-modal-notes').onclick = () =>
+    api.openExternal(`https://github.com/891458249/Drafter/releases/tag/v${version}`);
+  modal.classList.remove('hidden');
+}
 
 // ---------------------------------------------------------------------------
 // Boot(v0.9.3 起无首屏落地页):直接进对话页 —— 恢复最近会话,没有则自动建独立会话;
@@ -188,7 +249,12 @@ on('session-activated', (sid) => {
 // ---------------------------------------------------------------------------
 // Token 用量 / 上下文窗口弹层(输入框右下角)
 // ---------------------------------------------------------------------------
-function modelCtxMax(model) { return /haiku/i.test(model || '') ? 200000 : 1000000; }
+// 兜底窗口估计:首个 result 之前 SDK 尚未给出真实窗口
+//(result.modelUsage.contextWindow,按模型:Claude 200k / Kimi 262144 / Gemini 1M)
+function modelCtxMax(model) {
+  if (/gemini/i.test(model || '')) return 1000000;
+  return 200000;
+}
 
 function shortModelName(m) {
   if (/fable/i.test(m)) return 'Fable 5';
@@ -203,18 +269,25 @@ function ctxInfo() {
   const s = state.sessions.get(state.activeSid);
   const u = s && s.ui.lastUsage;
   const model = (s && (s.meta.model || s.ui.initModel)) || '';
-  // 优先用 SDK result.modelUsage 里的真实上下文窗口大小;
-  // 没有时(旧事件)退化为整轮输入 token 加总的启发值(会偏高,仅供参考)
-  const used = (s && s.ui.contextWindow) || (u
+  // 已用 = 最近一次 API 调用的输入(input+cache_read+cache_creation),即真实上下文占用。
+  // 不能用 result.usage(整轮多次调用加总,会数倍虚高)。
+  const used = u
     ? (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
-    : 0);
-  const max = modelCtxMax(model);
+    : 0;
+  // 上限 = SDK 报告的真实模型窗口(result.modelUsage.contextWindow),兜底启发值。
+  const max = (s && s.ui.contextWindowMax) || modelCtxMax(model);
   return { used, max, pct: Math.min(100, Math.round((used / max) * 100)) };
 }
 
 function updateUsageButton() {
   const { pct } = ctxInfo();
   $('btn-usage-label').textContent = `上下文 ${pct}%`;
+  const ring = document.querySelector('#btn-usage .usage-ring');
+  if (ring) {
+    const color = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--yellow, #d29922)' : 'var(--accent)';
+    ring.style.background = `conic-gradient(${color} ${pct * 3.6}deg, transparent 0)`;
+    ring.style.borderColor = color;
+  }
 }
 
 // 官方单价($/MTok):折算金额用;缓存读按 0.1×输入价、缓存写按 1.25×输入价
