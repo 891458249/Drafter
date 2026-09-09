@@ -14,9 +14,11 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-agent-route-live-'));
 installElectronStub(tmp);
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, '.claude');
 const store = require('../src/main/store');
+const modelGuard = require('../src/main/model-guard-proxy');
 const { SessionManager } = require('../src/main/sessions');
 
-after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
+before(() => modelGuard.start());
+after(async () => { await modelGuard.stop(); try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
 
 store.setSetting('apiKeys', [{
   id: 'k1', name: 'Fake', key: 'fake', baseUrl: 'http://127.0.0.1', enabled: true,
@@ -79,11 +81,14 @@ function startGateway(script) {
 }
 
 function makeManager(port) {
+  // 代理按 Key 存储的 baseUrl 决定真实上游;测试启动前把假网关端口写回 Key。
+  const apiKeys = (store.getSetting('apiKeys') || []).map((k) => ({ ...k, baseUrl: `http://127.0.0.1:${port}` }));
+  store.setSetting('apiKeys', apiKeys);
   const events = [];
   const mgr = new SessionManager(() => null, (extra) => ({
     ...process.env, ...extra,
-    ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
-    ANTHROPIC_AUTH_TOKEN: 'test-token',
+    ANTHROPIC_BASE_URL: extra.__modelGuardBaseUrl || `http://127.0.0.1:${port}`,
+    ANTHROPIC_AUTH_TOKEN: 'fake',
     ANTHROPIC_API_KEY: '',
     DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1',
   }));
@@ -159,6 +164,38 @@ test('真实运行时:合法子 Agent 以注册模型发出请求,绕过尝试�
     const data = JSON.parse(fs.readFileSync(path.join(tmp, 'drafter-store.json'), 'utf8'));
     assert.ok(data.modelUsage && data.modelUsage['gpt-5.4'], '用量面板应把子 Agent 记到 gpt-5.4 名下');
     assert.ok(!data.modelUsage['claude-sonnet-5'], '不得出现 Claude 记账');
+  } finally {
+    try { s.stop(); } catch {}
+    gw.server.close();
+  }
+});
+
+test('真实运行时:已注册子 Agent 的 sonnet 覆盖被剥掉,实际仍走固定模型', { timeout: 90000 }, async () => {
+  const gw = await startGateway((body, raw) => {
+    if (body.model === 'gpt-5.4') return sseText('gpt-5.4', '子任务完成');
+    if (raw.includes('tool_result')) return sseText(body.model, '主流程结束');
+    // Kuro 网关实测形态:主模型调合法自定义 Agent,但仍按 Agent schema 塞 model:"sonnet"。
+    return sseToolUse(body.model, 'toolu_1', 'Agent', {
+      subagent_type: 'model-gpt-5-4', model: 'sonnet', prompt: '回复 ok', description: 't',
+    });
+  });
+  const { mgr, events } = makeManager(gw.port);
+  const cwd = path.join(tmp, 'case-rewrite');
+  fs.mkdirSync(cwd, { recursive: true });
+  const meta = mgr.create({
+    cwd, kind: 'code', keyId: 'k1', model: 'gpt-6-astra',
+    agentModels: [{ keyId: 'k1', model: 'gpt-5.4' }],
+    permissionMode: 'bypassPermissions',
+  });
+  const s = mgr.get(meta.id);
+  try {
+    s.send('请处理这个任务');
+    await waitResult(events);
+    assert.ok(gw.requests.some((r) => r.model === 'gpt-5.4'), '剥掉覆盖后子 Agent 应以注册的 gpt-5.4 发请求');
+    assert.ok(gw.requests.every((r) => !/sonnet|claude/i.test(r.model || '')), '不得把覆盖的 sonnet 发给网关');
+    const route = store.readSessionEvents(meta.id).filter((e) => e.type === 'ui_agent_route');
+    assert.ok(route.some((e) => e.action === 'rewrite' && e.requestedModel === 'sonnet'), '应有 rewrite 审计事件');
+    assert.ok(!route.some((e) => e.action === 'deny'), '合法子 Agent 不得再进入 deny 重试循环');
   } finally {
     try { s.stop(); } catch {}
     gw.server.close();

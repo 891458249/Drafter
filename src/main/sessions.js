@@ -14,6 +14,7 @@ const projects = require('./projects');
 const perms = require('./perms');
 const keys = require('./keys');
 const gems = require('./gems');
+const modelGuard = require('./model-guard-proxy');
 
 // 编辑类工具:只读硬拦截与 acceptEdits 本地放行共用
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -307,11 +308,36 @@ class Session {
       try { fastGemAppend = gems.composeAppend(gems.byId(this.meta.gemId)) || ''; } catch {}
     }
     const fastOv = fastChatOverrides(this.meta, fastGemAppend);
+    // 网络层模型白名单(v0.15.5):只靠 PreToolUse 仍可能被 SDK 内部默认/绕路,
+    // 有明确主模型时把 ANTHROPIC_BASE_URL 指到本地守卫代理;每次请求离机前按
+    //「当前主模型 + 当前勾选子 Agent」硬校验;OpenAI 协议再向内转发给 oai-proxy 翻译。
+    let modelGuardBaseUrl = null;
+    if (this.meta.model && this.meta.keyId && modelGuard.isRunning()) {
+      const keyEntry = keys.byId(this.meta.keyId);
+      if (keyEntry) {
+        modelGuard.register({
+          sid: this.id,
+          keyId: this.meta.keyId,
+          getAllowedModels: () => [
+            this.meta.model,
+            ...currentAgentModels(this.meta).map((item) => item.model),
+          ].filter(Boolean),
+          onBlocked: (requestedModel) => {
+            this._emit({
+              type: 'ui_agent_route', action: 'network-deny', model: requestedModel,
+              allowed: [this.meta.model, ...currentAgentModels(this.meta).map((item) => item.model)].filter(Boolean),
+            }, true);
+            this._emit({ type: 'ui_aux', message: `⛔ 网络层已拦截未勾选模型 ${requestedModel};该请求未发送到网关` }, true);
+          },
+        });
+        modelGuardBaseUrl = modelGuard.baseUrlFor(this.id);
+      }
+    }
     const options = {
       cwd: this.meta.cwd,
       permissionMode: fastOv ? 'bypassPermissions' : (this.meta.permissionMode || 'default'),
       includePartialMessages: true,
-      env: this.m.buildEnv({ ELECTRON_RUN_AS_NODE: '1' }, this.meta.keyId), // 按会话绑定的 Key 注入凭据(v0.8.2)
+      env: this.m.buildEnv({ ELECTRON_RUN_AS_NODE: '1', __modelGuardBaseUrl: modelGuardBaseUrl }, this.meta.keyId), // 按会话绑定的 Key 注入凭据(v0.8.2);守卫代理强制模型白名单
       // 不读 user 级 settings(v0.11.6):~/.claude/settings.json 的 env(ANTHROPIC_AUTH_TOKEN/
       // BASE_URL 等)优先级高于 buildEnv 按会话 Key 注入的进程凭据——用户用 CLI 配置过网关时,
       // 所有会话都会被钉到那个网关(切 Key 无效,报 403 模型未配置)。app 凭据一律按 Key 注入,
@@ -476,6 +502,7 @@ class Session {
       if (this.q === q) {
         this.running = false;
         this.busy = false;
+        try { modelGuard.unregister(this.id); } catch {}
         if (this._resumeQuery === q) this._resumeQuery = null;
         this._emit({ type: 'ui_status', running: false, busy: false });
       }
@@ -592,9 +619,9 @@ class Session {
 
   // --- 子 Agent 委派守卫(PreToolUse hook) ---
   // agents 选项只是「新增」自定义定义,内置 Explore/Plan/general-purpose 依然可调,
-  // 且 Agent 工具的 input.model 可另行指定任意模型——两者都曾把会话路由到未勾选的
-  // Claude 模型。这里在工具执行前强制校验:只允许当前勾选模型注册的 Agent,拒绝
-  // 显式模型覆盖与无法核实模型的恢复/续聊。
+  // 且 Agent 工具的 input.model 可另行指定 Claude 别名。这里在工具执行前强制校验:
+  // 只允许当前勾选模型注册的 Agent;合法 Agent 的覆盖参数直接剥掉,未知类型/
+  // 恢复续聊/Workflow 仍 fail closed。网络守卫代理另做离机前最后一道白名单。
   _denyDelegation(toolName, reason, extra = {}) {
     this._emit({ type: 'ui_aux', message: '⛔ 已拦截超出子 Agent 白名单的调用:' + reason }, true);
     this._emit({ type: 'ui_agent_route', action: 'deny', tool: toolName, reason, ...extra }, true);
@@ -611,7 +638,8 @@ class Session {
     const route = this._agentRoute;
     if (!route) return {};
     const toolName = hookInput && hookInput.tool_name;
-    const input = (hookInput && hookInput.tool_input) || {};
+    let input = (hookInput && hookInput.tool_input) || {};
+    let rewrittenInput = null;
     const toolUseId = hookInput && hookInput.tool_use_id;
     // 最新勾选(取消勾选立即对新调用生效,不等回合结束后的重启)
     const current = new Set(currentAgentModels(this.meta).map((i) => i.model));
@@ -643,9 +671,17 @@ class Session {
         { agentType: type || null, requestedModel: requested || null, available });
     }
     if (requested && requested !== defModel) {
-      return this._denyDelegation(toolName,
-        `不允许为子 Agent ${type} 另行指定模型 ${requested};它固定使用 ${defModel}`,
-        { agentType: type, requestedModel: requested });
+      // Claude Code 的 Agent/Task schema 仍带 model 参数;部分模型(尤其经 Kuro 等
+      // 网关驱动时)会自动塞 sonnet 等 Claude 别名。对已注册子 Agent 不能 deny——
+      // deny 会让主模型按同一 schema 反复重试;这里剥掉覆盖,让 AgentDefinition.model
+      // 的固定模型生效。未知/内置类型已在上方 fail closed,不会到这里。
+      rewrittenInput = { ...input };
+      delete rewrittenInput.model;
+      input = rewrittenInput;
+      this._emit({
+        type: 'ui_agent_route', action: 'rewrite', tool: toolName,
+        agentType: type, requestedModel: requested, model: defModel,
+      }, true);
     }
     if (input.resume) {
       const target = String(input.resume);
@@ -658,7 +694,15 @@ class Session {
       }
     }
     if (toolUseId) route.spawned.set(toolUseId, defModel);
-    this._emit({ type: 'ui_agent_route', action: 'allow', tool: toolName, agentType: type, model: defModel }, true);
+    if (!rewrittenInput) this._emit({ type: 'ui_agent_route', action: 'allow', tool: toolName, agentType: type, model: defModel }, true);
+    if (rewrittenInput) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          updatedInput: rewrittenInput,
+        },
+      };
+    }
     return {}; // 不代行放行,正常权限流程继续
   }
 
@@ -1004,6 +1048,7 @@ class Session {
   }
 
   stop() {
+    try { modelGuard.unregister(this.id); } catch {}
     if (this.queue) this.queue.end();
     if (this.q && typeof this.q.close === 'function') { try { this.q.close(); } catch {} }
     this.running = false;

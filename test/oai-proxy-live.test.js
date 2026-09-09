@@ -15,9 +15,11 @@ installElectronStub(tmp);
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, '.claude');
 const store = require('../src/main/store');
 const proxy = require('../src/main/oai-proxy');
+const modelGuard = require('../src/main/model-guard-proxy');
 const { SessionManager } = require('../src/main/sessions');
 
 after(async () => {
+  try { await modelGuard.stop(); } catch {}
   try { await proxy.stop(); } catch {}
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 });
@@ -75,6 +77,7 @@ before(async () => {
     modelGroups: [{ category: 'chat', model_type: 'chat', models: ['gpt-6-astra'] }],
   }]);
   await proxy.start();
+  await modelGuard.start();
 });
 
 after(async () => {
@@ -97,7 +100,7 @@ test('真实 claude.exe 经翻译代理跑通 OpenAI 协议会话(含工具回�
   const events = [];
   const mgr = new SessionManager(() => null, (extra) => ({
     ...process.env, ...extra,
-    ANTHROPIC_BASE_URL: proxy.baseUrlFor('k_oai_live'),
+    ANTHROPIC_BASE_URL: extra.__modelGuardBaseUrl || proxy.baseUrlFor('k_oai_live'),
     ANTHROPIC_AUTH_TOKEN: OAI_TOKEN,
     ANTHROPIC_API_KEY: '',
     DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1',

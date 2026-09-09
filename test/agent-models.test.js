@@ -190,14 +190,20 @@ test('守卫:已注册类型无 model 覆盖 → 放行并登记派发记录', a
   assert.strictEqual(routeEvents(session)[0].action, 'allow');
 });
 
-test('守卫:已注册类型另行指定其他模型 → 拒绝覆盖', async () => {
+test('守卫:已注册类型另行指定其他模型 → 剥掉覆盖并按固定模型放行', async () => {
   const { session } = makeGuardedSession();
   const res = await session._guardDelegation({
     tool_name: 'Task', tool_use_id: 'tu_2',
-    tool_input: { subagent_type: 'model-claude-haiku-4-5', model: 'claude-sonnet-5' },
+    tool_input: { subagent_type: 'model-claude-haiku-4-5', model: 'sonnet', prompt: '调查' },
   });
-  assert.ok(denied(res));
-  assert.ok(res.hookSpecificOutput.permissionDecisionReason.includes('claude-haiku-4-5'));
+  assert.ok(!denied(res), '合法子 Agent 的无效 model 覆盖不能再 deny,否则主模型会按 schema 反复重试');
+  assert.deepStrictEqual(res.hookSpecificOutput.updatedInput, { subagent_type: 'model-claude-haiku-4-5', prompt: '调查' });
+  assert.strictEqual(session._agentRoute.spawned.get('tu_2'), 'claude-haiku-4-5');
+  const evs = routeEvents(session);
+  assert.strictEqual(evs.length, 1);
+  assert.strictEqual(evs[0].action, 'rewrite');
+  assert.strictEqual(evs[0].requestedModel, 'sonnet');
+  assert.strictEqual(evs[0].model, 'claude-haiku-4-5');
 });
 
 test('守卫:回合中取消勾选立即对新调用生效(不等重启)', async () => {
