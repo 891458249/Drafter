@@ -485,3 +485,9 @@ Git 工作流:
 - 修复:sessions.js result 事件改发 `contextWindowMax`(渲染端兼容旧历史事件的 `contextWindow` 字段);app.js ctxInfo 分子=最近一次 assistant 消息的 usage(input+cache_read+cache_creation,单次 API 调用输入快照=真实上下文占用),分母=contextWindowMax 优先、兜底启发值改 200k(gemini 1M);chat.js result 不再用整轮加总覆盖 lastUsage,assistant usage 全零(坏网关/旧事件)不覆盖已有快照,历史回放也记入 lastUsage(重启后无需新回合即正确);usage-ring 按 pct conic-gradient 填充,≥70% 黄 ≥90% 红
 - **更新弹窗**:update:status 的 available/downloaded 主动弹 modal(此前只有顶栏 chip 易被忽略);available 弹「发现新版本+后台下载中」可「不再提醒此版本」(持久化 settings.updatePromptDismissed,只压 available);downloaded 弹「已就绪·立即重启安装」每次启动提醒一次(更新已到本地不应被永久静音);均可跳 Release 页;updater.js 事件负载带 current 版本号
 - 测试:test/context-window.test.js 3 例(contextWindowMax 透传/无 modelUsage 兜底/多模型取最大);npm test 308/308
+
+### v0.15.4 — 上下文窗口按厂商实表兜底 + 支持百万窗口显示
+- **各厂商上下文窗口调研结论(2026-09-09,官方文档+实测交叉验证)**:Anthropic Fable 5/Mythos 5/Opus 4.6-4.8/Sonnet 5/Sonnet 4.6=**1M(GA,无需 beta 头)**,Haiku 4.5 及更早=200K;Kimi K2.x/K3 全系=256K(harness 实报 262144 验证);DeepSeek V3.x API=128K(官方文档);智谱 GLM-4.6/5.0-5.2≈200K、GLM-5.3=1M;MiniMax M2 系=200K、M1/M3=1M;OpenAI GPT-5.5 起=1.05M、GPT-5 初代/Codex=400K;Gemini 3.x 全系=1M(1,048,576);Qwen3.6/3.7/3.8=1M、qwen3-max=256K、其余=128K;xAI Grok 4-fast=2M、Grok 4 系=256K
+- 新增 src/renderer/ctxwin.js:MODEL_CTX_TABLE 按模型名正则查表,app.js 的 modelCtxMax 启发值(非 haiku 一律 1M)替换为实表;定位仅是**首个 result 前的显示兜底**——跑过一轮后永远以 SDK 实报 result.modelUsage.contextWindow 为准
+- 百万窗口链路核查:显示(fmtTokens 有 M 后缀)/弹层/oai-proxy 估算均无 200k 硬编码假设;Claude 侧 1M 已是 GA,claude.exe 按模型服务端生效,App 无需额外启用;网关模型以提供方实报为准
+- 测试:test/ctxwin.test.js 40+ 模型名用例;npm test 310/310
