@@ -2,6 +2,7 @@
 const { app } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const STORE_PATH = () => path.join(app.getPath('userData'), 'drafter-store.json');
 // v0.9.35 更名 Drafter:旧文件名按新到旧只读兜底(不删不改),写入一律走新文件名
@@ -11,21 +12,75 @@ const STORE_PATH_LEGACY = () => [
 ];
 const SESSIONS_DIR = () => path.join(app.getPath('userData'), 'sessions');
 
-function loadStore() {
-  for (const f of [STORE_PATH(), ...STORE_PATH_LEGACY()]) {
+function parseStore(raw) {
+  const value = JSON.parse(raw);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SyntaxError('配置必须是 JSON 对象');
+  for (const key of ['sessions', 'recentProjects', 'cronJobs', 'projects']) {
+    if (value[key] !== undefined && !Array.isArray(value[key])) throw new SyntaxError(`${key} 必须是数组`);
+  }
+  if (value.settings !== undefined && (!value.settings || typeof value.settings !== 'object' || Array.isArray(value.settings))) {
+    throw new SyntaxError('settings 必须是对象');
+  }
+  return value;
+}
+
+function readValid(file) {
+  const raw = fs.readFileSync(file, 'utf8');
+  return { raw, value: parseStore(raw) };
+}
+
+function readPrimary() {
+  const file = STORE_PATH();
+  try { return readValid(file); }
+  catch (e) {
+    if (e.code === 'ENOENT') return null;
+    if (!(e instanceof SyntaxError)) throw new Error(`无法读取配置 ${file}，已停止保存：${e.message}`, { cause: e });
     try {
-      return JSON.parse(fs.readFileSync(f, 'utf8'));
-    } catch {}
+      const backup = readValid(file + '.bak');
+      return { ...backup, corrupt: true };
+    } catch (backupError) {
+      throw new Error(`配置损坏且没有可用备份：${file}。原文件已保留，请修复配置或从备份恢复。`, { cause: backupError });
+    }
+  }
+}
+
+function loadStore() {
+  const current = readPrimary();
+  if (current) return current.value;
+  for (const file of [...STORE_PATH_LEGACY(), STORE_PATH() + '.bak']) {
+    try { return readValid(file).value; }
+    catch (e) { if (e.code !== 'ENOENT') throw new Error(`无法读取备用配置 ${file}：${e.message}`, { cause: e }); }
   }
   return { recentProjects: [], settings: {}, sessions: [], cronJobs: [] };
 }
 
-function saveStore(store) {
+function atomicWrite(file, raw) {
+  const temp = file + '.tmp-' + crypto.randomUUID();
+  let fd;
   try {
-    fs.writeFileSync(STORE_PATH(), JSON.stringify(store, null, 2), 'utf8');
-  } catch (e) {
-    console.error('[store] save failed:', e.message);
+    fd = fs.openSync(temp, 'wx', 0o600);
+    fs.writeFileSync(fd, raw, 'utf8');
+    fs.fsyncSync(fd);
+    fs.closeSync(fd); fd = undefined;
+    fs.renameSync(temp, file);
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+    try { fs.unlinkSync(temp); } catch (e) { if (e.code !== 'ENOENT') console.error('[store] temp cleanup failed:', e.message); }
   }
+}
+
+function saveStore(store) {
+  const raw = JSON.stringify(store, null, 2);
+  parseStore(raw);
+  const file = STORE_PATH();
+  // Validate before writing even for direct saveStore callers. Never replace corrupt data with defaults.
+  const previous = readPrimary();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (previous?.corrupt) {
+    fs.copyFileSync(file, file + '.corrupt-' + crypto.randomUUID(), fs.constants.COPYFILE_EXCL);
+  }
+  atomicWrite(file + '.bak', previous ? previous.raw : JSON.stringify(loadStore(), null, 2));
+  atomicWrite(file, raw);
 }
 
 function update(fn) {

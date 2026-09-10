@@ -34,6 +34,11 @@ if (!USERDATA_OVERRIDE) {
 }
 
 const store = require('./src/main/store');
+try { store.loadStore(); }
+catch (e) {
+  dialog.showErrorBox('Drafter 配置读取失败', e.message);
+  app.exit(1);
+}
 const git = require('./src/main/git');
 const files = require('./src/main/files');
 const commands = require('./src/main/commands');

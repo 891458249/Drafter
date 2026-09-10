@@ -11,6 +11,7 @@ const path = require('path');
 const { Notification } = require('electron');
 const store = require('./store');
 const projects = require('./projects');
+const { canonicalPath } = require('./path-identity');
 const perms = require('./perms');
 const keys = require('./keys');
 const gems = require('./gems');
@@ -119,6 +120,19 @@ function fastChatOverrides(meta, gemAppend) {
     strictMcpConfig: true,
     thinking: { type: 'disabled' },
   };
+}
+
+// Agent 模式的设置源(v0.15.7):常规加载 project/local(项目级权限规则照常生效),
+// 但 cwd 恰好是 Claude 配置目录的父目录时(典型:chat 会话默认 cwd = 用户主目录,
+// <cwd>/.claude 即 ~/.claude),'project' 会命中用户级 settings.json——其中 env 把
+// ANTHROPIC_BASE_URL/AUTH_TOKEN 钉回 CLI 网关,且 settings env 优先级高于 buildEnv
+// 按 Key 注入的进程凭据(v0.11.6 已排除 'user',此处换 'project' 入口复活);
+// --model 仍生效,于是请求带着 Kimi 的模型名打到 Kuro 网关,报 403「模型未配置」,
+// 表现为「切到 Agent 模式必报错、极速模式正常」。该情形下视为无项目设置。
+function agentSettingSources(cwd) {
+  const dir = canonicalPath(path.resolve(cwd || '.', '.claude'));
+  if (dir === canonicalPath(CLAUDE_CONFIG_DIR)) return [];
+  return ['project', 'local'];
 }
 
 // The Agent SDK is ESM-only — load it via dynamic import().
@@ -345,7 +359,9 @@ class Session {
       // BASE_URL 等)优先级高于 buildEnv 按会话 Key 注入的进程凭据——用户用 CLI 配置过网关时,
       // 所有会话都会被钉到那个网关(切 Key 无效,报 403 模型未配置)。app 凭据一律按 Key 注入,
       // 只保留 project/local(项目级权限规则 settings.local.json 照常生效)。
-      settingSources: fastOv ? [] : ['project', 'local'],
+      // v0.15.7:cwd = 用户主目录时 project 命中的正是用户级 settings.json(同一文件),
+      // env 钉网关的坑会换入口复活,该情形视为无项目设置(agentSettingSources)。
+      settingSources: fastOv ? [] : agentSettingSources(this.meta.cwd),
       stderr: (data) => this._emit({ type: 'ui_stderr', text: String(data) }),
       canUseTool: (toolName, input, opts) => this._onPermission(toolName, input, opts),
     };
@@ -429,30 +445,6 @@ class Session {
       const allDirs = [...new Set([...(projCtx.additionalDirectories || []), ...(this.meta.extraDirs || [])])]
         .filter((d) => normCwd(d) !== normCwd(this.meta.cwd || ''));
       if (allDirs.length) options.additionalDirectories = allDirs;
-      const pid = this.meta.projectId;
-      options.hooks = {
-        PreToolUse: [{
-          matcher: 'Edit|Write|MultiEdit|NotebookEdit',
-          hooks: [async (hookInput) => {
-            try {
-              const ti = (hookInput && hookInput.tool_input) || {};
-              const fp = ti.file_path || ti.notebook_path;
-              if (fp && projects.isReadonly(pid, fp)) {
-                return {
-                  decision: 'block',
-                  reason: `文件 ${fp} 在项目组中被标记为只读,禁止修改。`,
-                  hookSpecificOutput: {
-                    hookEventName: 'PreToolUse',
-                    permissionDecision: 'deny',
-                    permissionDecisionReason: `文件 ${fp} 被标记为只读,禁止修改;如确需修改请让用户先更改标签`,
-                  },
-                };
-              }
-            } catch {}
-            return {};
-          }],
-        }],
-      };
     } else if (this.meta.extraDirs && this.meta.extraDirs.length) {
       // 无项目组(v0.9.2 起独立会话也可 /add-dir):只挂附加目录
       options.additionalDirectories = this.meta.extraDirs;
@@ -462,6 +454,11 @@ class Session {
     if (!fastOv) {
       const hooks = options.hooks || {};
       hooks.PreToolUse = [...(hooks.PreToolUse || []), {
+        hooks: [async (input) => {
+          const reason = projects.readonlyToolReason(this.meta.projectId, this.meta.cwd, input.tool_name, input.tool_input);
+          return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
+        }],
+      }, {
         matcher: '^(Agent|Task|SendMessage|Workflow)$',
         hooks: [async (hookInput) => this._guardDelegation(hookInput)],
       }];
@@ -760,16 +757,11 @@ class Session {
 
   // --- permission flow (canUseTool) ---
   _onPermission(toolName, input, opts = {}) {
-    // hard guard: read-only tagged files can never be modified (backup to the hook)
-    try {
-      if (this.meta.projectId && EDIT_TOOLS.has(toolName)) {
-        const fp = input && (input.file_path || input.notebook_path);
-        if (fp && projects.isReadonly(this.meta.projectId, fp)) {
-          this._emit({ type: 'ui_error', message: `已拦截对只读文件的修改:${fp}` }, true);
-          return Promise.resolve({ behavior: 'deny', message: `文件 ${fp} 被标记为只读,禁止修改` });
-        }
-      }
-    } catch {}
+    const reason = projects.readonlyToolReason(this.meta.projectId, this.meta.cwd, toolName, input);
+    if (reason) {
+      this._emit({ type: 'ui_error', message: reason }, true);
+      return Promise.resolve({ behavior: 'deny', message: reason });
+    }
     // auto-allow if the user chose "always" for this tool in this session
     if (this.autoAllowTools.has(toolName)) {
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
@@ -820,6 +812,15 @@ class Session {
   respondPermission(reqId, decision, denyMessage, updatedInput, note) {
     const p = this.pendingPerms.get(reqId);
     if (!p) return false;
+    const merged = (updatedInput && typeof updatedInput === 'object')
+      ? { ...p.input, ...updatedInput } : p.input;
+    // Tags can change while the permission card is open, including during a mode switch.
+    const readonlyReason = projects.readonlyToolReason(this.meta.projectId, this.meta.cwd, p.toolName, merged);
+    if (decision !== 'deny' && readonlyReason) {
+      decision = 'deny';
+      denyMessage = readonlyReason;
+      note = readonlyReason;
+    }
     this.pendingPerms.delete(reqId);
     this._emit({ type: 'ui_permission_done', reqId, decision, note }, true);
     if (decision === 'deny') {
@@ -842,8 +843,6 @@ class Session {
       p.resolve(res);
       return true;
     }
-    const merged = (updatedInput && typeof updatedInput === 'object')
-      ? { ...p.input, ...updatedInput } : p.input;
     p.resolve({ behavior: 'allow', updatedInput: merged });
     return true;
   }
@@ -1251,4 +1250,4 @@ function safeJson(obj) {
   try { return JSON.parse(JSON.stringify(obj)); } catch { return String(obj); }
 }
 
-module.exports = { SessionManager, Session, resolveClaudeExe, encodeCwdForProjects, transcriptPath, isTranscriptResumable, migrateTranscript, fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT, normalizeAgentModels, buildSessionAgents };
+module.exports = { SessionManager, Session, resolveClaudeExe, encodeCwdForProjects, transcriptPath, isTranscriptResumable, migrateTranscript, fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT, agentSettingSources, normalizeAgentModels, buildSessionAgents };

@@ -5,9 +5,20 @@ AI 桌面工作台(Electron):极速问答(零工具+极简提示,响应对齐网
 ## 启动与打包
 
 ```powershell
+npm ci
+pnpm --dir vendor/deepseek-harness install --frozen-lockfile
+npm run build # 生成 Harness Web 与 IPC bundle；需 Node 22.19+ 或 24+、pnpm 11.7.0
 npm start      # 启动应用
-npm run dist   # electron-builder 打包,输出 dist/(Windows nsis 安装包)
+npm run dist   # 先重建 Harness，再打包；输出 dist/，不会自动发布
 ```
+
+仓库保留了带本地兼容补丁的 Harness `lib/` 和 `vendor-deps/`。根构建使用这些已提交文件，
+重新生成被忽略的 Web 与 IPC 产物；不要用上游全量 lib 构建覆盖兼容补丁。
+`npm run build:check` 可单独检查运行时必需文件是否齐全。
+
+项目包含只读标签时，Agent 可读取文件、编辑未受保护的目标；shell、MCP 和子 Agent 等
+无法可靠限定写入范围的调用会被阻止。需要这些工具时请先调整只读标签。该保护作用于
+Drafter Agent 工具调用，不替代操作系统权限，也不约束应用外部进程。
 
 ## 架构
 

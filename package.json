@@ -1,13 +1,16 @@
 {
   "name": "drafter",
-  "version": "0.15.6",
+  "version": "0.15.7",
   "description": "Drafter — AI desktop workbench: fast chat, coding agent and media creation",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test": "node --test \"test/*.test.js\"",
+    "build": "node build/prepare-harness.js",
+    "build:check": "node build/prepare-harness.js --check",
+    "predist": "npm run build",
     "rebuild": "electron-rebuild -f -w node-pty",
-    "dist": "electron-builder"
+    "dist": "electron-builder --publish never"
   },
   "author": "891458249",
   "license": "MIT",
@@ -51,6 +54,7 @@
       "vendor/deepseek-harness/native/**/package.json",
       "vendor/deepseek-harness/native/**/lib/**/*",
       "vendor/deepseek-harness/vendor-deps/**/*",
+      "!vendor/deepseek-harness/apps/web/dist/index.electron.html",
       "!vendor/**/*.tsbuildinfo",
       "!vendor/**/*.map"
     ],

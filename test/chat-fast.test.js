@@ -11,7 +11,7 @@ const { installElectronStub } = require('./helpers/electron-stub');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-chatfast-test-'));
 installElectronStub(tmp);
-const { fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT } = require('../src/main/sessions');
+const { fastChatOverrides, FAST_CHAT_SYSTEM_PROMPT, agentSettingSources } = require('../src/main/sessions');
 
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
@@ -60,4 +60,31 @@ test('极速系统提示:Drafter 身份 + 无工具声明 + 简洁要求 + 附�
   assert.ok(FAST_CHAT_SYSTEM_PROMPT.includes('简洁'), '应要求简洁回答');
   assert.ok(FAST_CHAT_SYSTEM_PROMPT.includes('<附件>'), '应说明附件全文在消息内(input.js 内联注入约定)');
   assert.ok(FAST_CHAT_SYSTEM_PROMPT.includes('直接作答'), '应要求跳过内部推理直接作答(提示层关思考)');
+});
+
+// Agent 模式设置源(v0.15.7):cwd = 用户主目录时,<cwd>/.claude/settings.json 与
+// 用户级 settings.json 是同一文件,'project' 源会把 CLI 钉死的网关 env 重新加载进来,
+// 盖过 buildEnv 按 Key 注入的凭据 → 跨网关 403「模型未配置」(--model 不受影响)。
+test('agentSettingSources:常规 cwd 加载 project/local', () => {
+  assert.deepStrictEqual(agentSettingSources('D:\\ClaudeUI'), ['project', 'local']);
+  assert.deepStrictEqual(agentSettingSources(path.join(os.homedir(), 'some-project')), ['project', 'local'],
+    '主目录的子目录不命中(claude.exe 对 settings 不做向上回溯,实测)');
+});
+
+test('agentSettingSources:cwd = 用户主目录 → 不加载任何文件设置', () => {
+  assert.deepStrictEqual(agentSettingSources(os.homedir()), [],
+    'cwd 为主目录时 project 与用户级是同一文件,必须排除(否则 env 钉网关复活)');
+});
+
+test('agentSettingSources:cwd 为空按当前目录解析', () => {
+  const expected = path.resolve('.', '.claude') === path.resolve(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))
+    ? [] : ['project', 'local'];
+  assert.deepStrictEqual(agentSettingSources(''), expected);
+  assert.deepStrictEqual(agentSettingSources(null), expected);
+});
+
+test('agentSettingSources:Windows 配置父目录大小写变体仍排除设置', { skip: process.platform !== 'win32' }, () => {
+  const parent = path.dirname(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'));
+  assert.deepStrictEqual(agentSettingSources(parent.toUpperCase()), []);
+  assert.deepStrictEqual(agentSettingSources(parent.toLowerCase()), []);
 });

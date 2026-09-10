@@ -83,11 +83,9 @@ export function truncate(s, n) {
   return s.length > n ? s.slice(0, n) + '\n… (已截断)' : s;
 }
 
-if (window.marked) window.marked.setOptions({ breaks: true, gfm: true });
-
 export function renderMarkdown(text) {
-  if (window.marked) {
-    try { return window.marked.parse(text || ''); } catch { /* fall through */ }
+  if (window.marked && window.safeMarkdown) {
+    return window.safeMarkdown.render(window.marked, text);
   }
   return escapeHtml(text || '');
 }

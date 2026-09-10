@@ -32,6 +32,7 @@ function seedSession(patch = {}) {
 
 beforeEach(() => {
   try { fs.unlinkSync(STORE_FILE); } catch {}
+  try { fs.unlinkSync(STORE_FILE + '.bak'); } catch {}
   fs.rmSync(PROJECTS, { recursive: true, force: true });
   fs.mkdirSync(PROJECTS, { recursive: true });
 });

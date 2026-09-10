@@ -108,6 +108,26 @@ async function waitResult(events, ms = 75000) {
   throw new Error('等待 result 超时');
 }
 
+test('真实运行时:bypass 模式下只读项目的 Bash 写入由 PreToolUse 阻止', { timeout: 90000 }, async () => {
+  const cwd = path.join(tmp, 'case-readonly');
+  fs.mkdirSync(cwd, { recursive: true });
+  const locked = path.join(cwd, 'locked.txt');
+  fs.writeFileSync(locked, 'preserve');
+  store.upsertProject({ id: 'readonly-live', dirs: [cwd], files: [{ path: locked, tag: 'readonly' }] });
+  const gw = await startGateway((body, raw) => raw.includes('tool_result')
+    ? sseText(body.model, '操作已阻止。')
+    : sseToolUse(body.model, 'toolu_ro', 'Bash', { command: 'echo changed > locked.txt' }));
+  const { mgr, events } = makeManager(gw.port);
+  const meta = mgr.create({ cwd, projectId: 'readonly-live', kind: 'code', keyId: 'k1', model: 'gpt-6-astra', permissionMode: 'bypassPermissions' });
+  const s = mgr.get(meta.id);
+  try {
+    s.send('执行任务');
+    await waitResult(events);
+    assert.equal(fs.readFileSync(locked, 'utf8'), 'preserve');
+    assert.ok(gw.requests.some((r) => r.raw.includes('tool_result') && r.raw.includes('只读')), '拒绝原因必须通过真实工具回路返回');
+  } finally { s.stop(); gw.server.close(); }
+});
+
 test('真实运行时:内置 Explore + sonnet 覆盖被守卫拦截,网关未收到任何 Claude 请求', { timeout: 90000 }, async () => {
   const gw = await startGateway((body, raw, n) => {
     if (n === 1) {

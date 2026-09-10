@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const store = require('./store');
+const { canonicalPath } = require('./path-identity');
 
 const norm = (p) => path.resolve(p).toLowerCase();
 
@@ -124,16 +125,48 @@ function pruneMissing() {
 }
 
 // --- read-only enforcement (consulted LIVE on every tool call) ---
-function isReadonly(projectId, filePath) {
+function isReadonly(projectId, filePath, cwd) {
   const p = get(projectId);
   if (!p || !filePath) return false;
-  const n = norm(filePath);
+  let target = path.resolve(cwd || process.cwd(), filePath);
+  if (process.platform === 'win32') {
+    const stream = target.indexOf(':', path.parse(target).root.length);
+    if (stream !== -1) target = target.slice(0, stream);
+  }
+  const n = canonicalPath(target);
   for (const f of (p.files || [])) {
     if (f.tag !== 'readonly') continue;
-    const fn = norm(f.path);
+    const fn = canonicalPath(f.path);
     if (n === fn || n.startsWith(fn + path.sep)) return true; // file or tagged folder
+    // Hard links have distinct paths but reference the same file.
+    try {
+      const a = fs.statSync(n, { bigint: true });
+      const b = fs.statSync(fn, { bigint: true });
+      if (a.dev === b.dev && a.ino === b.ino) return true;
+    } catch (e) {
+      if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') throw e;
+    }
   }
   return false;
+}
+
+function readonlyToolReason(projectId, cwd, toolName, input = {}) {
+  if (!projectId) return null;
+  try {
+    const project = get(projectId);
+    if (!(project?.files || []).some((f) => f.tag === 'readonly')) return null;
+    if (['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite',
+      'AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode', 'TaskGet', 'TaskList', 'TaskOutput'].includes(toolName)) return null;
+    if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(toolName)) {
+      const fp = input.file_path || input.notebook_path;
+      if (!fp || typeof fp !== 'string') return '无法确定编辑目标，已阻止操作以保护只读文件。';
+      if (isReadonly(projectId, fp, cwd)) return `文件 ${fp} 被标记为只读，禁止修改。`;
+      return null;
+    }
+    return `项目包含只读文件，无法确认 ${toolName} 的写入范围，已阻止调用。可使用 Read/Edit/Write 等受控工具；如需命令或子 Agent，请先由用户调整只读标签。`;
+  } catch (e) {
+    return `只读保护检查失败，已阻止操作：${e.message}`;
+  }
 }
 
 // --- shared memory -----------------------------------------------------------
@@ -197,5 +230,5 @@ function contextFor(projectId, cwd) {
 module.exports = {
   list, get, findByDir, findContaining, ensureForDir,
   rename, addDir, addFiles, setTag, removeFile, remove, pruneMissing,
-  isReadonly, memoryPath, readMemory, ensureMemoryFile, contextFor,
+  isReadonly, readonlyToolReason, memoryPath, readMemory, ensureMemoryFile, contextFor,
 };

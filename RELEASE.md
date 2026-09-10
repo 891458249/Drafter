@@ -15,6 +15,15 @@
    产物在 `dist/`:
    - `Drafter Setup <version>.exe` — NSIS 安装包
    - `latest.yml` — 自动更新元数据(electron-updater 客户端按它检测版本)
+   v0.15.7 起该命令先重建 Harness Web/IPC，随后执行 `electron-builder --publish never`。
+   可加 `-- --config.directories.output=dist/release-0.15.7` 隔离产物。构建后执行：
+   ```powershell
+   npm test
+   node build/verify-package.js dist/release-0.15.7
+   node test/packaged-smoke.js dist/release-0.15.7
+   ```
+   校验脚本比对版本、全部应用源码、必要运行文件和安装包 SHA-512；冒烟使用独立临时
+   userData，不读取用户的 Drafter 配置。首次构建的依赖准备见 README。
 3. 在 GitHub 网页创建 Release(或用 `.claude-ui/release-<version>.js` 脚本自动创建+上传):
    - 打开 https://github.com/891458249/Drafter/releases/new
    - **Tag 选择与本版一致的现有 tag**(如 `v0.4.0`),Release 标题随意(建议同 tag)
