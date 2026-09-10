@@ -2,6 +2,16 @@
 
 适用:Drafter 桌面应用,仓库 `891458249/Drafter`(**public**,已确认 2026-07-31)。
 
+**让客户端识别更新必须发布 GitHub Release，并上传安装包、blockmap 和 latest.yml。**
+仅推送代码和 tag 不会更新客户端读取的 `/releases/latest`。附件上传名须与 latest.yml
+一致，例如 `Drafter-Setup-0.15.7.exe`；不要直接使用带空格的本地安装包名上传。
+先上传到草稿并校验附件完整性，再发布为 Latest，可避免客户端看到不完整的更新。
+
+v0.15.7 的发布/复核入口为 `node .claude-ui/release-0.15.7.js`（发布）和
+`node .claude-ui/release-0.15.7.js --verify`（仅复核）。脚本使用 Git 凭据管理器，
+不会把凭据写入仓库；核验公开 latest.yml、两个二进制附件的完整下载哈希，以及
+旧版本调用 `checkRepoVersion()` 时的 `hasUpdate` 结果。
+
 ## 标准发布步骤
 
 1. 确认 `package.json` 的 `version` 已 bump,且对应 commit 已打同名 tag 并推送:
