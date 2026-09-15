@@ -54,6 +54,7 @@ const canvases = require('./src/main/canvases');
 const canvasJobs = require('./src/main/canvasJobs');
 const canvasGraph = require('./src/main/canvasGraph');
 const llmtext = require('./src/main/llmtext');
+const splitSubtasks = require('./src/main/split-subtasks');
 const oaiProxy = require('./src/main/oai-proxy');
 const modelGuard = require('./src/main/model-guard-proxy');
 const comfyConnections = require('./src/main/comfy/connection-store');
@@ -345,9 +346,20 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('before-quit', () => {
+let exitCleanup = null;
+let exitCleanupDone = false;
+app.on('before-quit', (event) => {
   app.isQuitting = true; // 覆盖 Cmd+Q / app.quit() 等所有退出路径
+  if (exitCleanupDone) return;
+  event.preventDefault();
+  if (exitCleanup) return;
   cleanup();
+  exitCleanup = require('./src/main/debug-resources').cleanupAll().then((reports) => {
+    for (const report of reports) if (!report.ok) console.error('[debug cleanup]', report.pending);
+  }).catch((error) => console.error('[debug cleanup]', error)).finally(() => {
+    exitCleanupDone = true;
+    app.quit();
+  });
 });
 
 app.on('window-all-closed', () => {
@@ -673,7 +685,7 @@ ipcMain.handle('perms:remove', (_e, { cwd, kind, rule }) => perms.removeRule(cwd
 
 // auto-update
 ipcMain.handle('update:check', () => { updater.checkNow(getWindow); return true; });
-ipcMain.handle('update:install', () => { updater.installAndRestart(); return true; });
+ipcMain.handle('update:install', async () => { await updater.installAndRestart(); return true; });
 ipcMain.handle('update:repoVersion', () => updater.checkRepoVersion());
 
 // ---------------------------------------------------------------------------
@@ -874,6 +886,65 @@ ipcMain.handle('sess:archive', async (_e, { sid, archived }) => {
 });
 ipcMain.handle('sess:remove', (_e, sid) => { sessions.remove(sid); return true; });
 ipcMain.handle('sess:setActive', (_e, sid) => { sessions.setActive(sid); return true; });
+
+// ---------------------------------------------------------------------------
+// 拆分子任务(v0.15.9):当前会话 AI 把需求拆成子任务,确认后建多个并行 code 会话
+// ---------------------------------------------------------------------------
+
+// 第一步:调 LLM 拆分需求,返回结构化子任务列表(不改当前会话历史)。
+// keyId/model 沿用当前会话;缺省回退到活跃 Key 的首个对话模型。
+ipcMain.handle('sess:splitSubtasks', async (_e, { sid, requirement } = {}) => {
+  const s = sid ? sessions.get(sid) : null;
+  const meta = s ? s.meta : {};
+  const keyEntry = keys.byId(meta.keyId || null) || keys.activeKey();
+  if (!keyEntry) return { ok: false, error: '未找到可用的 API Key' };
+  const model = meta.model
+    || (((keys.enabledModels() || []).find((e) => e.keyId === keyEntry.id) || {}).model);
+  if (!model) return { ok: false, error: '未找到可用的对话模型' };
+  const req = String(requirement || '').trim();
+  if (!req) return { ok: false, error: '需求为空,请先在输入框填写要拆解的需求' };
+  const r = await llmtext.complete(keyEntry, {
+    model, prompt: splitSubtasks.buildSplitPrompt(req),
+  });
+  if (!r.ok) return { ok: false, error: r.error || '拆分请求失败' };
+  const parsed = splitSubtasks.parseSubtasks(r.text);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  return { ok: true, tasks: parsed.tasks };
+});
+
+// 第二步:按确认的子任务列表批量建 code 会话(继承当前会话 cwd/项目/模型/Key/权限/Gem),
+// 并行发送各自子任务。返回新建的会话 meta 列表。
+ipcMain.handle('sess:spawnSubtasks', async (_e, { sid, tasks } = {}) => {
+  if (!Array.isArray(tasks) || !tasks.length) return { ok: false, error: '子任务列表为空' };
+  const base = sid ? sessions.get(sid) : null;
+  const bm = base ? base.meta : {};
+  const keyId = bm.keyId || (keys.activeKey() || {}).id || null;
+  const created = [];
+  for (const t of tasks.slice(0, 12)) {
+    const title = String(t.title || '子任务').slice(0, 60);
+    const detail = String(t.detail || t.title || '').trim();
+    if (!detail) continue;
+    // 继承项目归属:有 projectId 则进同组;否则按 cwd 解析/新建组
+    let projectId = bm.projectId || null;
+    const cwd = bm.cwd || os.homedir();
+    if (!projectId && cwd) projectId = projects.ensureForDir(cwd).id;
+    const meta = await sessions.create({
+      cwd, projectId, keyId,
+      model: bm.model || null,
+      permissionMode: bm.permissionMode || 'default',
+      effort: bm.effort || null,
+      agentModels: bm.agentModels || [],
+      gemId: bm.gemId || null,
+      title: '⧉ ' + title,
+      parentId: bm.id || null,
+    });
+    created.push(meta);
+    // 并行派发:send 是同步入队(返回 uuid),SDK 回合异步推进,各会话互不等待
+    sessions.get(meta.id).send(detail);
+  }
+  if (!created.length) return { ok: false, error: '未能创建任何子会话' };
+  return { ok: true, sessions: created };
+});
 
 // ---------------------------------------------------------------------------
 // IPC: AIGC 生成任务闭环(新媒体板块,v0.9.0)

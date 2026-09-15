@@ -5,6 +5,7 @@ import * as sessionsUi from './sessions-ui.js';
 import * as input from './input.js';
 import * as msgmenu from './msgmenu.js';
 import * as msgnav from './msgnav.js';
+import * as split from './split.js';
 import * as diff from './diff.js';
 import * as editor from './editor.js';
 import * as preview from './preview.js';
@@ -273,12 +274,12 @@ function ctxInfo() {
     : 0;
   // 上限 = SDK 报告的真实模型窗口(result.modelUsage.contextWindow),兜底启发值。
   const max = (s && s.ui.contextWindowMax) || modelCtxMax(model);
-  return { used, max, pct: Math.min(100, Math.round((used / max) * 100)) };
+  return { used, max, pct: Math.min(100, Math.round((used / max) * 100)), pending: !!s?.ui.contextUsagePending, compacting: !!s?.ui.compacting };
 }
 
 function updateUsageButton() {
-  const { pct } = ctxInfo();
-  $('btn-usage-label').textContent = `上下文 ${pct}%`;
+  const { pct, pending, compacting } = ctxInfo();
+  $('btn-usage-label').textContent = compacting ? '上下文压缩中…' : pending ? '上下文待统计' : `上下文 ${pct}%`;
   const ring = document.querySelector('#btn-usage .usage-ring');
   if (ring) {
     const color = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--yellow, #d29922)' : 'var(--accent)';
@@ -307,7 +308,7 @@ function estCost(m, v) {
 function fmtMoney(n) { return '$' + (n < 0.1 ? n.toFixed(4) : n.toFixed(2)); }
 
 async function renderUsagePop() {
-  const { used, max, pct } = ctxInfo();
+  const { used, max, pct, pending } = ctxInfo();
   let rows = '';
   let totalIn = 0, totalOut = 0, totalCost = 0;
   try {
@@ -337,7 +338,7 @@ async function renderUsagePop() {
   }
   $('usage-pop').innerHTML = `
     <div class="usage-sec">
-      <div class="usage-row head"><span>上下文窗口</span><span>${fmtTokens(used)} / ${fmtTokens(max)} (${pct}%)</span></div>
+      <div class="usage-row head"><span>上下文窗口</span><span>${pending ? '压缩后待统计' : `${fmtTokens(used)} / ${fmtTokens(max)} (${pct}%)`}</span></div>
       <div class="usage-bar"><div class="usage-bar-fill" style="width:${pct}%"></div></div>
     </div>
     <div class="usage-sec">
@@ -1319,6 +1320,7 @@ sessionsUi.init();
 input.init();
 msgmenu.init();
 msgnav.init();
+split.init(); // 拆分子任务(v0.15.9)
 diff.init();
 editor.init();
 preview.init();

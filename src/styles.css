@@ -564,6 +564,17 @@ html, body {
 .modal-status.err { color: var(--red); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
 .form-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+
+/* 拆分子任务确认列表(v0.15.9):可编辑的标题+说明行,确认后并行建会话 */
+#split-list { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.split-row { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--bg-input); }
+.split-row-head { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.split-row-head .idx { color: var(--text-dim); font-size: 11px; flex: none; width: 18px; }
+.split-title { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 12.5px; }
+.split-detail { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; line-height: 1.5; resize: vertical; min-height: 44px; font-family: var(--font); }
+.split-del { flex: none; }
+.split-title:focus, .split-detail:focus { outline: none; border-color: var(--accent); }
+
 .mcp-list { border: 1px solid var(--border); border-radius: 8px; max-height: 200px; overflow-y: auto; }
 .mcp-row { display: flex; gap: 8px; align-items: center; padding: 7px 10px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
 .mcp-row:last-child { border-bottom: none; }

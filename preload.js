@@ -134,6 +134,8 @@ contextBridge.exposeInMainWorld('api', {
   canvasJobList: (canvasId) => ipcRenderer.invoke('canvas:job:list', { canvasId }),
   canvasJobCancel: (jobId) => ipcRenderer.invoke('canvas:job:cancel', { jobId }),
   llmComplete: (p) => ipcRenderer.invoke('llm:complete', p), // 画布文本生成节点(v0.10.1)
+  sessSplitSubtasks: (p) => ipcRenderer.invoke('sess:splitSubtasks', p), // 拆分子任务(v0.15.9)
+  sessSpawnSubtasks: (p) => ipcRenderer.invoke('sess:spawnSubtasks', p),
   assetsList: () => ipcRenderer.invoke('assets:list'),
 
   // git / diff / PR
