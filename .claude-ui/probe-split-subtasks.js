@@ -1,6 +1,7 @@
 // 拆分子任务端到端冒烟:本地假 OpenAI 服务 + 真 Key,让真实 sess:splitSubtasks
 // 走通 llmtext.complete → HTTP → 返回固定子任务 JSON;UI 确认后验证真实
 // sess:spawnSubtasks 批量建出并行 code 会话。
+// v0.15.10:按钮改为发送框旁的激活/关闭开关,激活时发送被拦截去拆分。
 const { spawn } = require('node:child_process')
 const http = require('node:http')
 const path = require('node:path')
@@ -114,8 +115,12 @@ async function main() {
     await wait(300)
     await evaluate(`(() => { document.querySelector('#input').value = '做一个带用户系统的博客'; })()`)
 
-    // 点拆任务 → 真实 HTTP 拆分 → 弹卡片
+    // 激活拆任务开关 → 点发送 → 真实 HTTP 拆分 → 弹卡片
     await evaluate(`(() => { document.querySelector('#btn-split-subtasks').click(); })()`)
+    await wait(200)
+    const armedOn = await evaluate(`document.querySelector('#btn-split-subtasks').classList.contains('split-on')`)
+    if (!armedOn) throw new Error('split toggle did not arm')
+    await evaluate(`(() => { document.querySelector('#btn-send').click(); })()`)
     await wait(1500)
     const modalShown = await evaluate(`!document.querySelector('#split-modal').classList.contains('hidden')`)
     const rows = await evaluate(`[...document.querySelectorAll('#split-list .split-row')].map(r => r.querySelector('.split-title').value)`)

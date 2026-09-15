@@ -1,0 +1,109 @@
+{
+  "id": "t_33c9389e-509",
+  "name": "LLM 提示词 → 图片生成",
+  "createdAt": 1788250549518,
+  "graph": {
+    "drawflow": {
+      "Home": {
+        "data": {
+          "1": {
+            "id": 1,
+            "name": "cv-text",
+            "data": {
+              "type": "text",
+              "text": ""
+            },
+            "class": "cv-nt-text",
+            "html": "<div class=\"cv-shell\"><div class=\"cv-head nt-text\"><span>📝</span><span class=\"cv-title\">文本</span><button class=\"cv-del\" title=\"删除节点\">✕</button></div><div class=\"cv-body\"></div></div>",
+            "typenode": false,
+            "inputs": {},
+            "outputs": {
+              "output_1": {
+                "connections": [
+                  {
+                    "node": "2",
+                    "output": "input_1"
+                  }
+                ]
+              }
+            },
+            "pos_x": 60,
+            "pos_y": 140
+          },
+          "2": {
+            "id": 2,
+            "name": "cv-llmtext",
+            "data": {
+              "type": "llmtext",
+              "prompt": "",
+              "models": [],
+              "results": [],
+              "active": -1,
+              "view": 0
+            },
+            "class": "cv-nt-llmtext",
+            "html": "<div class=\"cv-shell\"><div class=\"cv-head nt-llmtext\"><span>✍️</span><span class=\"cv-title\">文本生成</span><button class=\"cv-del\" title=\"删除节点\">✕</button></div><div class=\"cv-body\"></div></div>",
+            "typenode": false,
+            "inputs": {
+              "input_1": {
+                "connections": [
+                  {
+                    "node": "1",
+                    "input": "output_1"
+                  }
+                ]
+              }
+            },
+            "outputs": {
+              "output_1": {
+                "connections": [
+                  {
+                    "node": "3",
+                    "output": "input_1"
+                  }
+                ]
+              }
+            },
+            "pos_x": 400,
+            "pos_y": 120
+          },
+          "3": {
+            "id": 3,
+            "name": "cv-image",
+            "data": {
+              "type": "image",
+              "prompt": "",
+              "models": [],
+              "tasks": [],
+              "active": -1,
+              "view": 0
+            },
+            "class": "cv-nt-image",
+            "html": "<div class=\"cv-shell\"><div class=\"cv-head nt-image\"><span>🎨</span><span class=\"cv-title\">图片生成</span><button class=\"cv-del\" title=\"删除节点\">✕</button></div><div class=\"cv-body\"></div></div>",
+            "typenode": false,
+            "inputs": {
+              "input_1": {
+                "connections": [
+                  {
+                    "node": "2",
+                    "input": "output_1"
+                  }
+                ]
+              },
+              "input_2": {
+                "connections": []
+              }
+            },
+            "outputs": {
+              "output_1": {
+                "connections": []
+              }
+            },
+            "pos_x": 760,
+            "pos_y": 140
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "id": "cv_2249f966-7f3",
+  "name": "新建画布",
+  "createdAt": 1788250589452,
+  "updatedAt": 1788250591433,
+  "graph": {
+    "4": {
+      "id": "4",
+      "class_type": "CLIPTextEncodeControlnet",
+      "title": "cv-nt-external",
+      "pos": [
+        160,
+        120
+      ],
+      "inputs": {
+        "comfyConnectionId": "comfy_local",
+        "comfyConnectionName": "本机 ComfyUI",
+        "comfyClassType": "CLIPTextEncodeControlnet",
+        "comfyDisplayName": "CLIP Text Encode (Controlnet)",
+        "comfyCategory": "model/conditioning",
+        "comfyOutputs": [
+          "CONDITIONING"
+        ],
+        "comfyInputs": {},
+        "comfyWidgets": {
+          "clip": {
+            "kind": "CLIP",
+            "multiline": false,
+            "tooltip": "",
+            "controlAfterGenerate": false
+          },
+          "conditioning": {
+            "kind": "CONDITIONING",
+            "multiline": false,
+            "tooltip": "",
+            "controlAfterGenerate": false
+          },
+          "text": {
+            "kind": "STRING",
+            "multiline": true,
+            "tooltip": "",
+            "controlAfterGenerate": false
+          }
+        },
+        "comfyInputTypes": {
+          "clip": "CLIP",
+          "conditioning": "CONDITIONING",
+          "text": "STRING"
+        },
+        "slotNames": [
+          "clip",
+          "conditioning",
+          "text"
+        ],
+        "tasks": [],
+        "active": -1,
+        "view": 0,
+        "_comfyConnectionId": "comfy_local",
+        "_comfyCategory": "model/conditioning",
+        "_comfyOutputs": [
+          "CONDITIONING"
+        ],
+        "_comfyInputTypes": {
+          "clip": "CLIP",
+          "conditioning": "CONDITIONING",
+          "text": "STRING"
+        }
+      }
+    }
+  }
+}

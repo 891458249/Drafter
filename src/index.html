@@ -189,7 +189,6 @@
             <button id="gem-sel-btn" class="btn btn-sm" title="选择 Gem 自定义助手(指令/知识随会话注入)">💎 <span id="gem-sel-name">Gem</span></button>
             <button id="btn-chat-mode" class="btn btn-sm chat-only chat-mode-on" title="极速问答(零工具+极简提示,响应快 5-10 倍,纯问答)。点击切换 Agent 模式">⚡ 极速</button>
             <button id="btn-compact" class="btn btn-sm sdk-only" title="压缩上下文 (/compact)">压缩</button>
-            <button id="btn-split-subtasks" class="btn btn-sm sdk-only" title="拆分子任务:AI 把当前需求拆成多个子任务,确认后建多个会话并行执行">⧉ 拆任务</button>
             <label class="ctrl sdk-only">模式
               <select id="perm-mode">
                 <option value="default">默认(询问)</option>
@@ -228,6 +227,9 @@
           <div class="input-wrap">
             <textarea id="input" class="input" rows="1"
               placeholder="发送消息…  (Enter 发送 · Shift+Enter 换行 · @文件 · /命令 · 可粘贴图片)"></textarea>
+            <button id="btn-split-subtasks" class="send-icon split-toggle sdk-only" title="拆分子任务:激活后,发送的这条消息会被 AI 拆成多个子任务,确认后建多个会话并行执行;再次点击关闭">
+              <svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M6 2h4v4h4v4h-4v4H6v-4H2V6h4z"/></svg>
+            </button>
             <button id="btn-send" class="send-icon" title="发送 (Enter)">
               <svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M8 1l6 6h-4v8H6V7H2z"/></svg>
             </button>

@@ -16,6 +16,7 @@
 
 const path = require('node:path')
 const store = require('../store')
+const { lookupCtxWindow } = require('../../renderer/ctxwin')
 
 // —— 纯函数:从 Drafter Key 生成 harness provider 路由条目 ————————————————————————
 
@@ -42,7 +43,10 @@ function credentialRefOf(keyId) {
 function keyToProvider(key) {
   const api = apiOf(key)
   const models = Array.isArray(key.models) && key.models.length
-    ? key.models.map((id) => ({ id }))
+    ? key.models.map((id) => {
+      const contextWindow = lookupCtxWindow(id)
+      return contextWindow ? { id, contextWindow } : { id }
+    })
     : [{ id: 'claude-sonnet-4-5' }] // 目录兜底:让选择器至少有一项
   const provider = {
     displayName: key.name || key.id,

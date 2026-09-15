@@ -46,6 +46,7 @@ const DSH_HOME = () => path.join(app.getPath('userData'), 'harness')
 
 // —— 运行时单例状态 ————————————————————————————————————————————————————————
 let harnessCtx = null          // Cordis 根 Context(boot 结果)
+let disposeDebugResources = null
 let apiFetchHandler = null     // toFetchHandler(ctx.apiProxy).fetch
 let bootPromise = null         // 防重入
 const sseBridges = new Map()   // channelId → { cancel() } 活跃 SSE 转发器
@@ -581,6 +582,7 @@ async function bootHarness() {
     const bareModuleBaseUrl = pathToFileURL(path.join(HARNESS_ROOT, 'packages/bundle/base/')).href
     const ctx = await boot('drafter', configPath, allPatches, prepare, bareModuleBaseUrl)
     harnessCtx = ctx
+    disposeDebugResources = await require('./debug-resources-bridge').applyDebugResources(ctx)
 
     if (!ctx.apiProxy) throw new Error('harness boot 完成但 ctx.apiProxy 缺失(api-gateway 未挂载?)')
     // Typert 桥(v0.11.7):/api 请求改走 connection 的复合 FetchHandler——
@@ -805,6 +807,8 @@ async function shutdownHarness() {
   for (const [, b] of sseBridges) { try { b.cancel() } catch {} }
   sseBridges.clear()
   if (harnessCtx) {
+    try { await disposeDebugResources?.() } catch (e) { logErr('debug cleanup failed:', e) }
+    disposeDebugResources = null
     try { await harnessCtx.fiber.dispose() } catch (e) { logErr('dispose failed:', e) }
     harnessCtx = null
     apiFetchHandler = null

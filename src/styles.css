@@ -828,7 +828,7 @@ kbd {
 
 /* --- 输入框内图标式发送/停止 ---------------------------------------------- */
 .input-wrap { position: relative; }
-.input-wrap .input { width: 100%; padding-right: 48px; box-sizing: border-box; }
+.input-wrap .input { width: 100%; padding-right: 80px; box-sizing: border-box; }
 .send-icon {
   position: absolute;
   right: 10px;
@@ -845,7 +845,21 @@ kbd {
   color: #fff;
   padding: 0;
 }
+/* 拆任务开关:置于发送按钮左侧(v0.15.10),激活态高亮 */
+#btn-split-subtasks {
+  right: 46px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+#btn-split-subtasks:hover { color: var(--text); border-color: var(--accent); }
+#btn-split-subtasks.split-on {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
 .send-icon:hover { background: var(--accent-hover); }
+#btn-split-subtasks.split-on:hover { background: var(--accent-hover); }
 .send-icon.stop { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); }
 .send-icon.stop:hover { border-color: var(--red); color: var(--red); }
 

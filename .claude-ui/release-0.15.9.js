@@ -91,7 +91,7 @@ async function main() {
     const data = fs.readFileSync(path.join(DIST, local));
     return { local, remote, data, digest: 'sha256:' + crypto.createHash('sha256').update(data).digest('hex') };
   });
-  if (!/^version: 0\.15\.8\s*$/m.test(yml) || !yml.includes('url: ' + assets[0].remote)) throw new Error('Update metadata mismatch');
+  if (!/^version: 0\.15\.9\s*$/m.test(yml) || !yml.includes('url: ' + assets[0].remote)) throw new Error('Update metadata mismatch');
   if (crypto.createHash('sha512').update(assets[0].data).digest('base64') !== /sha512:\s*(\S+)/.exec(yml)?.[1]) throw new Error('Installer SHA-512 mismatch');
   const credential = execFileSync('git', ['credential', 'fill'], { cwd: ROOT, input: 'protocol=https\nhost=github.com\n\n', encoding: 'utf8', windowsHide: true });
   token = credential.split(/\r?\n/).find((line) => line.startsWith('password='))?.slice(9);

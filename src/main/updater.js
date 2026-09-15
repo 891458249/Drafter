@@ -48,7 +48,9 @@ function checkNow(getWindow) {
   getAutoUpdater().checkForUpdates().catch(() => {});
 }
 
-function installAndRestart() {
+async function installAndRestart() {
+  const reports = await require('./debug-resources').cleanupAll();
+  if (reports.some((report) => !report.ok)) throw new Error('调试资源仍被占用，已暂停安装更新。请先解除调试占用。');
   try { require('electron').app.isQuitting = true; } catch {}
   getAutoUpdater().quitAndInstall();
 }

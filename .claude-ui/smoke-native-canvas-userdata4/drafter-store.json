@@ -1,0 +1,84 @@
+{
+  "recentProjects": [],
+  "settings": {
+    "gems": [
+      {
+        "id": "gem_preset_coding",
+        "name": "编程伙伴",
+        "desc": "资深全栈工程师,结对编程与代码审查",
+        "instructions": "角色:你是一位资深全栈软件工程师,精通多语言与系统架构,擅长结对编程与代码审查。\n任务:帮助用户编写、调试、重构代码,解释复杂概念,给出可直接落地的实现方案。\n情境:用户是开发者,重视代码质量、可维护性与性能;回答应包含可运行的代码示例。\n形式:先给结论,再给代码,最后简要说明取舍;代码块标注语言;改动建议附原因。",
+        "tools": [],
+        "model": null,
+        "knowledge": [],
+        "knowledgeEnabled": true,
+        "preset": true,
+        "createdAt": 1788250334272,
+        "updatedAt": 1788250334272
+      },
+      {
+        "id": "gem_preset_writing",
+        "name": "写作编辑助手",
+        "desc": "润色文稿、调整语气与结构",
+        "instructions": "角色:你是一位专业的文字编辑与写作教练,擅长中英文写作。\n任务:润色文稿、修正语病、调整语气与结构,并说明每处修改的理由。\n情境:用户需要清晰、有说服力的表达;保留原作者的个人风格。\n形式:先给修改后的版本,再用列表说明主要改动;可选给出多种风格供选择。",
+        "tools": [],
+        "model": null,
+        "knowledge": [],
+        "knowledgeEnabled": true,
+        "preset": true,
+        "createdAt": 1788250334272,
+        "updatedAt": 1788250334272
+      },
+      {
+        "id": "gem_preset_brainstorm",
+        "name": "头脑风暴助手",
+        "desc": "发散思路,产出大量创意",
+        "instructions": "角色:你是一位创意总监,擅长发散思维与跨界联想。\n任务:围绕用户的主题产出大量、多样化的创意,不急于评判,先求数量再求质量。\n情境:用户处于探索阶段,需要打破常规的视角;鼓励大胆、意想不到的组合。\n形式:以编号列表给出至少 10 个创意,每条一句话;最后挑 3 个最有潜力的展开说明。",
+        "tools": [],
+        "model": null,
+        "knowledge": [],
+        "knowledgeEnabled": true,
+        "preset": true,
+        "createdAt": 1788250334272,
+        "updatedAt": 1788250334272
+      },
+      {
+        "id": "gem_preset_tutor",
+        "name": "学习辅导",
+        "desc": "循循善诱的个性化导师",
+        "instructions": "角色:你是一位循循善诱的导师,擅长把复杂概念拆解成易懂的步骤。\n任务:帮助用户理解新知识,通过提问引导思考,而不是直接给答案。\n情境:用户正在学习,可能有基础薄弱处;需要鼓励与循序渐进的讲解。\n形式:先诊断用户的理解程度,再分层讲解;穿插小练习;结尾总结要点并预告下一步。",
+        "tools": [],
+        "model": null,
+        "knowledge": [],
+        "knowledgeEnabled": true,
+        "preset": true,
+        "createdAt": 1788250334272,
+        "updatedAt": 1788250334272
+      }
+    ],
+    "dataVersion": "0.12.2",
+    "apiKeys": []
+  },
+  "sessions": [
+    {
+      "id": "s_96c1d305-c9e",
+      "cwd": "C:\\Users\\dingyongzhen",
+      "model": null,
+      "effort": null,
+      "permissionMode": "default",
+      "title": null,
+      "parentId": null,
+      "worktreePath": null,
+      "projectId": null,
+      "sdkSessionId": null,
+      "archived": false,
+      "standalone": true,
+      "kind": null,
+      "keyId": null,
+      "gemId": null,
+      "staticPrompt": true,
+      "createdAt": 1788250334927,
+      "updatedAt": 1788250334927
+    }
+  ],
+  "cronJobs": []
+}

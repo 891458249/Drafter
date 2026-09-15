@@ -1,0 +1,52 @@
+{
+  "id": "cv_8bdb0459-97b",
+  "name": "新建画布",
+  "createdAt": 1788250553210,
+  "updatedAt": 1788250556204,
+  "graph": {
+    "1": {
+      "id": "1",
+      "class_type": "wanBlockSwap",
+      "title": "cv-nt-external",
+      "pos": [
+        120,
+        80
+      ],
+      "inputs": {
+        "comfyConnectionId": "comfy_local",
+        "comfyConnectionName": "本机 ComfyUI",
+        "comfyClassType": "wanBlockSwap",
+        "comfyDisplayName": "wanBlockSwap",
+        "comfyCategory": "",
+        "comfyOutputs": [
+          "MODEL"
+        ],
+        "comfyInputs": {},
+        "comfyWidgets": {
+          "model": {
+            "kind": "MODEL",
+            "multiline": false,
+            "tooltip": "",
+            "controlAfterGenerate": false
+          }
+        },
+        "comfyInputTypes": {
+          "model": "MODEL"
+        },
+        "slotNames": [
+          "model"
+        ],
+        "tasks": [],
+        "active": -1,
+        "view": 0,
+        "_comfyConnectionId": "comfy_local",
+        "_comfyOutputs": [
+          "MODEL"
+        ],
+        "_comfyInputTypes": {
+          "model": "MODEL"
+        }
+      }
+    }
+  }
+}

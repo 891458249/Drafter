@@ -5,11 +5,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const net = require('net');
-const { spawn } = require('child_process');
+const debugResources = require('../src/main/debug-resources');
+const debugScope = 'packaged-smoke:' + require('crypto').randomUUID();
 const dist = path.resolve(process.argv[2] || 'dist');
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'drafter-packaged-smoke-'));
 fs.writeFileSync(path.join(userData, 'drafter-store.json'), JSON.stringify({ settings: { updateCheck: false, floatBall: false }, sessions: [], cronJobs: [] }));
-let proc;
 const sockets = [];
 let output = '';
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -18,7 +18,8 @@ async function until(fn, ms = 30000) {
   let lastError;
   while (Date.now() - start < ms) {
     try { const result = await fn(); if (result) return result; } catch (e) { lastError = e; }
-    if (proc && proc.exitCode !== null) throw new Error('Drafter exited early: ' + proc.exitCode);
+    const ended = debugResources.records(debugScope).find((r) => r.status === 'failed' || r.status === 'released');
+    if (ended) throw new Error('Drafter exited early: ' + (ended.error || ended.status));
     await delay(250);
   }
   throw new Error('Smoke timeout: ' + (lastError?.message || 'condition not reached'));
@@ -40,11 +41,16 @@ async function connect(url) {
     pending.set(key, { resolve, reject, timer });
     ws.send(JSON.stringify({ id: key, method, params }));
   });
-  return async (expression) => {
+  const evaluate = async (expression) => {
     const result = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
     return result.result.value;
   };
+  evaluate.screenshot = async (file) => {
+    const result = await call('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(file, Buffer.from(result.data, 'base64'));
+  };
+  return evaluate;
 }
 (async () => {
   const server = net.createServer();
@@ -53,15 +59,10 @@ async function connect(url) {
   await new Promise((r) => server.close(r));
   const env = { ...process.env, DRAFTER_USERDATA: userData, DRAFTER_ALLOW_MULTI_INSTANCE: '1',
     DSH_HOME: path.join(userData, 'harness'), CLAUDE_CONFIG_DIR: path.join(userData, 'claude-config') };
-  delete env.ELECTRON_RUN_AS_NODE;
-  proc = spawn(path.join(dist, 'win-unpacked/Drafter.exe'), ['--remote-debugging-port=' + port], {
-    cwd: userData, windowsHide: true,
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  proc.stdout.on('data', (d) => { output += d; });
-  proc.stderr.on('data', (d) => { output += d; });
-  proc.on('error', (e) => { output += e.message; });
+  env.ELECTRON_RUN_AS_NODE = null;
+  await debugResources.launch({ scope: debugScope,
+    exe: process.env.DRAFTER_SMOKE_DEV ? require('electron') : path.join(dist, 'win-unpacked/Drafter.exe'),
+    args: [...(process.env.DRAFTER_SMOKE_DEV ? [path.resolve(__dirname, '..')] : []), '--remote-debugging-port=' + port], cwd: userData, env, ports: [port] });
   const pages = () => fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json());
   const page = await until(async () => (await pages()).find((p) => p.url.endsWith('/src/index.html')));
   const evaluate = await connect(page.webSocketDebuggerUrl);
@@ -82,14 +83,14 @@ async function connect(url) {
   const harnessEvaluate = await connect(harness.webSocketDebuggerUrl);
   await until(() => harnessEvaluate('!!window.__DSH_TRANSPORT__ && !!window.__DSH_BOOT__ && document.body.innerText.length > 30'), 45000);
   assert.equal(await evaluate('document.querySelector("#harness-status").classList.contains("hidden")'), true);
-  console.log(JSON.stringify({ packagedUi: true, storeIpc: true, safeMarkdown: true, terminal: true, harnessUi: true, userData }));
+  const screenshot = path.join(userData, 'harness.png');
+  await evaluate.screenshot(screenshot);
+  console.log(JSON.stringify({ devMode: !!process.env.DRAFTER_SMOKE_DEV, storeIpc: true, safeMarkdown: true, terminal: true, harnessUi: true, userData, screenshot }));
 })().catch((e) => { console.error(e.stack); console.error(output.slice(-6000)); process.exitCode = 1; })
   .finally(async () => {
     for (const socket of sockets) socket.close();
-    if (proc && proc.exitCode === null) {
-      const exited = new Promise((r) => proc.once('exit', r));
-      proc.kill();
-      await Promise.race([exited, delay(3000)]);
-    }
+    const report = await debugResources.cleanup(debugScope);
+    console.log('Debug cleanup:', JSON.stringify(report));
+    if (!report.ok) process.exitCode = 1;
     // Preserve isolated logs for diagnosis; never touch the user's real profile.
   });

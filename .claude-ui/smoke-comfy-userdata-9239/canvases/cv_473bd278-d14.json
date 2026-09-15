@@ -1,0 +1,19 @@
+{
+  "id": "cv_473bd278-d14",
+  "name": "新建画布",
+  "createdAt": 1788200486502,
+  "updatedAt": 1788200487629,
+  "graph": {
+    "1": {
+      "id": "1",
+      "class_type": "drafter/text",
+      "pos": [
+        120,
+        80
+      ],
+      "inputs": {
+        "text": ""
+      }
+    }
+  }
+}

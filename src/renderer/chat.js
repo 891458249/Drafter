@@ -63,7 +63,7 @@ export function updateTopbarForSession(sid) {
   const s = state.sessions.get(sid);
   if (!s) return;
   const m = s.meta;
-  // 极速/Agent 模式钮(v0.10.2):跟随会话回显;极速时权限模式/压缩按钮灰掉(零工具无意义)
+  // 极速模式只禁用工具权限；原生上下文压缩同样适用于零工具聊天。
   const chatModeBtn = $('btn-chat-mode');
   if (chatModeBtn) {
     const fast = isFastChat(s);
@@ -73,10 +73,8 @@ export function updateTopbarForSession(sid) {
       ? '当前:极速问答(零工具+极简提示,响应快)。点击切换 Agent 模式(全部工具能力)'
       : '当前:Agent 模式(全部工具能力)。点击切换极速问答(响应快 5-10 倍,纯问答)';
   }
-  for (const id of ['perm-mode', 'btn-compact']) {
-    const el = $(id);
-    if (el) el.disabled = isFastChat(s);
-  }
+  const permissionSelect = $('perm-mode');
+  if (permissionSelect) permissionSelect.disabled = isFastChat(s);
   if (m.permissionMode) $('perm-mode').value = m.permissionMode;
   $('model-sel').value = modelSelValue(m); // keyId|modelId 编码,回显所属 Key 分组
   updateKeyChips(); // 回显模型时同步 Key chip
@@ -112,6 +110,7 @@ export function setBusyUI(busy) {
   $('btn-send').classList.toggle('hidden', !!busy);
   $('btn-send').disabled = false; // 媒体会话的发送锁由 updateAigcSendUI 单独管理
   $('btn-stop').classList.toggle('hidden', !busy);
+  $('btn-compact').disabled = !!busy;
   $('busy-hint').classList.toggle('hidden', !busy);
   updateTurnStatus();
 }
@@ -1038,6 +1037,7 @@ export function renderEvent(sid, ev, { replay }) {
       s.ui.curAction = '已发送,等待响应…';
       resetTurnProgress(); // 新回合:预测进度归零
     }
+    if (!s.ui.busy) { s.ui.compacting = false; s.ui.curAction = null; }
     if (sid === state.activeSid) setBusyUI(s.ui.busy);
     emit('session-status', { sid, busy: s.ui.busy, running: s.ui.running });
     return;
@@ -1063,7 +1063,22 @@ export function renderEvent(sid, ev, { replay }) {
     return;
   }
   if (t === 'ui_stderr') { console.debug('[stderr]', ev.text); return; }
-  if (t === 'ui_compact') { metaLine(s, '── 上下文已压缩 ──'); return; }
+  if (t === 'ui_compacting') {
+    s.ui.compacting = !!ev.active;
+    s.ui.curAction = ev.active ? '正在自动压缩上下文…' : null;
+    if (ev.result === 'failed') metaLine(s, '上下文压缩失败：' + (ev.error || '可点击压缩重试，聊天历史已保留。'), 'error-line');
+    if (sid === state.activeSid) { updateTurnStatus(); emit('usage-updated'); }
+    return;
+  }
+  if (t === 'ui_compact') {
+    s.ui.compacting = false;
+    s.ui.curAction = null;
+    s.ui.lastUsage = null;
+    s.ui.contextUsagePending = true;
+    metaLine(s, '── 上下文已压缩，继续原会话 ──');
+    if (sid === state.activeSid) emit('usage-updated');
+    return;
+  }
   if (t === 'ui_permission') { addPermissionCard(s, ev, replay); return; }
   if (t === 'ui_permission_done') { resolvePermCard(s, ev.reqId, ev.decision, ev.note); return; }
 
@@ -1095,6 +1110,7 @@ export function renderEvent(sid, ev, { replay }) {
   }
 
   if (t === 'result') {
+    s.ui.compacting = false;
     s.ui.busy = false;
     s.ui.curAction = null; // 回合结束:清除可能的残留等待提示
     finalizeAssistant(s);
@@ -1114,6 +1130,7 @@ export function renderEvent(sid, ev, { replay }) {
     if (ev.total_cost_usd != null) parts.push('$' + ev.total_cost_usd.toFixed(4));
     if (ev.usage) parts.push('↑' + fmtTokens(ctxTokens(ev.usage)) + ' ↓' + fmtTokens(ev.usage.output_tokens));
     if (ev.is_error) parts.push('(出错:' + (ev.subtype || '') + ')');
+    if (ev.errors?.length) metaLine(s, ev.errors.join('\n'), 'error-line');
     if (parts.length) {
       const el = document.createElement('div');
       el.className = 'result-line' + (ev.is_error ? ' error-line' : '');
@@ -1201,7 +1218,8 @@ function handleAssistantMessage(s, parentId, message, replay) {
       if (s.meta.id === state.activeSid) updateTurnStatus();
     }
     if (!replay) s.ui.msgDeltaCounted = false;
-    if (inToks > 0 || u.output_tokens > 0) { // 全零 usage(坏网关/旧事件)不覆盖已有快照
+    if (!parentId && inToks > 0) { // 子任务和无输入计数的消息不能覆盖主会话快照
+      s.ui.contextUsagePending = false;
       s.ui.lastUsage = u;
       if (s.meta.id === state.activeSid) emit('usage-updated');
     }

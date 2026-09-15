@@ -3,6 +3,7 @@
 import { api, state, $, escapeHtml, emit, on, parseModelValue, updateKeyChips, MEDIA_KINDS, sectionOfKind, boardOf, ensureGroups, modelSelValue } from './state.js';
 import { addUserMessage, setBusyUI, aigcLocalEcho, aigcBusy, updateAigcSendUI, updateTopbarForSession, isFastChat } from './chat.js';
 import { refreshList } from './sessions-ui.js';
+import { maybeSplitOnSend } from './split.js';
 
 const inputEl = () => $('input');
 const acEl = () => $('autocomplete');
@@ -18,6 +19,9 @@ export async function sendMessage() {
   const text = el.value.trim();
   if (!text && !state.attachments.length) return;
   if (!state.activeSid) return;
+
+  // 拆分子任务开关激活时(v0.15.10):拦截这条消息去 AI 拆分 + 确认卡片,不直接发送
+  if (text && !state.attachments.length && await maybeSplitOnSend(text)) return;
 
   // 新媒体板块会话:走 AIGC 生成任务闭环,不进 Agent SDK
   const sess = state.sessions.get(state.activeSid);
@@ -416,8 +420,18 @@ export function init() {
   };
   $('btn-compact').onclick = async () => {
     if (!state.activeSid) return;
-    addUserMessage(state.activeSid, '/compact');
-    await api.sessSend(state.activeSid, '/compact');
+    const session = state.sessions.get(state.activeSid);
+    if (session?.ui.busy || session?.ui.compacting) return;
+    const sid = state.activeSid;
+    setBusyUI(true);
+    addUserMessage(sid, '/compact');
+    try {
+      const result = await api.sessSend(sid, '/compact');
+      if (!result && state.activeSid === sid) setBusyUI(false);
+    } catch (error) {
+      if (state.activeSid === sid) setBusyUI(false);
+      alert('压缩请求发送失败：' + error.message);
+    }
   };
 
   // --- composer toolbar: attachments / folder / per-session model & effort ---

@@ -1,0 +1,56 @@
+{
+  "id": "cv_60c6f401-e6b",
+  "name": "LLM 提示词 → 图片生成",
+  "createdAt": 1788250579385,
+  "updatedAt": 1788250579386,
+  "graph": {
+    "1": {
+      "id": "1",
+      "class_type": "drafter/text",
+      "pos": [
+        60,
+        140
+      ],
+      "inputs": {
+        "text": ""
+      }
+    },
+    "2": {
+      "id": "2",
+      "class_type": "drafter/llmtext",
+      "pos": [
+        400,
+        120
+      ],
+      "inputs": {
+        "prompt": [
+          "1",
+          0
+        ],
+        "models": [],
+        "results": [],
+        "active": -1,
+        "view": 0
+      }
+    },
+    "3": {
+      "id": "3",
+      "class_type": "drafter/image",
+      "pos": [
+        760,
+        140
+      ],
+      "inputs": {
+        "prompt": [
+          "2",
+          0
+        ],
+        "ref": null,
+        "models": [],
+        "tasks": [],
+        "active": -1,
+        "view": 0
+      }
+    }
+  }
+}

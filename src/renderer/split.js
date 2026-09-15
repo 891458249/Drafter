@@ -1,23 +1,24 @@
-// 拆分子任务(v0.15.9):点「⧉ 拆任务」→ 当前会话的 AI 把输入框里的需求拆成
-// 若干子任务 → 弹出可编辑的确认卡片 → 确认后为每个子任务新建一个并行 code
-// 会话(继承当前会话的项目/模型/Key/权限/Gem)并各自发送子任务,并行执行。
+// 拆分子任务(v0.15.9 起为开关模式,v0.15.10 移到发送按钮旁):激活「⧉」开关后,
+// 用户发出的下一条消息不会直接发送,而是由当前会话的 AI 把这条需求拆成若干子任务
+// → 弹出可编辑的确认卡片 → 确认后为每个子任务新建一个并行 code 会话(继承当前会
+// 话的项目/模型/Key/权限/Gem)并各自发送子任务,并行执行。再次点击开关即关闭。
 import { api, state, $, escapeHtml } from './state.js';
 import { ensureSession } from './chat.js';
 import { refreshList } from './sessions-ui.js';
 
 let open = false;
+let armed = false; // 开关是否激活(激活时发送被拦截去拆分)
+let splitting = false; // 正在拆分中(防止连发)
 
-// 读取当前需求:优先输入框文本;为空则取当前会话最近一条用户消息作为需求
-function currentRequirement() {
-  const t = ($('input').value || '').trim();
-  if (t) return t;
-  const s = state.sessions.get(state.activeSid);
-  const log = s && s.ui.logEl;
-  if (!log) return '';
-  const users = [...log.querySelectorAll('.msg.user')];
-  const last = users[users.length - 1];
-  const bubble = last && last.querySelector('.bubble');
-  return (bubble ? bubble.innerText : '').trim();
+export function isArmed() { return armed; }
+
+function syncToggle() {
+  const btn = $('btn-split-subtasks');
+  if (!btn) return;
+  btn.classList.toggle('split-on', armed);
+  btn.title = armed
+    ? '拆分子任务已激活:发送的这条消息会被 AI 拆成多个子任务,确认后建多个会话并行执行;点击关闭'
+    : '拆分子任务:激活后,发送的这条消息会被 AI 拆成多个子任务,确认后建多个会话并行执行;再次点击关闭';
 }
 
 function renderRows(tasks) {
@@ -66,25 +67,33 @@ function setStatus(msg, cls) {
 
 function closeModal() { $('split-modal').classList.add('hidden'); open = false; }
 
-async function openSplit() {
-  if (open) return;
-  const requirement = currentRequirement();
-  if (!requirement) { alert('请先在输入框填写要拆解的需求(或当前会话需已有用户消息)。'); return; }
-  open = true;
+async function openSplit(requirement) {
+  if (open || splitting) return;
+  const req = (requirement || '').trim();
+  if (!req) return;
+  open = true; splitting = true;
   const btn = $('btn-split-subtasks');
   const old = btn.innerHTML;
-  btn.disabled = true; btn.textContent = '拆分中…';
+  btn.disabled = true;
   try {
-    const r = await api.sessSplitSubtasks({ sid: state.activeSid, requirement });
-    if (!r || !r.ok) { alert('拆分失败:' + ((r && r.error) || '未知错误')); return; }
+    const r = await api.sessSplitSubtasks({ sid: state.activeSid, requirement: req });
+    if (!r || !r.ok) { setStatus('拆分失败:' + ((r && r.error) || '未知错误'), 'err'); $('split-modal').classList.remove('hidden'); renderRows([]); return; }
     renderRows(r.tasks);
     setStatus('');
     $('split-modal').classList.remove('hidden');
   } finally {
     btn.disabled = false; btn.innerHTML = old;
-    // open 保持 true,直到取消/确认;但允许重新打开(修正:拆完后应复位)
+    splitting = false;
     open = false;
   }
+}
+
+// 供发送流程调用:激活时拦截这条消息去拆分,返回 true 表示已接管(不再走正常发送)
+export async function maybeSplitOnSend(text) {
+  if (!armed) return false;
+  if (!state.activeSid) return false;
+  await openSplit(text);
+  return true;
 }
 
 async function confirmSplit() {
@@ -105,11 +114,12 @@ async function confirmSplit() {
 }
 
 export function init() {
-  $('btn-split-subtasks').onclick = openSplit;
+  $('btn-split-subtasks').onclick = () => { armed = !armed; syncToggle(); };
   $('split-cancel').onclick = closeModal;
   $('split-confirm').onclick = confirmSplit;
   $('split-add').onclick = () => {
     $('split-list').appendChild(rowEl({ title: '', detail: '' }, $('split-list').children.length));
     renumber();
   };
+  syncToggle();
 }

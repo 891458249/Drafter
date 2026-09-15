@@ -1,0 +1,475 @@
+{
+  "id": "cv_493b33f8-79d",
+  "name": "新建画布",
+  "createdAt": 1788250356520,
+  "updatedAt": 1788250379775,
+  "graph": {
+    "2": {
+      "id": "2",
+      "class_type": "wanBlockSwap",
+      "title": "cv-nt-external",
+      "pos": [
+        160,
+        120
+      ],
+      "inputs": {
+        "comfyConnectionId": "comfy_local",
+        "comfyConnectionName": "本机 ComfyUI",
+        "comfyClassType": "wanBlockSwap",
+        "comfyDisplayName": "wanBlockSwap",
+        "comfyCategory": "",
+        "comfyOutputs": [
+          "MODEL"
+        ],
+        "comfyInputs": {},
+        "comfyWidgets": {
+          "model": {
+            "kind": "MODEL",
+            "multiline": false,
+            "tooltip": "",
+            "controlAfterGenerate": false
+          }
+        },
+        "comfyInputTypes": {
+          "model": "MODEL"
+        },
+        "slotNames": [
+          "model"
+        ],
+        "tasks": [],
+        "active": -1,
+        "view": 0,
+        "_comfyConnectionId": "comfy_local",
+        "_comfyOutputs": [
+          "MODEL"
+        ],
+        "_comfyInputTypes": {
+          "model": "MODEL"
+        }
+      }
+    },
+    "3": {
+      "id": "3",
+      "class_type": "BuildPoseFile",
+      "title": "cv-nt-external",
+      "pos": [
+        200,
+        160
+      ],
+      "inputs": {
+        "comfyConnectionId": "comfy_local",
+        "comfyConnectionName": "本机 ComfyUI",
+        "comfyClassType": "BuildPoseFile",
+        "comfyDisplayName": "Create 3D Animation File",
+        "comfyCategory": "3d",
+        "comfyOutputs": [
+          "FILE_3D"
+        ],
+        "comfyInputs": {
+          "fps": 24,
+          "camera_translation": "off",
+          "track_index": -1
+        },
+        "comfyWidgets": {
+          "pose_data": {
+            "kind": "MHR_POSE_DATA,KIMODO_POSE_DATA",
+            "multiline": false,
+            "tooltip": "3D pose data.",
+            "controlAfterGenerate": false
+          },
+          "format": {
+            "kind": "dynamic",
+            "values": [
+              "[object Object]",
+              "[object Object]"
+            ],
+            "tooltip": "Output format, both fed to Save 3D Model to write to disk. 'glb' = animated GLB (mesh / bones / openpose / scail). 'bvh' = BVH mocap clip (one skeleton; needs the model)."
+          },
+          "fps": {
+            "kind": "FLOAT",
+            "default": 24,
+            "min": 1,
+            "max": 240,
+            "step": 1,
+            "multiline": false,
+            "tooltip": "Animation frame rate.",
+            "controlAfterGenerate": false
+          },
+          "camera_translation": {
+            "kind": "combo",
+            "values": [
+              "off",
+              "centered",
+              "absolute"
+            ],
+            "default": "off",
+            "tooltip": "Bake pred_cam_t into the root's translation 'off' = bind position 'centered' = delta from frame 0 'absolute' = raw (Z is camera depth — usually meters away).",
+            "multiselect": false
+          },
+          "track_index": {
+            "kind": "INT",
+            "default": -1,
+            "min": -1,
+            "max": 15,
+            "multiline": false,
+            "tooltip": "-1 = all tracks; ≥0 = single track.",
+            "controlAfterGenerate": false
+          },
+          "sam3d_body_model": {
+            "kind": "SAM3D_BODY_MODEL",
+            "multiline": false,
+            "tooltip": "",
+            "controlAfterGenerate": false
+          }
+        },
+        "comfyInputTypes": {
+          "pose_data": "MHR_POSE_DATA,KIMODO_POSE_DATA",
+          "format": "COMFY_DYNAMICCOMBO_V3",
+          "fps": "FLOAT",
+          "camera_translation": "COMBO",
+          "track_index": "INT",
+          "sam3d_body_model": "SAM3D_BODY_MODEL"
+        },
+        "slotNames": [
+          "pose_data",
+          "format",
+          "fps",
+          "camera_translation",
+          "track_index",
+          "sam3d_body_model"
+        ],
+        "tasks": [],
+        "active": -1,
+        "view": 0,
+        "fps": 24,
+        "camera_translation": "off",
+        "track_index": -1,
+        "_comfyConnectionId": "comfy_local",
+        "_comfyCategory": "3d",
+        "_comfyOutputs": [
+          "FILE_3D"
+        ],
+        "_comfyInputTypes": {
+          "pose_data": "MHR_POSE_DATA,KIMODO_POSE_DATA",
+          "format": "COMFY_DYNAMICCOMBO_V3",
+          "fps": "FLOAT",
+          "camera_translation": "COMBO",
+          "track_index": "INT",
+          "sam3d_body_model": "SAM3D_BODY_MODEL"
+        }
+      }
+    },
+    "4": {
+      "id": "4",
+      "class_type": "BuildPoseFile",
+      "title": "cv-nt-external",
+      "pos": [
+        240,
+        200
+      ],
+      "inputs": {
+        "comfyConnectionId": "comfy_local",
+        "comfyConnectionName": "本机 ComfyUI",
+        "comfyClassType": "BuildPoseFile",
+        "comfyDisplayName": "Create 3D Animation File",
+        "comfyCategory": "3d",
+        "comfyOutputs": [
+          "FILE_3D"
+        ],
+        "comfyInputs": {
+          "fps": 24,
+          "camera_translation": "off",
+          "track_index": -1
+        },
+        "comfyWidgets": {
+          "pose_data": {
+            "kind": "MHR_POSE_DATA,KIMODO_POSE_DATA",
+            "multiline": false,
+            "tooltip": "3D pose data.",
+            "controlAfterGenerate": false
+          },
+          "format": {
+            "kind": "dynamic",
+            "values": [
+              "[object Object]",
+              "[object Object]"
+            ],
+            "tooltip": "Output format, both fed to Save 3D Model to write to disk. 'glb' = animated GLB (mesh / bones / openpose / scail). 'bvh' = BVH mocap clip (one skeleton; needs the model)."
+          },
+          "fps": {
+            "kind": "FLOAT",
+            "default": 24,
+            "min": 1,
+            "max": 240,
+            "step": 1,
+            "multiline": false,
+            "tooltip": "Animation frame rate.",
+            "controlAfterGenerate": false
+          },
+          "camera_translation": {
+            "kind": "combo",
+            "values": [
+              "off",
+              "centered",
+              "absolute"
+            ],
+            "default": "off",
+            "tooltip": "Bake pred_cam_t into the root's translation 'off' = bind position 'centered' = delta from frame 0 'absolute' = raw (Z is camera depth — usually meters away).",
+            "multiselect": false
+          },
+          "track_index": {
+            "kind": "INT",
+            "default": -1,
+            "min": -1,
+            "max": 15,
+            "multiline": false,
+            "tooltip": "-1 = all tracks; ≥0 = single track.",
+            "controlAfterGenerate": false
+          },
+          "sam3d_body_model": {
+            "kind": "SAM3D_BODY_MODEL",
+            "multiline": false,
+            "tooltip": "",
+            "controlAfterGenerate": false
+          }
+        },
+        "comfyInputTypes": {
+          "pose_data": "MHR_POSE_DATA,KIMODO_POSE_DATA",
+          "format": "COMFY_DYNAMICCOMBO_V3",
+          "fps": "FLOAT",
+          "camera_translation": "COMBO",
+          "track_index": "INT",
+          "sam3d_body_model": "SAM3D_BODY_MODEL"
+        },
+        "slotNames": [
+          "pose_data",
+          "format",
+          "fps",
+          "camera_translation",
+          "track_index",
+          "sam3d_body_model"
+        ],
+        "tasks": [],
+        "active": -1,
+        "view": 0,
+        "fps": 24,
+        "camera_translation": "off",
+        "track_index": -1,
+        "_comfyConnectionId": "comfy_local",
+        "_comfyCategory": "3d",
+        "_comfyOutputs": [
+          "FILE_3D"
+        ],
+        "_comfyInputTypes": {
+          "pose_data": "MHR_POSE_DATA,KIMODO_POSE_DATA",
+          "format": "COMFY_DYNAMICCOMBO_V3",
+          "fps": "FLOAT",
+          "camera_translation": "COMBO",
+          "track_index": "INT",
+          "sam3d_body_model": "SAM3D_BODY_MODEL"
+        }
+      }
+    },
+    "5": {
+      "id": "5",
+      "class_type": "BuildPoseFile",
+      "title": "cv-nt-external",
+      "pos": [
+        280,
+        240
+      ],
+      "inputs": {
+        "comfyConnectionId": "comfy_local",
+        "comfyConnectionName": "本机 ComfyUI",
+        "comfyClassType": "BuildPoseFile",
+        "comfyDisplayName": "Create 3D Animation File",
+        "comfyCategory": "3d",
+        "comfyOutputs": [
+          "FILE_3D"
+        ],
+        "comfyInputs": {
+          "fps": 24,
+          "camera_translation": "off",
+          "track_index": -1
+        },
+        "comfyWidgets": {
+          "pose_data": {
+            "kind": "MHR_POSE_DATA,KIMODO_POSE_DATA",
+            "multiline": false,
+            "tooltip": "3D pose data.",
+            "controlAfterGenerate": false
+          },
+          "format": {
+            "kind": "dynamic",
+            "values": [
+              "[object Object]",
+              "[object Object]"
+            ],
+            "tooltip": "Output format, both fed to Save 3D Model to write to disk. 'glb' = animated GLB (mesh / bones / openpose / scail). 'bvh' = BVH mocap clip (one skeleton; needs the model)."
+          },
+          "fps": {
+            "kind": "FLOAT",
+            "default": 24,
+            "min": 1,
+            "max": 240,
+            "step": 1,
+            "multiline": false,
+            "tooltip": "Animation frame rate.",
+            "controlAfterGenerate": false
+          },
+          "camera_translation": {
+            "kind": "combo",
+            "values": [
+              "off",
+              "centered",
+              "absolute"
+            ],
+            "default": "off",
+            "tooltip": "Bake pred_cam_t into the root's translation 'off' = bind position 'centered' = delta from frame 0 'absolute' = raw (Z is camera depth — usually meters away).",
+            "multiselect": false
+          },
+          "track_index": {
+            "kind": "INT",
+            "default": -1,
+            "min": -1,
+            "max": 15,
+            "multiline": false,
+            "tooltip": "-1 = all tracks; ≥0 = single track.",
+            "controlAfterGenerate": false
+          },
+          "sam3d_body_model": {
+            "kind": "SAM3D_BODY_MODEL",
+            "multiline": false,
+            "tooltip": "",
+            "controlAfterGenerate": false
+          }
+        },
+        "comfyInputTypes": {
+          "pose_data": "MHR_POSE_DATA,KIMODO_POSE_DATA",
+          "format": "COMFY_DYNAMICCOMBO_V3",
+          "fps": "FLOAT",
+          "camera_translation": "COMBO",
+          "track_index": "INT",
+          "sam3d_body_model": "SAM3D_BODY_MODEL"
+        },
+        "slotNames": [
+          "pose_data",
+          "format",
+          "fps",
+          "camera_translation",
+          "track_index",
+          "sam3d_body_model"
+        ],
+        "tasks": [],
+        "active": -1,
+        "view": 0,
+        "fps": 24,
+        "camera_translation": "off",
+        "track_index": -1,
+        "_comfyConnectionId": "comfy_local",
+        "_comfyCategory": "3d",
+        "_comfyOutputs": [
+          "FILE_3D"
+        ],
+        "_comfyInputTypes": {
+          "pose_data": "MHR_POSE_DATA,KIMODO_POSE_DATA",
+          "format": "COMFY_DYNAMICCOMBO_V3",
+          "fps": "FLOAT",
+          "camera_translation": "COMBO",
+          "track_index": "INT",
+          "sam3d_body_model": "SAM3D_BODY_MODEL"
+        }
+      }
+    },
+    "6": {
+      "id": "6",
+      "class_type": "MeshToFile3D",
+      "title": "cv-nt-external",
+      "pos": [
+        320,
+        80
+      ],
+      "inputs": {
+        "comfyConnectionId": "comfy_local",
+        "comfyConnectionName": "本机 ComfyUI",
+        "comfyClassType": "MeshToFile3D",
+        "comfyDisplayName": "Create 3D File (from Mesh)",
+        "comfyCategory": "3d",
+        "comfyOutputs": [
+          "FILE_3D_GLB"
+        ],
+        "comfyInputs": {},
+        "comfyWidgets": {
+          "mesh": {
+            "kind": "MESH",
+            "multiline": false,
+            "tooltip": "",
+            "controlAfterGenerate": false
+          }
+        },
+        "comfyInputTypes": {
+          "mesh": "MESH"
+        },
+        "slotNames": [
+          "mesh"
+        ],
+        "tasks": [],
+        "active": -1,
+        "view": 0,
+        "_comfyConnectionId": "comfy_local",
+        "_comfyCategory": "3d",
+        "_comfyOutputs": [
+          "FILE_3D_GLB"
+        ],
+        "_comfyInputTypes": {
+          "mesh": "MESH"
+        }
+      }
+    },
+    "7": {
+      "id": "7",
+      "class_type": "MeshToFile3D",
+      "title": "cv-nt-external",
+      "pos": [
+        120,
+        120
+      ],
+      "inputs": {
+        "comfyConnectionId": "comfy_local",
+        "comfyConnectionName": "本机 ComfyUI",
+        "comfyClassType": "MeshToFile3D",
+        "comfyDisplayName": "Create 3D File (from Mesh)",
+        "comfyCategory": "3d",
+        "comfyOutputs": [
+          "FILE_3D_GLB"
+        ],
+        "comfyInputs": {},
+        "comfyWidgets": {
+          "mesh": {
+            "kind": "MESH",
+            "multiline": false,
+            "tooltip": "",
+            "controlAfterGenerate": false
+          }
+        },
+        "comfyInputTypes": {
+          "mesh": "MESH"
+        },
+        "slotNames": [
+          "mesh"
+        ],
+        "tasks": [],
+        "active": -1,
+        "view": 0,
+        "_comfyConnectionId": "comfy_local",
+        "_comfyCategory": "3d",
+        "_comfyOutputs": [
+          "FILE_3D_GLB"
+        ],
+        "_comfyInputTypes": {
+          "mesh": "MESH"
+        }
+      }
+    }
+  }
+}

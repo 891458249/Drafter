@@ -73,8 +73,13 @@ function startGateway(script) {
       let out;
       try { out = script(body, raw, requests.length); }
       catch (e) { out = sseText(body.model || 'unknown', '(script error: ' + e.message + ')'); }
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-      res.end(out);
+      if (out && typeof out === 'object') {
+        res.writeHead(out.status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(out.body));
+      } else {
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+        res.end(out);
+      }
     });
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, requests, port: server.address().port })));
@@ -107,6 +112,121 @@ async function waitResult(events, ms = 75000) {
   }
   throw new Error('等待 result 超时');
 }
+
+for (const kind of ['code', 'chat']) test(`真实运行时:${kind} 自动压缩后保持会话继续对话`, { timeout: 90000 }, async () => {
+  let mainRequests = 0;
+  const gw = await startGateway((body) => {
+    if (/Write the title in the predominant language/.test(JSON.stringify(body.messages))) return sseText(body.model, 'title');
+    mainRequests++;
+    const response = sseText(body.model, '记住项目暗号 ORCHID。继续任务。');
+    return mainRequests === 6 ? response.replace('"input_tokens":10', '"input_tokens":190000') : response;
+  });
+  const { mgr, events } = makeManager(gw.port);
+  const cwd = path.join(tmp, 'compact-' + kind);
+  fs.mkdirSync(cwd, { recursive: true });
+  const meta = mgr.create({ cwd, kind, keyId: 'k1', model: 'gpt-6-astra', permissionMode: 'bypassPermissions' });
+  const s = mgr.get(meta.id);
+  try {
+    for (let i = 0; i < 6; i++) {
+      events.length = 0;
+      s.send('记住项目暗号 ORCHID，然后回复收到。第' + i + '轮 ' + '历史工作记录。'.repeat(1000));
+      await waitResult(events);
+    }
+    const sessionId = s.meta.sdkSessionId;
+    const firstEvents = [...events];
+    events.length = 0;
+    s.send('暗号是什么？继续任务。');
+    await waitResult(events);
+    assert.ok([...firstEvents, ...events].some((e) => e.ev.type === 'ui_compact'), '应收到真实自动压缩边界; 请求数=' + gw.requests.length + ';事件=' + JSON.stringify([...firstEvents, ...events].map((e) => e.ev)));
+    assert.equal(s.meta.sdkSessionId, sessionId);
+    assert.ok(gw.requests.length >= 3, '应包括摘要请求和压缩后回复');
+    assert.ok(gw.requests.at(-1).raw.includes('ORCHID'));
+    assert.equal(s.busy, false);
+  } finally { s.stop(); await s._debugCleanup?.cleanup(); gw.server.close(); }
+});
+
+for (const kind of ['code', 'chat']) test(`真实运行时:${kind} 提供方拒绝超长上下文后自动恢复`, { timeout: 90000 }, async () => {
+  let rejected = false;
+  const gw = await startGateway((body) => {
+    if (/Write the title in the predominant language/.test(JSON.stringify(body.messages))) return sseText(body.model, 'title');
+    if (!rejected && JSON.stringify(body.messages).includes('触发溢出')) {
+      rejected = true;
+      return { status: 400, body: { type: 'error', error: { type: 'invalid_request_error', message: 'prompt is too long: 210000 tokens > 200000 maximum' } } };
+    }
+    return sseText(body.model, '项目暗号 ORCHID，已保留任务。');
+  });
+  const { mgr, events } = makeManager(gw.port);
+  const cwd = path.join(tmp, 'overflow-' + kind);
+  fs.mkdirSync(cwd, { recursive: true });
+  const meta = mgr.create({ cwd, kind, keyId: 'k1', model: 'gpt-6-astra', permissionMode: 'bypassPermissions' });
+  const s = mgr.get(meta.id);
+  try {
+    for (let i = 0; i < 6; i++) { events.length = 0; s.send('ORCHID 工作记录' + i + '历史。'.repeat(1000)); await waitResult(events); }
+    const sessionId = s.meta.sdkSessionId;
+    events.length = 0;
+    s.send('触发溢出：请继续任务');
+    const result = await waitResult(events);
+    assert.equal(rejected, true);
+    assert.equal(result.is_error, false, JSON.stringify(result));
+    assert.ok(events.some((e) => e.ev.type === 'ui_compact'));
+    assert.equal(s.meta.sdkSessionId, sessionId);
+  } finally { s.stop(); await s._debugCleanup?.cleanup(); gw.server.close(); }
+});
+
+test('真实运行时:极速聊天手动压缩后可继续，失败不清空会话', { timeout: 90000 }, async () => {
+  let reject = false;
+  const gw = await startGateway((body) => {
+    if (reject && !/Write the title/.test(JSON.stringify(body.messages))) return { status: 401, body: { type: 'error', error: { type: 'authentication_error', message: 'fake auth failure' } } };
+    return sseText(body.model, '项目 ORCHID 的摘要与回复。');
+  });
+  const { mgr, events } = makeManager(gw.port);
+  const cwd = path.join(tmp, 'manual-compact'); fs.mkdirSync(cwd, { recursive: true });
+  const meta = mgr.create({ cwd, kind: 'chat', keyId: 'k1', model: 'gpt-6-astra', permissionMode: 'bypassPermissions' });
+  const s = mgr.get(meta.id);
+  try {
+    for (let i = 0; i < 4; i++) { events.length = 0; s.send('ORCHID 记录' + i + '工作内容。'.repeat(1000)); await waitResult(events); }
+    const sessionId = s.meta.sdkSessionId;
+    events.length = 0; s.send('/compact');
+    const compactResult = await waitResult(events).catch((e) => { console.log('COMPACT DEBUG', JSON.stringify(events.map((x) => x.ev && { type: x.ev.type, subtype: x.ev.subtype, raw: x.ev.raw && x.ev.raw.type || x.ev.raw }))); throw e; });
+    void compactResult;
+    assert.ok(events.some((e) => e.ev.type === 'ui_compact'));
+    assert.equal(s.meta.sdkSessionId, sessionId);
+    events.length = 0; reject = true; s.send('失败测试');
+    await new Promise((r) => setTimeout(r, 8000));
+    const lateCompact = events.filter((e) => e.ev.type === 'ui_compact' || e.ev.type === 'ui_compacting');
+    assert.deepEqual(lateCompact, [], '401 不能触发上下文溢出重试;实际事件=' + JSON.stringify(events.map((e) => e.ev && { t: e.ev.type, st: e.ev.subtype, active: e.ev.active, res: e.ev.result, err: e.ev.error, result: e.ev.result && typeof e.ev.result === 'string' ? e.ev.result.slice(0, 80) : undefined, trigger: e.ev.trigger })));
+    await s.interrupt(); // 引擎对 401 会静默重试数分钟(v0.15.1 已知);中断后会话必须仍可用
+    await waitResult(events, 15000).catch(() => {}); // 等被中断回合的终态 result 到达再清事件
+    reject = false; events.length = 0; s.send('继续 ORCHID');
+    assert.equal((await waitResult(events)).is_error, false);
+    assert.equal(s.meta.sdkSessionId, sessionId);
+  } finally { s.stop(); gw.server.close(); }
+});
+
+test('真实运行时:Stop 与用户 interrupt 都释放登记的调试连接', { timeout: 90000 }, async () => {
+  const resources = require('../src/main/debug-resources');
+  let releaseCount = 0;
+  const gw = await startGateway((body) => sseText(body.model, '调试结束'));
+  const { mgr, events } = makeManager(gw.port);
+  const cwd = path.join(tmp, 'debug-stop');
+  fs.mkdirSync(cwd, { recursive: true });
+  const meta = mgr.create({ cwd, kind: 'code', keyId: 'k1', model: 'gpt-6-astra', permissionMode: 'bypassPermissions' });
+  const s = mgr.get(meta.id);
+  try {
+    await s.start();
+    const startedAt = Date.now();
+    while (!s._debugCleanup && Date.now() - startedAt < 10000) await new Promise((r) => setTimeout(r, 25));
+    const scope = JSON.parse(s._debugCleanup.prompt.match(/--scope ("[^"]+")/)[1]);
+    resources.attach(scope, { name: 'stop connection', release: () => releaseCount++, verify: () => true });
+    s.send('完成');
+    await waitResult(events);
+    assert.equal(releaseCount, 1, '真实 Stop hook 应先释放再结束回合');
+    resources.attach(scope, { name: 'interrupt connection', release: () => releaseCount++, verify: () => true });
+    s.busy = true;
+    await s.interrupt();
+    assert.equal(releaseCount, 2);
+  } finally { s.stop(); await s._debugCleanup?.cleanup(); gw.server.close(); }
+});
 
 test('真实运行时:bypass 模式下只读项目的 Bash 写入由 PreToolUse 阻止', { timeout: 90000 }, async () => {
   const cwd = path.join(tmp, 'case-readonly');

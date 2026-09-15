@@ -43,7 +43,11 @@
       "WebFetch(domain:docs.claude.com)",
       "Read(//c/Users/dingyongzhen/AppData/Roaming/Drafter/**)",
       "Read(//tmp/**)",
-      "Read(//c/Users/dingyongzhen/.claude/**)"
+      "Read(//c/Users/dingyongzhen/.claude/**)",
+      "WebFetch(domain:platform.minimax.io)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Grep"
     ]
   }
 }

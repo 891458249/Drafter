@@ -16,6 +16,8 @@ const perms = require('./perms');
 const keys = require('./keys');
 const gems = require('./gems');
 const modelGuard = require('./model-guard-proxy');
+const { createSessionCleanup } = require('./debug-resources/session');
+const { compactionSettings, compactionEnv } = require('./context-compaction');
 // 模型上下文窗口实表(双环境模块):纠正 modelUsage.contextWindow——claude.exe 按自身
 // 注册表本地计算,对第三方网关模型(kimi-k3 等)一律回退默认 200000,并非提供方实报。
 const { effectiveCtxWindow } = require('../renderer/ctxwin.js');
@@ -350,6 +352,8 @@ class Session {
         modelGuardBaseUrl = modelGuard.baseUrlFor(this.id);
       }
     }
+    const debugCleanup = fastOv ? null : createSessionCleanup(this.id, (event) => this._emit(event, true));
+    this._debugCleanup = debugCleanup;
     const options = {
       cwd: this.meta.cwd,
       permissionMode: fastOv ? 'bypassPermissions' : (this.meta.permissionMode || 'default'),
@@ -429,8 +433,8 @@ class Session {
     // cwd/git/记忆等动态段移出系统提示(改由首条用户消息携带),前缀跨会话静态 → 缓存命中。
     // 只对创建时盖戳的会话启用:既存会话不中途换提示,避免缓存前缀反复横跳。
     const staticPrompt = !!this.meta.staticPrompt;
-    if (projCtx || gemAppend) {
-      const combined = ((projCtx && projCtx.append) || '') + gemAppend;
+    if (projCtx || gemAppend || debugCleanup) {
+      const combined = ((projCtx && projCtx.append) || '') + gemAppend + '\n\n' + (debugCleanup?.prompt || '');
       options.systemPrompt = { type: 'preset', preset: 'claude_code', append: combined };
       if (staticPrompt) options.systemPrompt.excludeDynamicSections = true;
       // 无项目组时的附加目录由下方 else-if 分支统一处理(行为与旧版一致)
@@ -466,9 +470,14 @@ class Session {
         matcher: '^(Agent|Task)$',
         hooks: [async (hookInput) => this._trackSpawnedAgent(hookInput)],
       }];
+      for (const [event, entries] of Object.entries(debugCleanup.hooks)) {
+        hooks[event] = [...(hooks[event] || []), ...entries];
+      }
       options.hooks = hooks;
     }
     }
+    options.settings = { ...(options.settings || {}), ...compactionSettings(this.meta.model) };
+    options.env = compactionEnv(options.env);
     try {
       this.q = sdk.query({ prompt: this.queue, options });
       this._resumeQuery = options.resume ? this.q : null;
@@ -484,6 +493,7 @@ class Session {
 
   async _pump() {
     const q = this.q; // v0.9.30:记录本次泵的 query——旧泵 finally 不得覆盖新 query 的状态
+    const debugCleanup = this._debugCleanup;
     try {
       for await (const msg of q) {
         this._handleMessage(msg);
@@ -499,6 +509,7 @@ class Session {
         this._emit({ type: 'ui_error', message: '会话异常终止:' + text });
       }
     } finally {
+      await debugCleanup?.cleanup();
       if (this.q === q) {
         this.running = false;
         this.busy = false;
@@ -526,6 +537,14 @@ class Session {
       this._emit({ type: 'ui_init', model: msg.model, tools: msg.tools, slashCommands: msg.slash_commands });
       return;
     }
+    if (msg.type === 'system' && msg.subtype === 'status') {
+      if (msg.status === 'compacting' || msg.compact_result || this.compacting) {
+        this.compacting = msg.status === 'compacting';
+        this._emit({ type: 'ui_compacting', active: this.compacting,
+          result: msg.compact_result, error: msg.compact_error }, true);
+      }
+      return;
+    }
     if (msg.type === 'stream_event') {
       // stream deltas: forward but don't persist
       this.m.send('sess:event', { sid: this.id, ev: { type: 'stream_event', event: msg.event, parent_tool_use_id: msg.parent_tool_use_id || null } });
@@ -543,6 +562,7 @@ class Session {
       return;
     }
     if (msg.type === 'result') {
+      this.compacting = false;
       this.busy = false;
       const cost = msg.total_cost_usd != null ? msg.total_cost_usd
         : (msg.cost && msg.cost.total_cost_usd != null ? msg.cost.total_cost_usd : null);
@@ -601,6 +621,7 @@ class Session {
         cum_cost_usd: this.cumCostUsd,
         usage: msg.usage || null,
         contextWindowMax,
+        errors: Array.isArray(msg.errors) ? msg.errors.map(String) : undefined,
         result: typeof msg.result === 'string' ? msg.result.slice(0, 2000) : undefined,
       };
       this._emit(ev, true);
@@ -618,7 +639,8 @@ class Session {
       return;
     }
     if (msg.type === 'compact_boundary' || (msg.type === 'system' && msg.subtype === 'compact_boundary')) {
-      this._emit({ type: 'ui_compact' }, true);
+      this.compacting = false;
+      this._emit({ type: 'ui_compact', trigger: msg.compact_metadata?.trigger }, true);
       return;
     }
     // anything else: forward raw for debugging
@@ -884,6 +906,7 @@ class Session {
     if (!(this.q && this.busy) && !this._interrupting) return;
     if (this._interrupting) return this._interrupting;
     const q = this.q;
+    const debugCleanup = this._debugCleanup;
     const p = (async () => {
       try {
         await Promise.race([
@@ -895,6 +918,7 @@ class Session {
       } catch (e) {
         this._emit({ type: 'ui_error', message: 'interrupt 失败:' + e.message });
       } finally {
+        await debugCleanup?.cleanup();
         if (this._interrupting === p) {
           this._interrupting = null;
           if (this.q === q) {
@@ -954,7 +978,11 @@ class Session {
         await this.start({ resume: !!this.meta.sdkSessionId });
         return true;
       }
-      try { await this.q.setModel(model || undefined); return true; } catch {}
+      try {
+        await this.q.setModel(model || undefined);
+        if (typeof this.q.applyFlagSettings === 'function') await this.q.applyFlagSettings(compactionSettings(model));
+        return true;
+      } catch {}
     }
     // 未运行的会话无需热切:模型与 Key 已持久化,下次 start() 会直接使用新配置。
     return !this.running;
@@ -1063,6 +1091,7 @@ class Session {
   }
 
   stop() {
+    void this._debugCleanup?.cleanup();
     try { modelGuard.unregister(this.id); } catch {}
     if (this.queue) this.queue.end();
     if (this.q && typeof this.q.close === 'function') { try { this.q.close(); } catch {} }

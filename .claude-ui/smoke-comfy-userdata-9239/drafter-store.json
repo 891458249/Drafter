@@ -1,0 +1,30 @@
+{
+  "recentProjects": [],
+  "settings": {
+    "dataVersion": "0.12.1",
+    "apiKeys": []
+  },
+  "sessions": [
+    {
+      "id": "s_d6d5b868-5d4",
+      "cwd": "C:\\Users\\dingyongzhen",
+      "model": null,
+      "effort": null,
+      "permissionMode": "default",
+      "title": null,
+      "parentId": null,
+      "worktreePath": null,
+      "projectId": null,
+      "sdkSessionId": null,
+      "archived": false,
+      "standalone": true,
+      "kind": null,
+      "keyId": null,
+      "gemId": null,
+      "staticPrompt": true,
+      "createdAt": 1788200481184,
+      "updatedAt": 1788200481184
+    }
+  ],
+  "cronJobs": []
+}
