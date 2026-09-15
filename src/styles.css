@@ -68,6 +68,27 @@ html, body {
 
 /* ---------------- Workspace / topbar ---------------- */
 .workspace { height: 100vh; display: flex; flex-direction: column; }
+
+/* v0.15.8:修复「按住鼠标选择文字,一选就把上方所有文字都选中」。
+   根因:全局未设 user-select,从消息气泡向上拖拽越过 #messages 滚动容器
+   上边界时,Chromium 原生选择会把焦点跳到顶栏等可选 UI 元素,导致从
+   顶栏到按下点的所有文字(含 UI 按钮/标签)被一并选中。
+   方案:UI 骨架设为 user-select:none,仅保留消息气泡正文(.bubble)、
+   输入框/编辑器等需要文字交互的区域可选。*/
+.topbar, .sidebar, .right-panel, .composer, .msg-role,
+.msg-nav, .scroll-bottom, .update-chip, .usage-chip,
+.section-switch, .ctx-menu, .modal-mask, .code-card-head,
+.thinking, .tool-head, .perm-card, .aigc-card-head,
+.turn-status, .turn-progress, .composer-foot {
+  user-select: none;
+}
+/* 消息正文、代码块、编辑区、输入框保持可选/可编辑 */
+.bubble, .code-card pre, .msg-edit-area, .composer input,
+.composer textarea, .editor-area, .modal input, .modal textarea,
+.modal select, .gem-form-col input, .gem-form-col textarea {
+  user-select: text;
+}
+
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 14px; border-bottom: 1px solid var(--border);
