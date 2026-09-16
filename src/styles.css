@@ -203,6 +203,8 @@ html, body {
   display: flex; align-items: center; gap: 6px;
 }
 .session-title .spin { color: var(--accent); }
+/* 行内重命名输入框(v0.15.13):替换 .session-title / .proj-name 后占满可用宽度 */
+.session-item > .sess-rename, .proj-head > .proj-rename { width: 100%; min-width: 0; box-sizing: border-box; }
 .session-sub {
   font-size: 11px; color: var(--text-dim); font-family: var(--mono);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;

@@ -95,9 +95,28 @@ export async function refreshList() {
       refreshList();
     };
     const nameEl = head.querySelector('.proj-name');
-    nameEl.ondblclick = async () => {
-      const name = prompt('项目组名称:', p.name);
-      if (name != null && name.trim()) { await api.projRename(p.id, name.trim()); refreshList(); }
+    nameEl.ondblclick = () => {
+      // 同 renameSession:window.prompt 不可用,行内 input 改名
+      const input = document.createElement('input');
+      input.className = 'input-sm proj-rename';
+      input.value = p.name || '';
+      nameEl.replaceWith(input);
+      input.focus();
+      input.select();
+      let done = false;
+      const commit = async () => {
+        if (done) return; done = true;
+        const name = input.value.trim();
+        if (name && name !== p.name) await api.projRename(p.id, name);
+        refreshList();
+      };
+      input.onkeydown = (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') commit();
+        if (e.key === 'Escape') { done = true; refreshList(); }
+      };
+      input.onclick = (e) => e.stopPropagation();
+      input.onblur = commit;
     };
     head.querySelector('[data-op="add"]').onclick = async (e) => {
       e.stopPropagation();
@@ -214,7 +233,7 @@ function renderSessionItem(p, m) {
   li.oncontextmenu = (e) => {
     e.preventDefault();
     showCtxMenu(e.clientX, e.clientY, [
-      { label: '重命名', onClick: () => renameSession(m) },
+      { label: '重命名', onClick: () => renameSession(m, li) },
       { label: 'Side chat', onClick: () => sideChat(m) },
       { label: m.archived ? '恢复' : '归档', onClick: async () => { await api.sessArchive(m.id, !m.archived); refreshList(); } },
       '-',
@@ -224,9 +243,31 @@ function renderSessionItem(p, m) {
   return li;
 }
 
-async function renameSession(m) {
-  const title = prompt('会话名称:', m.title || '');
-  if (title != null) { await api.sessRename(m.id, title.trim()); refreshList(); }
+// window.prompt 在本 Electron 渲染进程里不弹窗(静默返回 null),重命名改走行内 input
+// (同 canvas.js renameCanvas 模式);右键菜单点开时 li 仍在 DOM,直接就地替换标题。
+async function renameSession(m, li) {
+  const titleEl = li && li.querySelector('.session-title');
+  if (!titleEl) return;
+  const input = document.createElement('input');
+  input.className = 'input-sm sess-rename';
+  input.value = m.title || '';
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const commit = async () => {
+    if (done) return; done = true; // blur 与 Enter 会相继触发,只提交一次
+    const title = input.value.trim();
+    if (title && title !== m.title) await api.sessRename(m.id, title);
+    refreshList();
+  };
+  input.onkeydown = (e) => {
+    e.stopPropagation(); // 不触发输入框/列表的全局快捷键
+    if (e.key === 'Enter') commit();
+    if (e.key === 'Escape') { done = true; refreshList(); }
+  };
+  input.onclick = (e) => e.stopPropagation(); // 不冒泡成"选中会话"
+  input.onblur = commit;
 }
 
 async function sideChat(m) {
