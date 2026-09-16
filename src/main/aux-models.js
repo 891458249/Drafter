@@ -86,9 +86,10 @@ async function analyzeMedia(keyEntry, model, { name, mediaKind, filePath, data, 
           }
           if (blocks.length) {
             const durInfo = ext0.duration ? `(时长约 ${ext0.duration}s)` : '';
+            const sceneInfo = (ext0.scenes > 1) ? `,共检测到约 ${ext0.scenes} 个镜头` : '';
             blocks.push({ type: 'text', text:
-              `以上是从一段视频${durInfo}按时间顺序均匀抽取的 ${blocks.length} 个关键帧。`
-              + '请综合这些帧,详细描述这段视频的内容(画面、人物、动作、场景与关键事件的发展),'
+              `以上是从一段视频${durInfo}按时间顺序在场景切换处抽取的 ${blocks.length} 个关键帧(含镜头边界${sceneInfo})。`
+              + '相邻帧的时间间隔不均匀,每个场景选取了代表画面。请综合这些帧,详细描述这段视频的内容(画面、人物、动作、场景与关键事件的发展),'
               + '用于提供给另一个 AI 助手作为上下文。' });
             const { res, json } = await fetchJson(oaiUrl(keyEntry.baseUrl, 'chat/completions'), {
               headers: authHeaders(keyEntry),
