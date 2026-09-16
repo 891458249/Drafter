@@ -61,8 +61,11 @@ function fmtSize(n) {
 // media: { name, mediaKind, filePath?, data?(base64), mime? }
 // 成功 { ok:true, text };接口不支持/读取失败/HTTP 错误 { ok:false, error }
 async function analyzeMedia(keyEntry, model, { name, mediaKind, filePath, data, mime }) {
-  // 视频/3D:chat 接口没有对应的二进制入参,由调用方直接走元信息兜底
-  if (mediaKind === 'video' || mediaKind === 'model') {
+  // 3D:chat 接口没有对应的二进制入参,由调用方直接走元信息兜底。
+  // 视频(v0.15.11):Qwen-VL/GLM-4V/Gemini-OpenAI-兼容等多模态网关支持
+  // chat/completions 的 video_url 块(data url base64),配置视频辅助模型后即可内容分析;
+  // 网关不支持该块类型时按 HTTP 错误走元信息兜底。
+  if (mediaKind === 'model') {
     return { ok: false, error: (KIND_LABEL[mediaKind] || '该类型') + '暂不支持内容分析' };
   }
   const ext = ((name || filePath || '').split('.').pop() || '').toLowerCase();
@@ -79,10 +82,14 @@ async function analyzeMedia(keyEntry, model, { name, mediaKind, filePath, data, 
   }
   const mediaBlock = mediaKind === 'audio'
     ? { type: 'input_audio', input_audio: { data: b64, format: AUDIO_FORMAT[ext] || 'mp3' } }
-    : { type: 'image_url', image_url: { url: `data:${mediaType || 'image/png'};base64,${b64}` } };
+    : mediaKind === 'video'
+      ? { type: 'video_url', video_url: { url: `data:${mediaType || 'video/mp4'};base64,${b64}` } }
+      : { type: 'image_url', image_url: { url: `data:${mediaType || 'image/png'};base64,${b64}` } };
   const prompt = mediaKind === 'audio'
     ? '请详细描述这段音频的内容(语音内容请转写成文字),用于提供给另一个 AI 助手作为上下文。'
-    : '请详细描述这张图片的内容,用于提供给另一个 AI 助手作为上下文。';
+    : mediaKind === 'video'
+      ? '请详细描述这段视频的内容(画面、人物、动作、场景与关键事件,语音内容请转写成文字),用于提供给另一个 AI 助手作为上下文。'
+      : '请详细描述这张图片的内容,用于提供给另一个 AI 助手作为上下文。';
   try {
     const { res, json } = await fetchJson(oaiUrl(keyEntry.baseUrl, 'chat/completions'), {
       headers: authHeaders(keyEntry),

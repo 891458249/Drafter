@@ -41,8 +41,10 @@ const chatRes = (text) => jsonRes({ choices: [{ message: { content: text } }] })
 // 临时媒体文件
 const imgFile = path.join(tmp, 'cat.png');
 const audioFile = path.join(tmp, 'voice.mp3');
+const videoFile = path.join(tmp, 'demo.mp4');
 fs.writeFileSync(imgFile, Buffer.from('fake-png-bytes'));
 fs.writeFileSync(audioFile, Buffer.from('fake-mp3-bytes'));
+fs.writeFileSync(videoFile, Buffer.from('fake-mp4-bytes'));
 
 // --- analyzeMedia -----------------------------------------------------------
 test('analyzeMedia(image):image_url 块结构 + data url + 中文 prompt', async () => {
@@ -81,13 +83,31 @@ test('analyzeMedia(audio):m4a/ogg 映射最接近的 mp3 format', async () => {
   assert.strictEqual(JSON.parse(calls[1].opts.body).messages[0].content[0].input_audio.format, 'mp3');
 });
 
-test('analyzeMedia:video/model 不发请求直接走兜底(ok:false)', async () => {
-  const rv = await aux.analyzeMedia(KEY, 'm', { name: 'v.mp4', mediaKind: 'video', filePath: imgFile });
-  assert.strictEqual(rv.ok, false);
-  assert.ok(rv.error.includes('暂不支持'));
+test('analyzeMedia(video):video_url 块 + mp4 mime + 中文 prompt(v0.15.11)', async () => {
+  queue = [chatRes('一段猫在客厅跑动的视频')];
+  const r = await aux.analyzeMedia(KEY, 'qwen-vl', { name: 'demo.mp4', mediaKind: 'video', filePath: videoFile });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.text, '一段猫在客厅跑动的视频');
+  assert.strictEqual(calls.length, 1);
+  const blocks = JSON.parse(calls[0].opts.body).messages[0].content;
+  assert.strictEqual(blocks[0].type, 'video_url');
+  assert.strictEqual(blocks[0].video_url.url, 'data:video/mp4;base64,' + Buffer.from('fake-mp4-bytes').toString('base64'));
+  assert.ok(blocks[1].text.includes('请详细描述这段视频'));
+});
+
+test('analyzeMedia(video):mov/webm 扩展名映射正确 mime', async () => {
+  queue = [chatRes('x'), chatRes('y')];
+  await aux.analyzeMedia(KEY, 'm', { name: 'a.mov', mediaKind: 'video', data: 'eA==' });
+  assert.ok(JSON.parse(calls[0].opts.body).messages[0].content[0].video_url.url.startsWith('data:video/quicktime;base64,'));
+  await aux.analyzeMedia(KEY, 'm', { name: 'a.webm', mediaKind: 'video', data: 'eA==' });
+  assert.ok(JSON.parse(calls[1].opts.body).messages[0].content[0].video_url.url.startsWith('data:video/webm;base64,'));
+});
+
+test('analyzeMedia:model 不发请求直接走兜底(ok:false)', async () => {
   const rm = await aux.analyzeMedia(KEY, 'm', { name: 'a.glb', mediaKind: 'model', filePath: imgFile });
   assert.strictEqual(rm.ok, false);
-  assert.strictEqual(calls.length, 0, 'video/model 不应发起 HTTP 请求');
+  assert.ok(rm.error.includes('暂不支持'));
+  assert.strictEqual(calls.length, 0, 'model 不应发起 HTTP 请求');
 });
 
 test('analyzeMedia:HTTP 错误与网络错误都返回 ok:false', async () => {
@@ -173,6 +193,20 @@ test('injectMedia:配置图像辅助时 image block 保留 + 追加分析文本'
   // 分析请求用的是块内 base64,不读文件
   const blocks = JSON.parse(calls[0].opts.body).messages[0].content;
   assert.strictEqual(blocks[0].image_url.url, 'data:image/png;base64,eA==');
+});
+
+test('injectMedia:配置视频辅助时 media_ref(video) 被 <附件分析> 替换(v0.15.11)', async () => {
+  queue = [chatRes('视频内容:猫在客厅跑动')];
+  const content = [
+    { type: 'media_ref', mediaKind: 'video', name: 'demo.mp4', path: videoFile, size: 15 },
+    { type: 'text', text: '视频里有什么?' },
+  ];
+  const out = await aux.injectMedia(content, { auxModels: { video: 'k_1|qwen-vl' }, keysById });
+  assert.strictEqual(out.length, 2);
+  assert.strictEqual(out[0].type, 'text');
+  assert.ok(out[0].text.includes('<附件分析 name="demo.mp4">'));
+  assert.ok(out[0].text.includes('视频内容:猫在客厅跑动'));
+  assert.strictEqual(calls.length, 1);
 });
 
 test('injectMedia:字符串 content 与无媒体块数组原样返回', async () => {
