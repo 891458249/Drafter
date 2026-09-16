@@ -59,18 +59,57 @@ function fmtSize(n) {
 
 // --- 辅助模型分析 -------------------------------------------------------------
 // media: { name, mediaKind, filePath?, data?(base64), mime? }
+// opts.deps.extractFrames: 可选,视频抽帧器(filePath→{ok,frames:[{jpeg}],...}),单测注入。
 // 成功 { ok:true, text };接口不支持/读取失败/HTTP 错误 { ok:false, error }
-async function analyzeMedia(keyEntry, model, { name, mediaKind, filePath, data, mime }) {
+async function analyzeMedia(keyEntry, model, { name, mediaKind, filePath, data, mime }, opts = {}) {
   // 3D:chat 接口没有对应的二进制入参,由调用方直接走元信息兜底。
-  // 视频(v0.15.11):Qwen-VL/GLM-4V/Gemini-OpenAI-兼容等多模态网关支持
-  // chat/completions 的 video_url 块(data url base64),配置视频辅助模型后即可内容分析;
-  // 网关不支持该块类型时按 HTTP 错误走元信息兜底。
   if (mediaKind === 'model') {
     return { ok: false, error: (KIND_LABEL[mediaKind] || '该类型') + '暂不支持内容分析' };
   }
   const ext = ((name || filePath || '').split('.').pop() || '').toLowerCase();
-  let b64 = data;
   const mediaType = mime || MIME_BY_EXT[ext];
+
+  // 视频(v0.15.12):实测 Kuro 等 OpenAI Responses 风格网关不接受任何视频字节入参
+  // (video_url 判为非法值、input_file 仅支持文档类 MIME 拒绝 video/mp4),但支持图像。
+  // 因此改为本地抽取若干关键帧,按时间顺序作为多个 image_url 块发送(OpenAI 式
+  // 「视频理解」的标准做法);抽帧不可用时才回退 video_url(兼容 Qwen-VL/GLM-4V 等原生
+  // 支持该块的网关),再失败才元信息兜底。
+  if (mediaKind === 'video') {
+    const extractFrames = opts.deps && opts.deps.extractFrames;
+    if (extractFrames && filePath) {
+      try {
+        const ext0 = await extractFrames(filePath);
+        if (ext0 && ext0.ok && Array.isArray(ext0.frames) && ext0.frames.length) {
+          const blocks = [];
+          for (const f of ext0.frames) {
+            if (f && f.jpeg) blocks.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${f.jpeg}` } });
+          }
+          if (blocks.length) {
+            const durInfo = ext0.duration ? `(时长约 ${ext0.duration}s)` : '';
+            blocks.push({ type: 'text', text:
+              `以上是从一段视频${durInfo}按时间顺序均匀抽取的 ${blocks.length} 个关键帧。`
+              + '请综合这些帧,详细描述这段视频的内容(画面、人物、动作、场景与关键事件的发展),'
+              + '用于提供给另一个 AI 助手作为上下文。' });
+            const { res, json } = await fetchJson(oaiUrl(keyEntry.baseUrl, 'chat/completions'), {
+              headers: authHeaders(keyEntry),
+              body: { model, messages: [{ role: 'user', content: blocks }] },
+            });
+            if (res.ok) {
+              const c = json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
+              const text = (typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('\n') : '').trim();
+              if (text) return { ok: true, text };
+              // 空内容则继续走 video_url 回退
+            }
+            // 图像通道被网关/上游拒绝或超时:继续尝试 video_url 回退
+          }
+        }
+      } catch (e) {
+        // 抽帧或图像通道异常:不中断,回退 video_url
+      }
+    }
+  }
+
+  let b64 = data;
   if (!b64) {
     try {
       const st = fs.statSync(filePath);
@@ -127,6 +166,14 @@ function metaFallbackText({ name, mediaKind, path: fp, size }, reason) {
     + hint + `\n</附件>`;
 }
 
+// 惰性加载 Electron 抽帧器(单测环境无 electron 时保持 null,由测试注入 deps)
+let _videoFrames = null;
+function getVideoFrameExtractor() {
+  if (_videoFrames) return _videoFrames;
+  try { _videoFrames = require('./video-frames').extractVideoFrames; } catch { _videoFrames = null; }
+  return _videoFrames;
+}
+
 // 单个 media_ref 块 → <附件分析> 或元信息兜底文本
 async function resolveMediaRef(b, { auxModels, keysById, onStatus }) {
   const conf = auxModels && auxModels[b.mediaKind];
@@ -137,9 +184,10 @@ async function resolveMediaRef(b, { auxModels, keysById, onStatus }) {
     const keyEntry = keyId && keysById ? keysById(keyId) : null;
     if (keyEntry && model) {
       try { onStatus && onStatus(`正在用辅助模型分析附件 ${b.name}…`); } catch {}
+      const deps = b.mediaKind === 'video' ? { extractFrames: getVideoFrameExtractor() } : undefined;
       const r = await analyzeMedia(keyEntry, model, {
         name: b.name, mediaKind: b.mediaKind, filePath: b.path, data: b.data, mime: b.mediaType,
-      });
+      }, { deps });
       if (r.ok) return `<附件分析 name="${b.name}">\n${r.text}\n</附件分析>`;
       try { onStatus && onStatus(`附件 ${b.name} 辅助分析失败,已注入文件信息兜底`); } catch {}
       return metaFallbackText(b, '辅助分析失败:' + (r.error || '未知错误'));

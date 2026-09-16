@@ -83,19 +83,37 @@ test('analyzeMedia(audio):m4a/ogg 映射最接近的 mp3 format', async () => {
   assert.strictEqual(JSON.parse(calls[1].opts.body).messages[0].content[0].input_audio.format, 'mp3');
 });
 
-test('analyzeMedia(video):video_url 块 + mp4 mime + 中文 prompt(v0.15.11)', async () => {
+test('analyzeMedia(video):注入抽帧器时走多 image_url 块(Responses 网关无视频入参,v0.15.12)', async () => {
   queue = [chatRes('一段猫在客厅跑动的视频')];
-  const r = await aux.analyzeMedia(KEY, 'qwen-vl', { name: 'demo.mp4', mediaKind: 'video', filePath: videoFile });
+  const deps = { extractFrames: async (fp) => ({ ok: true, frames: [{ t: 0.5, jpeg: 'ZjE=' }, { t: 1.5, jpeg: 'ZjI=' }], duration: 3 }) };
+  const r = await aux.analyzeMedia(KEY, 'gpt-6-astra', { name: 'demo.mp4', mediaKind: 'video', filePath: videoFile }, { deps });
   assert.strictEqual(r.ok, true);
   assert.strictEqual(r.text, '一段猫在客厅跑动的视频');
   assert.strictEqual(calls.length, 1);
   const blocks = JSON.parse(calls[0].opts.body).messages[0].content;
-  assert.strictEqual(blocks[0].type, 'video_url');
-  assert.strictEqual(blocks[0].video_url.url, 'data:video/mp4;base64,' + Buffer.from('fake-mp4-bytes').toString('base64'));
-  assert.ok(blocks[1].text.includes('请详细描述这段视频'));
+  assert.strictEqual(blocks[0].type, 'image_url');
+  assert.strictEqual(blocks[0].image_url.url, 'data:image/jpeg;base64,ZjE=');
+  assert.strictEqual(blocks[1].type, 'image_url');
+  assert.strictEqual(blocks[2].type, 'text');
+  assert.ok(blocks[2].text.includes('关键帧'));
+  assert.ok(blocks[2].text.includes('2 个关键帧'));
 });
 
-test('analyzeMedia(video):mov/webm 扩展名映射正确 mime', async () => {
+test('analyzeMedia(video):图像通道失败时回退 video_url 块', async () => {
+  // 第一次(图像通道)400,第二次(video_url 回退)成功
+  queue = [jsonRes({ error: { message: 'no image' } }, { status: 400 }), chatRes('回退成功')];
+  const deps = { extractFrames: async () => ({ ok: true, frames: [{ t: 0.5, jpeg: 'ZjE=' }], duration: 1 }) };
+  const r = await aux.analyzeMedia(KEY, 'qwen-vl', { name: 'demo.mp4', mediaKind: 'video', filePath: videoFile }, { deps });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.text, '回退成功');
+  assert.strictEqual(calls.length, 2);
+  assert.strictEqual(JSON.parse(calls[0].opts.body).messages[0].content[0].type, 'image_url');
+  const blocks2 = JSON.parse(calls[1].opts.body).messages[0].content;
+  assert.strictEqual(blocks2[0].type, 'video_url');
+  assert.strictEqual(blocks2[0].video_url.url, 'data:video/mp4;base64,' + Buffer.from('fake-mp4-bytes').toString('base64'));
+});
+
+test('analyzeMedia(video):无抽帧器时直接走 video_url 块(原生多模态网关)', async () => {
   queue = [chatRes('x'), chatRes('y')];
   await aux.analyzeMedia(KEY, 'm', { name: 'a.mov', mediaKind: 'video', data: 'eA==' });
   assert.ok(JSON.parse(calls[0].opts.body).messages[0].content[0].video_url.url.startsWith('data:video/quicktime;base64,'));
@@ -195,7 +213,7 @@ test('injectMedia:配置图像辅助时 image block 保留 + 追加分析文本'
   assert.strictEqual(blocks[0].image_url.url, 'data:image/png;base64,eA==');
 });
 
-test('injectMedia:配置视频辅助时 media_ref(video) 被 <附件分析> 替换(v0.15.11)', async () => {
+test('injectMedia:配置视频辅助时 media_ref(video) 被 <附件分析> 替换(v0.15.12)', async () => {
   queue = [chatRes('视频内容:猫在客厅跑动')];
   const content = [
     { type: 'media_ref', mediaKind: 'video', name: 'demo.mp4', path: videoFile, size: 15 },
@@ -206,7 +224,9 @@ test('injectMedia:配置视频辅助时 media_ref(video) 被 <附件分析> 替�
   assert.strictEqual(out[0].type, 'text');
   assert.ok(out[0].text.includes('<附件分析 name="demo.mp4">'));
   assert.ok(out[0].text.includes('视频内容:猫在客厅跑动'));
+  // 单测无 electron,抽帧器为 null → 回退 video_url,一次请求
   assert.strictEqual(calls.length, 1);
+  assert.strictEqual(JSON.parse(calls[0].opts.body).messages[0].content[0].type, 'video_url');
 });
 
 test('injectMedia:字符串 content 与无媒体块数组原样返回', async () => {

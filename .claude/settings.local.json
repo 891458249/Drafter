@@ -47,7 +47,9 @@
       "WebFetch(domain:platform.minimax.io)",
       "Skill(update-config)",
       "Skill(update-config:*)",
-      "Grep"
+      "Grep",
+      "WebFetch(domain:platform.openai.com)",
+      "Monitor"
     ]
   }
 }
