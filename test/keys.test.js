@@ -58,8 +58,7 @@ test('setActive / remove:切换默认与删除后回退', () => {
   assert.strictEqual(keys.setActive('k_nope').ok, false);
 });
 
-test('refreshModels: 按 key 拉取并缓存模型列表(mock fetch)', async () => {
-  const kuro = keys.list().find((k) => k.name === '库洛');
+test('refreshModels: 按 key 拉取并缓存模型列表(mock fetch)', async () => {  const kuro = keys.list().find((k) => k.name === '库洛');
   keys.setActive(kuro.id); // activeModels 读活跃 key,先切过去
   const origFetch = global.fetch;
   let seenUrl = '', seenAuth = '';
@@ -95,6 +94,22 @@ test('额度字段保存 + 模型勾选白名单优先', () => {
   // 恢复全量
   keys.setModelsEnabled(kuro.id, null);
   assert.deepStrictEqual(keys.activeModels(), ['claude-fable-5', 'claude-haiku-4-5']);
+});
+
+test('refreshModels: 连接失败时错误展开底层 cause(不再只剩 fetch failed)', async () => {
+  // 占一个立刻关闭的端口,制造确定性的 ECONNREFUSED
+  const http = require('http');
+  const srv = http.createServer();
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const deadPort = srv.address().port;
+  await new Promise((r) => srv.close(r));
+  const saved = keys.save({ name: 'dead', key: 'sk-dead-x', baseUrl: `http://127.0.0.1:${deadPort}` });
+  assert.strictEqual(saved.ok, true);
+  const r = await keys.refreshModels(saved.id);
+  assert.strictEqual(r.ok, false);
+  assert.ok(/ECONNREFUSED/.test(r.error), '应含底层 cause code: ' + r.error);
+  assert.ok(r.error.includes('连接被拒绝'), '应含人话提示: ' + r.error);
+  keys.remove(saved.id);
 });
 
 test('usageUrl:保存/清空/非法协议拒绝,且不影响脱敏', () => {

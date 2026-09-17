@@ -8,6 +8,7 @@
 const http = require('http');
 const keys = require('./keys');
 const tr = require('./oai-translate');
+const { netErrorText } = require('./net-error');
 
 let server = null;
 let port = 0;
@@ -109,7 +110,11 @@ async function handleMessages(req, res, keyEntry, body) {
       body: JSON.stringify(oaiBody),
     });
   } catch (e) {
-    return sendAnthropicError(res, 504, '上游请求失败:' + e.message);
+    // fetch 抛错 = 连接级失败(ECONNRESET/超时/DNS…),真因在 e.cause,必须展开给用户看
+    let host = '';
+    try { host = new URL(keyEntry.baseUrl || '').host; } catch {}
+    console.error(`[oai-proxy] upstream fetch failed (${host}):`, e && e.cause ? e.cause : e);
+    return sendAnthropicError(res, 504, `上游请求失败(${host || '未配置 Base URL'}):` + netErrorText(e));
   }
   if (!up.ok) {
     let json = null;
@@ -142,8 +147,8 @@ function onRequest(req, res) {
     if (!body.model) return sendAnthropicError(res, 400, '缺少 model', 'invalid_request_error');
     return handleMessages(req, res, keyEntry, body);
   })().catch((e) => {
-    console.error('[oai-proxy] request failed:', e.message);
-    try { sendAnthropicError(res, 500, '代理内部错误:' + e.message); } catch {}
+    console.error('[oai-proxy] request failed:', e);
+    try { sendAnthropicError(res, 500, '代理内部错误:' + netErrorText(e)); } catch {}
   });
 }
 

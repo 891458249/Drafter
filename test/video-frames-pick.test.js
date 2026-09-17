@@ -63,16 +63,64 @@ test('isSceneCut:空/长度不一的输入安全返回不切', () => {
 });
 
 // --- pickFrameTimes ----------------------------------------------------------
+// v0.15.15:禁用均匀抽帧——无场景信息时由帧差样本(samples:[{t,diff,luma}])选点,
+// 仅在完全无帧差数据时才用最大空隙二分兜底(dyadic 点,不再是 (i+0.5)/n 均匀公式)。
 const asc = (arr) => arr.every((v, i) => i === 0 || v >= arr[i - 1]);
 
-test('pickFrameTimes:无场景边界 → 等价旧版均匀采样 (i+0.5)/n(回归)', () => {
-  const d = 60, n = 6;
-  const ts = vf.pickFrameTimes(d, [], n);
+test('pickFrameTimes:无场景边界+帧差样本 → 按帧差贪心取点(禁用均匀)', () => {
+  const d = 60, n = 4;
+  const samples = [
+    { t: 10, diff: 5, luma: 120 }, { t: 20, diff: 40, luma: 120 },
+    { t: 30, diff: 10, luma: 120 }, { t: 40, diff: 50, luma: 120 },
+    { t: 50, diff: 8, luma: 120 },
+  ];
+  const ts = vf.pickFrameTimes(d, [], n, samples);
+  // 按 diff 降序 40,20,30,50 均可选(minSep=60/12=5,彼此间距 ≥10)
+  assert.deepStrictEqual(ts, [20, 30, 40, 50]);
+  // 明确不等于旧均匀公式 (i+0.5)/n = [7.5,22.5,37.5,52.5]
+  assert.notDeepStrictEqual(ts, [7.5, 22.5, 37.5, 52.5]);
+});
+
+test('pickFrameTimes:帧差取点跳过黑帧样本(luma<8)', () => {
+  const d = 60, n = 2;
+  const samples = [
+    { t: 10, diff: 99, luma: 2 },  // 黑帧,diff 再高也不选
+    { t: 30, diff: 20, luma: 120 },
+  ];
+  const ts = vf.pickFrameTimes(d, [], n, samples);
+  assert.ok(ts.includes(30), '选中唯一非黑样本: ' + ts.join(','));
+  assert.ok(!ts.includes(10), '黑帧样本被排除: ' + ts.join(','));
+});
+
+test('pickFrameTimes:无场景边界+无帧差数据 → 二分兜底(非均匀公式)', () => {
+  const ts = vf.pickFrameTimes(60, [], 6);
+  // 最大空隙二分:30 → 15 → 45 → 7.5 → 22.5 → 37.5
+  assert.deepStrictEqual(ts, [7.5, 15, 22.5, 30, 37.5, 45]);
+});
+
+test('pickFrameTimes:边界少于帧数+帧差样本 → 优先帧差补齐而非二分', () => {
+  const d = 100, n = 6;
+  const bounds = [30, 70]; // 场景中点 15, 50, 85
+  const samples = [
+    { t: 5, diff: 50, luma: 120 },   // 距 15 为 10 ≥ minSep(100/18≈5.56)→ 可选
+    { t: 63, diff: 40, luma: 120 },  // 距 50/85 均 ≥13 → 可选
+    { t: 95, diff: 60, luma: 120 },  // 距 85 为 10 → 可选
+  ];
+  const ts = vf.pickFrameTimes(d, bounds, n, samples);
+  assert.deepStrictEqual(ts, [5, 15, 50, 63, 85, 95]);
+});
+
+test('pickFrameTimes:帧差补齐遵守最小间隔,不挤在一次动作爆发上', () => {
+  const d = 100, n = 4;
+  const samples = [
+    { t: 50, diff: 60, luma: 120 }, { t: 51, diff: 59, luma: 120 },
+    { t: 52, diff: 58, luma: 120 }, { t: 90, diff: 10, luma: 120 },
+  ];
+  const ts = vf.pickFrameTimes(d, [], n, samples);
+  // minSep=100/12≈8.33:50 选中后 51/52 被拒,90 入选,剩余名额二分补齐
+  assert.ok(ts.includes(50) && ts.includes(90), '帧差点分散: ' + ts.join(','));
+  assert.ok(!ts.includes(51) && !ts.includes(52), '过近样本被拒: ' + ts.join(','));
   assert.strictEqual(ts.length, n);
-  for (let i = 0; i < n; i++) {
-    const want = (d * (i + 0.5)) / n;
-    assert.ok(Math.abs(ts[i] - want) < 0.06, `点${i}: ${ts[i]} ≈ ${want}`);
-  }
   assert.ok(asc(ts));
 });
 
@@ -87,6 +135,19 @@ test('pickFrameTimes:边界多于帧数 → 恰好 n 个、升序、落在 [0,d]
   // 分层应覆盖首末段
   assert.ok(ts[0] < d / n, '首点落在首段内');
   assert.ok(ts[n - 1] > d - d / n, '末点落在末段内');
+});
+
+test('pickFrameTimes:分层取时段内无场景点 → 用段内帧差最高点兜底(非段中心)', () => {
+  const d = 100, n = 4;
+  // 7 个密集边界 → 8 个候选中点(0.5 首帧保护后 7 个),3 个名额分 3 段,
+  // 末段 [66.7,100] 无场景点
+  const bounds = [1, 2, 3, 4, 5, 6, 7];
+  const samples = [{ t: 70, diff: 9, luma: 120 }, { t: 90, diff: 30, luma: 120 }];
+  const ts = vf.pickFrameTimes(d, bounds, n, samples);
+  assert.strictEqual(ts.length, n);
+  assert.ok(Math.abs(ts[0] - 0.5) < 0.06, '首帧保护: ' + ts.join(','));
+  assert.ok(ts.includes(90), '末段取帧差最高点 90 而非段中心 83.3: ' + ts.join(','));
+  assert.ok(!ts.some((t) => Math.abs(t - 83.33) < 0.5), '不再是段中心兜底: ' + ts.join(','));
 });
 
 test('pickFrameTimes:边界少 → 场景点全保留 + 空隙二分补齐到 n', () => {

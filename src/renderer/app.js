@@ -1180,8 +1180,17 @@ document.addEventListener('keydown', (e) => {
 });
 
 // close modals by clicking mask
+// v0.15.15:必须是一次完整点击(按下+弹起都在蒙层空白上)才关闭。
+// 旧实现用 click 事件:在面板内按下(如拖选文字/拖滑块)移到蒙层上弹起时,
+// 浏览器会把 click 派发到最近公共祖先(蒙层),导致面板被误关;反之按下在蒙层、
+// 弹起在面板内同样误关。改为分别跟踪 mousedown/mouseup 的落点。
 for (const m of document.querySelectorAll('.modal-mask')) {
-  m.addEventListener('click', (e) => { if (e.target === m) m.classList.add('hidden'); });
+  let downOnMask = false;
+  m.addEventListener('mousedown', (e) => { downOnMask = e.target === m; });
+  m.addEventListener('mouseup', (e) => {
+    if (downOnMask && e.target === m) m.classList.add('hidden');
+    downOnMask = false;
+  });
 }
 
 // ---------------------------------------------------------------------------

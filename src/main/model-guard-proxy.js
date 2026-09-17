@@ -4,6 +4,7 @@
 const http = require('http');
 const keys = require('./keys');
 const oaiProxy = require('./oai-proxy');
+const { netErrorText } = require('./net-error');
 
 let server = null;
 let port = 0;
@@ -127,11 +128,20 @@ async function onRequest(req, res) {
       headers: forwardHeaders(req, keyEntry),
       body: raw || undefined,
       redirect: 'manual',
+    }).catch((e) => {
+      // 连接级失败(直连网关时常见:ECONNRESET/超时/DNS),翻译成人话再抛给外层
+      let host = '';
+      try { host = new URL(upstreamUrl).host; } catch {}
+      const wrapped = new Error(`上游请求失败(${host}):` + netErrorText(e), { cause: e });
+      wrapped.formatted = true; // 外层不再重复展开 cause
+      throw wrapped;
     });
     return pipeResponse(upstream, res);
   } catch (e) {
-    console.error('[model-guard] request failed:', e.message);
-    try { sendAnthropicError(res, 500, '模型守卫代理内部错误:' + e.message); } catch {}
+    console.error('[model-guard] request failed:', e);
+    // e.formatted = 上游连接错误已翻译成人话,直接透传;否则按内部错误格式化
+    const text = e && e.formatted ? e.message : '模型守卫代理内部错误:' + netErrorText(e);
+    try { sendAnthropicError(res, 500, text); } catch {}
   }
 }
 

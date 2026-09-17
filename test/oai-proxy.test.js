@@ -22,6 +22,7 @@ after(async () => {
 // --- 假 OpenAI 后端:按路径脚本化响应 -------------------------------------------
 let upstream = null;
 let upstreamPort = 0;
+let deadPort = 0;
 const seenRequests = [];
 
 function sse(frames) {
@@ -65,9 +66,15 @@ before(async () => {
   });
   await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
   upstreamPort = upstream.address().port;
+  // 占一个立刻关闭的端口,制造确定性的 ECONNREFUSED 上游
+  const tmpSrv = http.createServer();
+  await new Promise((r) => tmpSrv.listen(0, '127.0.0.1', r));
+  deadPort = tmpSrv.address().port;
+  await new Promise((r) => tmpSrv.close(r));
   store.setSetting('apiKeys', [
     { id: 'k_oai', name: 'OAI', key: 'sk-real-secret', baseUrl: `http://127.0.0.1:${upstreamPort}`, kind: 'authToken', protocol: 'openai', enabled: true, models: [], modelsAt: 0 },
     { id: 'k_off', name: 'Off', key: 'sk-off', baseUrl: `http://127.0.0.1:${upstreamPort}`, kind: 'authToken', protocol: 'openai', enabled: false, models: [], modelsAt: 0 },
+    { id: 'k_dead', name: 'Dead', key: 'sk-dead', baseUrl: `http://127.0.0.1:${deadPort}`, kind: 'authToken', protocol: 'openai', enabled: true, models: [], modelsAt: 0 },
   ]);
   await proxy.start();
 });
@@ -147,4 +154,15 @@ test('错误透传:上游余额 429 改写 402,原文保留在 Anthropic 错误�
   const json = await r.json();
   assert.strictEqual(json.type, 'error');
   assert.ok(json.error.message.includes('no credits remaining'));
+});
+
+test('连接级失败:504,错误展开底层 cause(ECONNREFUSED)+ host + 人话提示,不再只剩 fetch failed', async () => {
+  const r = await call('/k_dead/v1/messages', { token: 'sk-dead', body: { model: 'm', max_tokens: 1, messages: [] } });
+  assert.strictEqual(r.status, 504);
+  const json = await r.json();
+  assert.strictEqual(json.type, 'error');
+  assert.ok(json.error.message.includes('上游请求失败'), json.error.message);
+  assert.ok(/ECONNREFUSED/.test(json.error.message), '应含底层 cause code: ' + json.error.message);
+  assert.ok(json.error.message.includes('连接被拒绝'), '应含人话提示: ' + json.error.message);
+  assert.ok(json.error.message.includes(`127.0.0.1:${deadPort}`), '应含上游 host: ' + json.error.message);
 });

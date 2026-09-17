@@ -7,6 +7,7 @@
 const crypto = require('crypto');
 const store = require('./store');
 const { oaiUrl } = require('./oai-translate');
+const { netErrorText } = require('./net-error');
 
 const OFFICIAL_API = 'https://api.anthropic.com';
 
@@ -200,7 +201,7 @@ async function fetchModels(entry) {
     if (!raw.length) return { ok: false, error: '接口返回空模型列表' };
     return { ok: true, models: filterMainstreamModels(raw) };
   } catch (e) {
-    return { ok: false, error: e.name === 'AbortError' ? '请求超时' : e.message };
+    return { ok: false, error: e.name === 'AbortError' ? '请求超时' : netErrorText(e) };
   } finally {
     clearTimeout(timer);
   }
@@ -225,7 +226,7 @@ async function fetchMyModels(entry) {
     if (!groups.length) return { ok: false, error: '接口返回空分组' };
     return { ok: true, groups };
   } catch (e) {
-    return { ok: false, error: e.name === 'AbortError' ? '请求超时' : e.message };
+    return { ok: false, error: e.name === 'AbortError' ? '请求超时' : netErrorText(e) };
   } finally {
     clearTimeout(timer);
   }
@@ -276,7 +277,7 @@ async function httpGetJson(url, key) {
     }
     return { ok: true, json: await res.json() };
   } catch (e) {
-    return { ok: false, error: e.name === 'AbortError' ? '请求超时' : e.message };
+    return { ok: false, error: e.name === 'AbortError' ? '请求超时' : netErrorText(e) };
   } finally {
     clearTimeout(timer);
   }

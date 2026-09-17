@@ -1,6 +1,7 @@
 // LLM 文本补全(v0.10.1,画布「文本生成」节点,md 1.1 文本生成:接入多家 LLM):
 // OpenAI 格式 /v1/chat/completions 单次调用,key 解析/Bearer 兼容与 aigc/aux 同套。
 // 本模块不依赖 electron(便于单测 mock fetch)。
+const { netErrorText } = require('./net-error');
 const HTTP_TIMEOUT_MS = 120000;
 
 // 与 keys.js/aigc.js 相同的归一化:去掉末尾 / 与 /v1 后缀,拼端点时补回 /v1
@@ -39,7 +40,7 @@ async function complete(keyEntry, { model, prompt, system } = {}) {
     if (!text) return { ok: false, error: '模型返回空内容' };
     return { ok: true, text };
   } catch (e) {
-    return { ok: false, error: e.name === 'AbortError' ? '请求超时(120s)' : e.message };
+    return { ok: false, error: e.name === 'AbortError' ? '请求超时(120s)' : netErrorText(e) };
   } finally {
     clearTimeout(timer);
   }

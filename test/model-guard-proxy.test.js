@@ -66,6 +66,34 @@ test('未勾选模型在本地 403,上游零请求并触发回调', async () => 
   }
 });
 
+test('直连网关连接失败:500 但错误为已翻译的上游人话(ECONNREFUSED),不套内部错误', async () => {
+  // 占一个立刻关闭的端口,制造确定性的 ECONNREFUSED 上游
+  const tmpSrv = http.createServer();
+  await new Promise((r) => tmpSrv.listen(0, '127.0.0.1', r));
+  const deadPort = tmpSrv.address().port;
+  await new Promise((r) => tmpSrv.close(r));
+  store.setSetting('apiKeys', [{
+    id: 'k_guard', name: 'Gateway', key: 'secret-token', baseUrl: `http://127.0.0.1:${deadPort}`, enabled: true,
+    models: ['gpt-main'], modelsEnabled: null,
+  }]);
+  try {
+    await guard.start();
+    guard.register({ sid: 's1', keyId: 'k_guard', getAllowedModels: () => ['gpt-main'], onBlocked: () => {} });
+    const res = await fetch(`${guard.baseUrlFor('s1')}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer secret-token' },
+      body: JSON.stringify({ model: 'gpt-main', messages: [] }),
+    });
+    const json = await res.json();
+    assert.strictEqual(res.status, 500);
+    assert.ok(json.error.message.includes('上游请求失败'), json.error.message);
+    assert.ok(/ECONNREFUSED/.test(json.error.message), '应含底层 cause: ' + json.error.message);
+    assert.ok(!json.error.message.includes('内部错误'), '上游连接错误不应误报内部错误: ' + json.error.message);
+  } finally {
+    await guard.stop();
+  }
+});
+
 test('勾选模型按原请求转发并透传 SSE;策略动态读取最新勾选', async () => {
   const up = await startUpstream();
   seedKey();

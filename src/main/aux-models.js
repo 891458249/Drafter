@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { oaiUrl } = require('./oai-translate');
+const { netErrorText } = require('./net-error');
 
 const MAX_MEDIA_BYTES = 20 * 1024 * 1024; // 媒体附件读取上限,超限不做分析
 const HTTP_TIMEOUT_MS = 90000; // 大体积 base64 上传 + 多模态推理较慢,超时放宽
@@ -175,7 +176,7 @@ async function analyzeMedia(keyEntry, model, { name, mediaKind, filePath, data, 
     if (!text) return { ok: false, error: '辅助模型返回空内容' };
     return { ok: true, text };
   } catch (e) {
-    return { ok: false, error: e.name === 'AbortError' ? '辅助分析请求超时' : e.message };
+    return { ok: false, error: e.name === 'AbortError' ? '辅助分析请求超时' : netErrorText(e) };
   }
 }
 

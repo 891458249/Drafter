@@ -4,6 +4,10 @@
 // v0.15.13:场景切换检测——先在隐藏窗口内做轻量缩略图差异扫描找镜头边界,
 // 再在各场景代表点抽高清帧;边界不足/过多时用分层均匀采样补足/筛选,
 // 保证任意时长、任意内容的输出帧数稳定受控且时间分布均匀。
+// v0.15.15:禁用均匀抽帧——选点全部由前后帧对比驱动:场景点不足/无场景时
+// 用扫描期记录的帧差样本(diff 越高画面变化越大)贪心补齐,段内无场景点用段内
+// 帧差最高点兜底;仅在扫描完全失败(无任何帧差数据)时才用最大空隙二分兜底,
+// 不再使用 (i+0.5)/n 均匀公式。
 // 仅主进程可用(需要 electron);aux-models 通过依赖注入使用,单测不经过本模块。
 // 纯函数 framesForDuration/isSceneCut/pickFrameTimes 可脱离 electron 单测;
 // 页面内脚本用同一套算法(sceneCutInPage/pickFrameTimesInPage/framesForDurationInPage,逻辑保持一致)。
@@ -55,10 +59,14 @@ function isSceneCut(a, b, threshold = SCENE_DIFF_THRESHOLD) {
   return { cut: diff > threshold, diff, luma };
 }
 
-// 由场景边界(秒,升序)+ 时长 + 目标帧数,选最终采样时间点(秒,升序,长度 ≤ frames)。
-// 规则:候选取各场景中点;场景多按时间均匀分层挑 frames 个;场景少则全保留并在最长时间空隙递归二分补齐;
-// 首场景点距 0 < FIRST_FRAME_KEEP_S 时固定保留(封面/标题帧)。无边界时退化为旧版均匀 (i+0.5)/n。
-function pickFrameTimes(duration, sceneBoundaries, frames) {
+// 由场景边界(秒,升序)+ 时长 + 目标帧数 + 帧差样本,选最终采样时间点(秒,升序,长度 ≤ frames)。
+// 规则(v0.15.15,禁用均匀抽帧,全部由前后帧对比驱动):
+// 候选取各场景中点;首场景点距 0 < FIRST_FRAME_KEEP_S 时固定保留(封面/标题帧);
+// 场景少则全保留,先用帧差样本按差值贪心补齐(带最小间隔防扎堆、黑帧排除),
+// 仅在完全无帧差数据(扫描失败)时才用最大空隙二分兜底;场景多按时间均匀分层挑 frames 个,
+// 段内无场景点改用段内帧差最高点兜底。
+// samples: [{t, diff, luma}] — diff 为该扫描点与前一点的缩略图帧差(0~255),luma 为该点亮度。
+function pickFrameTimes(duration, sceneBoundaries, frames, samples) {
   const d = Number(duration);
   const n = Math.max(1, Math.floor(frames) || 1);
   if (!isFinite(d) || d <= 0) return [0];
@@ -66,25 +74,40 @@ function pickFrameTimes(duration, sceneBoundaries, frames) {
   const clampT = (t) => Math.min(cap, Math.max(0, t));
   const bounds = (Array.isArray(sceneBoundaries) ? sceneBoundaries : [])
     .map(Number).filter((t) => isFinite(t) && t > 0 && t < d).sort((x, y) => x - y);
-  // 场景区间中点作为候选(避开边界本身的过渡帧)
+  // 场景区间中点作为候选(避开边界本身的过渡帧);无边界时不造内容无关的中点,交给帧差选点
   const cuts = [0, ...bounds, d];
   let candidates = [];
-  for (let i = 0; i + 1 < cuts.length; i++) {
-    const mid = (cuts[i] + cuts[i + 1]) / 2;
-    if (mid > 0 && mid < d) candidates.push(mid);
+  if (bounds.length) {
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const mid = (cuts[i] + cuts[i + 1]) / 2;
+      if (mid > 0 && mid < d) candidates.push(mid);
+    }
   }
-  if (!candidates.length || (candidates.length === 1 && !bounds.length)) {
-    // 无场景信息(无边界,或仅 [0,d] 单场景/扫描失败):等价旧版均匀采样,保证回归旧行为
-    const out = [];
-    for (let i = 0; i < n; i++) out.push(clampT((d * (i + 0.5)) / n));
-    return out;
-  }
+  // 帧差样本:过滤越界/黑帧(黑场不做代表帧),按时间排序
+  const diffs = (Array.isArray(samples) ? samples : [])
+    .map((s) => ({ t: Number(s && s.t), diff: Number(s && s.diff), luma: Number(s && s.luma) }))
+    .filter((s) => isFinite(s.t) && s.t > 0 && s.t < d && isFinite(s.diff))
+    .filter((s) => !(s.luma < BLACK_LUMA))
+    .sort((x, y) => x.t - y.t);
+  const minSep = Math.max(0.5, d / (n * 3)); // 帧差补齐的最小时间间隔,避免挤在一次动作爆发上
+  // 按帧差从大到小贪心取点,要求与所有已选点间距 ≥ minSep
+  const fillByDiff = (pts, target) => {
+    const ranked = diffs.slice().sort((x, y) => y.diff - x.diff);
+    for (const s of ranked) {
+      if (pts.length >= target) break;
+      if (pts.every((t) => Math.abs(t - s.t) >= minSep)) {
+        pts.push(s.t);
+        pts.sort((x, y) => x - y);
+      }
+    }
+  };
   const picked = [];
   // 首帧保护:封面/标题帧固定保留
-  if (candidates[0] < FIRST_FRAME_KEEP_S) picked.push(candidates.shift());
+  if (candidates.length && candidates[0] < FIRST_FRAME_KEEP_S) picked.push(candidates.shift());
   if (candidates.length + picked.length <= n) {
-    // 场景不足:全保留,剩余名额在最长时间空隙里递归二分补齐
+    // 场景不足/无场景:全保留,先帧差补齐;仍不够(无帧差数据)再最大空隙二分兜底
     const pts = [...picked, ...candidates];
+    fillByDiff(pts, n);
     while (pts.length < n) {
       const seq = [0, ...pts, d];
       let gi = 0, gw = -1;
@@ -99,7 +122,7 @@ function pickFrameTimes(duration, sceneBoundaries, frames) {
     }
     return dedupSort(pts.map(clampT)).slice(0, n);
   }
-  // 场景过多:按时长等分剩余名额段,每段取距段中心最近的候选;段内无场景点用段中心兜底
+  // 场景过多:按时长等分剩余名额段,每段取距段中心最近的候选;段内无场景点用段内帧差最高点兜底,再无才用段中心
   const rest = n - picked.length;
   const chosen = [];
   for (let i = 0; i < rest; i++) {
@@ -109,6 +132,13 @@ function pickFrameTimes(duration, sceneBoundaries, frames) {
       if (c < lo || c >= hi) continue;
       const dist = Math.abs(c - center);
       if (dist < bd) { bd = dist; best = c; }
+    }
+    if (best == null) {
+      let bDiff = -1;
+      for (const s of diffs) {
+        if (s.t < lo || s.t >= hi) continue;
+        if (s.diff > bDiff) { bDiff = s.diff; best = s.t; }
+      }
     }
     chosen.push(best == null ? center : best);
   }
@@ -152,7 +182,7 @@ function sceneCutInPage(a, b, threshold, blackLuma) {
   return { cut: diff > threshold, diff, luma };
 }
 
-function pickFrameTimesInPage(duration, sceneBoundaries, frames, firstKeepS) {
+function pickFrameTimesInPage(duration, sceneBoundaries, frames, firstKeepS, samples) {
   const d = Number(duration);
   const n = Math.max(1, Math.floor(frames) || 1);
   if (!isFinite(d) || d <= 0) return [0];
@@ -162,24 +192,38 @@ function pickFrameTimesInPage(duration, sceneBoundaries, frames, firstKeepS) {
     .map(Number).filter((t) => isFinite(t) && t > 0 && t < d).sort((x, y) => x - y);
   const cuts = [0, ...bounds, d];
   let candidates = [];
-  for (let i = 0; i + 1 < cuts.length; i++) {
-    const mid = (cuts[i] + cuts[i + 1]) / 2;
-    if (mid > 0 && mid < d) candidates.push(mid);
+  if (bounds.length) {
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const mid = (cuts[i] + cuts[i + 1]) / 2;
+      if (mid > 0 && mid < d) candidates.push(mid);
+    }
   }
+  const diffs = (Array.isArray(samples) ? samples : [])
+    .map((s) => ({ t: Number(s && s.t), diff: Number(s && s.diff), luma: Number(s && s.luma) }))
+    .filter((s) => isFinite(s.t) && s.t > 0 && s.t < d && isFinite(s.diff))
+    .filter((s) => !(s.luma < 8)) // BLACK_LUMA=8,页内自包含不引用 Node 侧常量
+    .sort((x, y) => x.t - y.t);
+  const minSep = Math.max(0.5, d / (n * 3));
+  const fillByDiff = (pts, target) => {
+    const ranked = diffs.slice().sort((x, y) => y.diff - x.diff);
+    for (const s of ranked) {
+      if (pts.length >= target) break;
+      if (pts.every((t) => Math.abs(t - s.t) >= minSep)) {
+        pts.push(s.t);
+        pts.sort((x, y) => x - y);
+      }
+    }
+  };
   const dedup = (arr) => {
     const s = arr.slice().sort((x, y) => x - y), out = [];
     for (const t of s) if (!out.length || Math.abs(t - out[out.length - 1]) > 0.05) out.push(t);
     return out;
   };
-  if (!candidates.length || (candidates.length === 1 && !bounds.length)) {
-    const out = [];
-    for (let i = 0; i < n; i++) out.push(clampT((d * (i + 0.5)) / n));
-    return out;
-  }
   const picked = [];
-  if (candidates[0] < firstKeepS) picked.push(candidates.shift());
+  if (candidates.length && candidates[0] < firstKeepS) picked.push(candidates.shift());
   if (candidates.length + picked.length <= n) {
     const pts = [...picked, ...candidates];
+    fillByDiff(pts, n);
     while (pts.length < n) {
       const seq = [0, ...pts, d];
       let gi = 0, gw = -1;
@@ -204,6 +248,13 @@ function pickFrameTimesInPage(duration, sceneBoundaries, frames, firstKeepS) {
       const dist = Math.abs(c - center);
       if (dist < bd) { bd = dist; best = c; }
     }
+    if (best == null) {
+      let bDiff = -1;
+      for (const s of diffs) {
+        if (s.t < lo || s.t >= hi) continue;
+        if (s.diff > bDiff) { bDiff = s.diff; best = s.t; }
+      }
+    }
     chosen.push(best == null ? center : best);
   }
   return dedup([...picked, ...chosen].map(clampT)).slice(0, n);
@@ -211,7 +262,7 @@ function pickFrameTimesInPage(duration, sceneBoundaries, frames, firstKeepS) {
 
 // 在隐藏窗口内执行的抽帧脚本(媒体源以 Blob 注入,避免 file:// 源被 opaque origin 拦截)。
 // 返回 { ok, frames:[{t, jpeg}], width, height, duration, scenes, scanned } 或 { ok:false, error }。
-// scenes: 检测到的场景数(边界数+1);scanned: 缩略扫描点数(0 表示扫描失败退回均匀)。
+// scenes: 检测到的场景数(边界数+1);scanned: 缩略扫描点数(0 表示扫描失败,选点退化为二分兜底)。
 function extractInPage(mime, b64, frameCountIn, maxWidth, quality, seekTimeoutMs, optsJson) {
   return (async () => {
     const opts = JSON.parse(optsJson || '{}');
@@ -258,8 +309,10 @@ function extractInPage(mime, b64, frameCountIn, maxWidth, quality, seekTimeoutMs
       // 帧数:显式传入(>0)优先,否则按真实时长分档
       const n = (Math.floor(frameCountIn) > 0) ? Math.floor(frameCountIn) : framesForDurationInPage(duration);
 
-      // ① 缩略扫描找场景切换边界;扫描失败不致命,退回无场景信息(等价旧版均匀)。
+      // ① 缩略扫描找场景切换边界,并记录每个采样点的前后帧差样本(v0.15.15 选点数据源);
+      // 扫描中途失败不致命:保留已扫到的部分边界/样本,帧差选点照常工作。
       let boundaries = [], scanned = 0;
+      const samples = [];
       try {
         const step = Math.min(SMAX, Math.max(SMIN, duration / SCAN_MAX));
         const pts = Math.max(1, Math.min(SCAN_MAX, Math.floor(duration / step)));
@@ -276,15 +329,18 @@ function extractInPage(mime, b64, frameCountIn, maxWidth, quality, seekTimeoutMs
           if (prev) {
             const r = sceneCutInPage(prev, data, THRESH, BLK);
             if (r.cut) boundaries.push((prevT + t) / 2);
+            samples.push({ t, diff: r.diff, luma: r.luma });
+          } else {
+            samples.push({ t, diff: 0, luma: 255 });
           }
           prev = data; prevT = t;
         }
       } catch (e) {
-        boundaries = []; // 扫描失败:退回均匀采样,不影响取图
+        // 扫描中断:boundaries/samples 保留已采集部分,不再清空
       }
 
-      // ② 由边界+时长选采样点
-      const times = pickFrameTimesInPage(duration, boundaries, n, FIRST_KEEP);
+      // ② 由边界+帧差样本+时长选采样点(无帧差数据时二分兜底,不再均匀采样)
+      const times = pickFrameTimesInPage(duration, boundaries, n, FIRST_KEEP, samples);
 
       // ③ 高清取图
       const scale = Math.min(1, maxWidth / vw);
