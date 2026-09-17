@@ -50,6 +50,34 @@ async function fetchJson(url, { headers = {}, body, timeoutMs = HTTP_TIMEOUT_MS 
   }
 }
 
+// GET /v1/models(跨 Key 兜底探测用),返回模型 id 数组;失败/超时返回 []
+async function listModels(keyEntry, { timeoutMs = 15000 } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(apiRoot(keyEntry.baseUrl) + '/v1/models', {
+      headers: authHeaders(keyEntry), signal: ctrl.signal,
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json || !Array.isArray(json.data)) return [];
+    return json.data.map((m) => m && m.id).filter(Boolean);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 兜底候选排序:剔除明显非多模态(embedding/tts/whisper/dall/rerank 等),
+// 名称带视觉线索的排前;其余保持网关返回顺序。上限由调用方截断。
+const NON_VISION_RE = /embed|whisper|tts|dall|rerank|moderation|transcri|speech|audio/i;
+const VISION_HINT_RE = /vl|vision|omni|video|image|4o|gpt-5|gemini|claude|kimi|k3|qwen|glm|llava|minicpm|pixtral/i;
+function rankVisionCandidates(ids) {
+  return ids
+    .filter((id) => !NON_VISION_RE.test(id))
+    .sort((a, b) => (VISION_HINT_RE.test(b) ? 1 : 0) - (VISION_HINT_RE.test(a) ? 1 : 0));
+}
+
 function fmtSize(n) {
   if (n == null) return '未知';
   if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
@@ -60,6 +88,7 @@ function fmtSize(n) {
 // --- 辅助模型分析 -------------------------------------------------------------
 // media: { name, mediaKind, filePath?, data?(base64), mime? }
 // opts.deps.extractFrames: 可选,视频抽帧器(filePath→{ok,frames:[{jpeg}],...}),单测注入。
+// opts.timeoutMs: 可选,覆盖单次请求超时(兜底链尝试时收紧,避免长时间卡住发送)。
 // 成功 { ok:true, text };接口不支持/读取失败/HTTP 错误 { ok:false, error }
 async function analyzeMedia(keyEntry, model, { name, mediaKind, filePath, data, mime }, opts = {}) {
   // 3D:chat 接口没有对应的二进制入参,由调用方直接走元信息兜底。
@@ -94,6 +123,7 @@ async function analyzeMedia(keyEntry, model, { name, mediaKind, filePath, data, 
             const { res, json } = await fetchJson(oaiUrl(keyEntry.baseUrl, 'chat/completions'), {
               headers: authHeaders(keyEntry),
               body: { model, messages: [{ role: 'user', content: blocks }] },
+              timeoutMs: opts.timeoutMs,
             });
             if (res.ok) {
               const c = json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
@@ -134,6 +164,7 @@ async function analyzeMedia(keyEntry, model, { name, mediaKind, filePath, data, 
     const { res, json } = await fetchJson(oaiUrl(keyEntry.baseUrl, 'chat/completions'), {
       headers: authHeaders(keyEntry),
       body: { model, messages: [{ role: 'user', content: [mediaBlock, { type: 'text', text: prompt }] }] },
+      timeoutMs: opts.timeoutMs,
     });
     if (!res.ok) {
       const msg = (json && (json.error && (json.error.message || json.error) || json.message)) || '';
@@ -176,31 +207,58 @@ function getVideoFrameExtractor() {
 }
 
 // 单个 media_ref 块 → <附件分析> 或元信息兜底文本
-async function resolveMediaRef(b, { auxModels, keysById, onStatus }) {
+// 跨 Key 兜底(v0.15.15):配置的辅助模型失败(如 429 额度尽)时,枚举其余启用的 Key,
+// 拉 /v1/models 过滤明显非多模态模型后逐个尝试,直到某个模型分析成功——附件内容可能
+// 因此发往其他提供方,属用户明确要求的「不管用什么模型都要能解析」行为。
+async function resolveMediaRef(b, { auxModels, keysById, listKeys, onStatus }) {
   const conf = auxModels && auxModels[b.mediaKind];
-  if (conf) {
-    const i = conf.indexOf('|'); // 值编码 keyId|modelId
-    const keyId = i > 0 ? conf.slice(0, i) : null;
-    const model = i > 0 ? conf.slice(i + 1) : conf;
-    const keyEntry = keyId && keysById ? keysById(keyId) : null;
-    if (keyEntry && model) {
-      try { onStatus && onStatus(`正在用辅助模型分析附件 ${b.name}…`); } catch {}
-      const deps = b.mediaKind === 'video' ? { extractFrames: getVideoFrameExtractor() } : undefined;
-      const r = await analyzeMedia(keyEntry, model, {
-        name: b.name, mediaKind: b.mediaKind, filePath: b.path, data: b.data, mime: b.mediaType,
-      }, { deps });
-      if (r.ok) return `<附件分析 name="${b.name}">\n${r.text}\n</附件分析>`;
-      try { onStatus && onStatus(`附件 ${b.name} 辅助分析失败,已注入文件信息兜底`); } catch {}
-      return metaFallbackText(b, '辅助分析失败:' + (r.error || '未知错误'));
+  if (!conf) return metaFallbackText(b, null);
+  const i = conf.indexOf('|'); // 值编码 keyId|modelId
+  const keyId = i > 0 ? conf.slice(0, i) : null;
+  const model = i > 0 ? conf.slice(i + 1) : conf;
+  const keyEntry = keyId && keysById ? keysById(keyId) : null;
+  if (!keyEntry || !model) return metaFallbackText(b, null);
+
+  const media = { name: b.name, mediaKind: b.mediaKind, filePath: b.path, data: b.data, mime: b.mediaType };
+  // 视频抽帧器在整条链上只跑一次(抽帧耗时 ~2s,每个候选复用结果)
+  let deps;
+  if (b.mediaKind === 'video') {
+    const rawExtract = getVideoFrameExtractor();
+    if (rawExtract) {
+      let cached = null;
+      deps = { extractFrames: async (fp) => cached || (cached = await rawExtract(fp)) };
     }
   }
-  return metaFallbackText(b, null);
+  try { onStatus && onStatus(`正在用辅助模型分析附件 ${b.name}…`); } catch {}
+  const r = await analyzeMedia(keyEntry, model, media, { deps });
+  if (r.ok) return `<附件分析 name="${b.name}">\n${r.text}\n</附件分析>`;
+
+  // 3D 模型 chat 接口无二进制入参,兜底无意义;其余类型失败时尝试其他 Key
+  const errors = [r.error || '未知错误'];
+  if (b.mediaKind !== 'model' && typeof listKeys === 'function') {
+    const others = (listKeys() || [])
+      .filter((k) => k && k.id !== keyEntry.id && k.key && k.enabled !== false)
+      .slice(0, 2);
+    for (const k2 of others) {
+      const candidates = rankVisionCandidates(await listModels(k2)).slice(0, 3);
+      if (!candidates.length) { errors.push(`${k2.name || k2.id}:无可用模型`); continue; }
+      try { onStatus && onStatus(`配置的辅助模型失败,正在尝试 ${k2.name || '其他 Key'} 的模型…`); } catch {}
+      for (const m2 of candidates) {
+        const r2 = await analyzeMedia(k2, m2, media, { deps, timeoutMs: 45000 });
+        if (r2.ok) return `<附件分析 name="${b.name}">\n${r2.text}\n</附件分析>`;
+        errors.push(`${k2.name || k2.id}/${m2}:${r2.error || '未知错误'}`);
+      }
+    }
+  }
+  try { onStatus && onStatus(`附件 ${b.name} 辅助分析失败,已注入文件信息兜底`); } catch {}
+  return metaFallbackText(b, '辅助分析失败:' + errors.slice(0, 4).join(';'));
 }
 
 // --- 注入:发送给主模型前改写 content blocks ------------------------------------
 // media_ref 块 → 分析文本/元信息文本;图片块原样保留,配置了图像辅助时追加分析文本。
 // 返回新的 content(无媒体块时原样返回)。
-async function injectMedia(content, { auxModels = {}, keysById, onStatus } = {}) {
+// listKeys: 可选,枚举全部 Key(含完整 key 字段),供分析失败时跨 Key 兜底。
+async function injectMedia(content, { auxModels = {}, keysById, listKeys, onStatus } = {}) {
   if (!Array.isArray(content)) return content;
   const hasMedia = content.some((b) => b && b.type === 'media_ref');
   const hasImageAux = !!(auxModels && auxModels.image) && content.some((b) => b && b.type === 'image');
@@ -208,7 +266,7 @@ async function injectMedia(content, { auxModels = {}, keysById, onStatus } = {})
   const out = [];
   for (const b of content) {
     if (b && b.type === 'media_ref') {
-      out.push({ type: 'text', text: await resolveMediaRef(b, { auxModels, keysById, onStatus }) });
+      out.push({ type: 'text', text: await resolveMediaRef(b, { auxModels, keysById, listKeys, onStatus }) });
     } else if (b && b.type === 'image') {
       out.push(b); // 图片块原样直发主模型(未配置图像辅助时维持现状)
       if (auxModels && auxModels.image) {
@@ -234,4 +292,4 @@ async function injectMedia(content, { auxModels = {}, keysById, onStatus } = {})
   return out;
 }
 
-module.exports = { analyzeMedia, injectMedia, metaFallbackText, apiRoot, authHeaders, MAX_MEDIA_BYTES };
+module.exports = { analyzeMedia, injectMedia, metaFallbackText, rankVisionCandidates, apiRoot, authHeaders, MAX_MEDIA_BYTES };

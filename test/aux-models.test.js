@@ -243,3 +243,71 @@ test('injectMedia:aux 配置指向不存在的 key 时走元信息兜底', async
   assert.ok(out[0].text.includes('<附件 name="voice.mp3">'));
   assert.strictEqual(calls.length, 0);
 });
+
+// --- 跨 Key 兜底(v0.15.15) ---------------------------------------------------
+const KEY2 = { id: 'k_2', name: 'Kimi', key: 'kimi-test-key', baseUrl: 'https://kimi.example.com', kind: 'authToken' };
+const keysById2 = (id) => (id === 'k_1' ? KEY : id === 'k_2' ? KEY2 : null);
+const listKeys2 = () => [KEY, KEY2];
+
+test('injectMedia:配置 key 失败(429)时自动兜底到其他 key 的模型', async () => {
+  const status = [];
+  handler = (url, opts) => {
+    if (url.endsWith('/v1/models')) return jsonRes({ data: [{ id: 'text-embedding-3' }, { id: 'k3' }] });
+    if (url.includes('gw.example.com')) return jsonRes({ error: { message: '额度已用完' } }, { status: 429 });
+    if (url.includes('kimi.example.com')) return jsonRes({ choices: [{ message: { content: '兜底分析:一段语音' } }] });
+    throw new Error('unexpected url ' + url);
+  };
+  const content = [{ type: 'media_ref', mediaKind: 'audio', name: 'voice.mp3', path: audioFile, size: 14 }];
+  const out = await aux.injectMedia(content, {
+    auxModels: { audio: 'k_1|qwen-audio' }, keysById: keysById2, listKeys: listKeys2, onStatus: (m) => status.push(m),
+  });
+  assert.ok(out[0].text.includes('<附件分析 name="voice.mp3">'));
+  assert.ok(out[0].text.includes('兜底分析:一段语音'));
+  // 调用序:主 key chat(429)→ 兜底 key GET models → 兜底 key chat(成功)
+  assert.strictEqual(calls.length, 3);
+  assert.ok(calls[0].url.includes('gw.example.com/v1/chat/completions'));
+  assert.ok(calls[1].url.includes('kimi.example.com/v1/models'));
+  assert.ok(calls[2].url.includes('kimi.example.com/v1/chat/completions'));
+  // 非多模态模型被过滤,兜底用的是 k3;认证头用兜底 key
+  const body = JSON.parse(calls[2].opts.body);
+  assert.strictEqual(body.model, 'k3');
+  assert.strictEqual(calls[2].opts.headers.authorization, 'Bearer kimi-test-key');
+  assert.ok(status.some((m) => m.includes('Kimi')), '兜底进度提示含 key 名');
+});
+
+test('injectMedia:兜底链全部失败 → 元信息兜底并聚合各 key 错误', async () => {
+  handler = (url) => {
+    if (url.endsWith('/v1/models')) return jsonRes({ data: [{ id: 'k3' }] });
+    return jsonRes({ error: { message: 'down' } }, { status: 500 });
+  };
+  const content = [{ type: 'media_ref', mediaKind: 'audio', name: 'voice.mp3', path: audioFile, size: 14 }];
+  const out = await aux.injectMedia(content, {
+    auxModels: { audio: 'k_1|qwen-audio' }, keysById: keysById2, listKeys: listKeys2,
+  });
+  assert.ok(out[0].text.includes('<附件 name="voice.mp3">'));
+  assert.ok(out[0].text.includes('辅助分析失败'));
+  assert.ok(out[0].text.includes('Kimi/k3'), '兜底 key 的错误也聚合进原因');
+});
+
+test('injectMedia:未传 listKeys 时不触发兜底(旧行为)', async () => {
+  queue = [jsonRes({ error: 'boom' }, { status: 429 })];
+  const content = [{ type: 'media_ref', mediaKind: 'audio', name: 'voice.mp3', path: audioFile, size: 14 }];
+  const out = await aux.injectMedia(content, { auxModels: { audio: 'k_1|qwen-audio' }, keysById });
+  assert.ok(out[0].text.includes('<附件 name="voice.mp3">'));
+  assert.strictEqual(calls.length, 1, '不拉 models 列表,不重试');
+});
+
+test('injectMedia:3D 模型不触发兜底(本就无 chat 入参)', async () => {
+  const content = [{ type: 'media_ref', mediaKind: 'model', name: 'a.glb', path: imgFile, size: 14 }];
+  const out = await aux.injectMedia(content, {
+    auxModels: { model: 'k_1|qwen' }, keysById: keysById2, listKeys: listKeys2,
+  });
+  assert.ok(out[0].text.includes('<附件 name="a.glb">'));
+  assert.ok(out[0].text.includes('暂不支持'));
+  assert.strictEqual(calls.length, 0, '3D 不应发任何请求,也不应拉兜底 models');
+});
+
+test('rankVisionCandidates:剔除非多模态模型,视觉线索排前', () => {
+  const ranked = aux.rankVisionCandidates(['text-embedding-3', 'llama-3-8b', 'qwen-vl-max', 'whisper-1', 'k3']);
+  assert.deepStrictEqual(ranked, ['qwen-vl-max', 'k3', 'llama-3-8b']);
+});

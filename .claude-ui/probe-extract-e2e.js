@@ -103,14 +103,23 @@ app.whenReady().then(async () => {
       : ext.error) + ` ${Date.now() - t0}ms`);
     if (!ext.ok) return;
 
-    // 2) 走 analyzeMedia(注入抽帧器)→ 真网关
-    log('step2: begin analyzeMedia');
-    const deps = { extractFrames: async () => { log('step2: extractFrames injected called'); return ext; } };
+    // 2) 走生产注入链 injectMedia(媒体块 → resolveMediaRef → analyzeMedia,
+    //    配置 key 429 时应自动兜底到其他 key 的模型,v0.15.15)
+    log('step2: begin injectMedia (production path, cross-key fallback)');
     const t1 = Date.now();
-    const r = await aux.analyzeMedia(key, model, { name: '37440784200-1-192.mp4', mediaKind: 'video', filePath: VIDEO }, { deps });
-    log('analyzeMedia ' + (r.ok ? 'ok' : 'FAIL') + ` ${Date.now() - t1}ms`);
-    if (r.ok) log('TEXT>>> ' + r.text.slice(0, 400));
-    else log('ERR>>> ' + (r.error || '').slice(0, 400));
+    const out = await aux.injectMedia([
+      { type: 'media_ref', mediaKind: 'video', name: '37440784200-1-192.mp4', path: VIDEO, size: fs.statSync(VIDEO).size },
+      { type: 'text', text: '测试一下,描述视频内容' },
+    ], {
+      auxModels: aux0,
+      keysById: (id) => f.k.find((x) => x.id === id) || null,
+      listKeys: () => f.k,
+      onStatus: (m) => log('status: ' + m),
+    });
+    log('injectMedia done ' + (Date.now() - t1) + 'ms');
+    const t0txt = out && out[0] && out[0].text || '';
+    log('block0 ' + (t0txt.startsWith('<附件分析') ? 'ANALYSIS-OK' : 'META-FALLBACK'));
+    log('TEXT>>> ' + t0txt.slice(0, 500));
   } catch (e) {
     log('FATAL ' + (e && e.message));
   } finally {

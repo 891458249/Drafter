@@ -790,6 +790,8 @@ ipcMain.handle('sess:send', async (_e, { sid, content }) => {
     const injected = await aux.injectMedia(content, {
       auxModels: store.getSetting('auxModels', {}) || {},
       keysById: (id) => keys.byId(id),
+      // 跨 Key 兜底(v0.15.15):辅助分析失败时枚举其他启用 Key 的模型重试
+      listKeys: () => (store.getSetting('apiKeys', []) || []).filter((k) => k && k.enabled !== false),
       onStatus: (msg) => sessions.send('sess:event', { sid, ev: { type: 'ui_aux', message: msg } }),
     });
     sent = await s.send(injected, content); // 历史回显保留原始附件卡片,SDK 收注入后的内容
