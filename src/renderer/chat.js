@@ -5,6 +5,7 @@ import { highlightCode } from './hljs.js';
 import { enhanceCodeHtml } from './codeblock.js';
 import { parseFilePath, PATH_IN_TEXT_RE } from './filelink.js';
 import { updateAgentModelsSelector } from './agents-ui.js';
+import { updateSkillSelector } from './extensions.js'; // 技能选择器跟随会话回显(v0.15.16)
 
 const messagesEl = () => $('messages');
 
@@ -79,6 +80,7 @@ export function updateTopbarForSession(sid) {
   $('model-sel').value = modelSelValue(m); // keyId|modelId 编码,回显所属 Key 分组
   updateKeyChips(); // 回显模型时同步 Key chip
   updateAgentModelsSelector();
+  updateSkillSelector();
   const composerEffort = $('effort-sel-composer');
   if (composerEffort) composerEffort.value = m.effort || '';
   $('usage-chip').textContent = fmtCost(s.ui.cumCost) +

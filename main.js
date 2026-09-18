@@ -67,6 +67,7 @@ const { ComfyJobs } = require('./src/main/comfy/jobs');
 const aux = require('./src/main/aux-models');
 const title = require('./src/main/title');
 const gems = require('./src/main/gems');
+const extensions = require('./src/main/extensions');
 const { TermManager } = require('./src/main/terminal');
 const { SessionManager } = require('./src/main/sessions');
 const overlay = require('./src/main/overlay');
@@ -664,6 +665,70 @@ ipcMain.handle('shell:openExternal', (_e, url) => {
   if (/^https?:\/\//.test(url)) shell.openExternal(url);
 });
 
+// 扩展板块(v0.15.16):Skill/子 Agent 的 CRUD、AI 起草、导入导出。
+// 存储 settings.extensions;预置模板不可改删(extensions.js 内校验)。
+extensions.seedPresets();
+ipcMain.handle('ext:list', (_e, kind) => extensions.list(kind));
+ipcMain.handle('ext:save', (_e, { kind, item } = {}) => extensions.save(kind, item));
+ipcMain.handle('ext:remove', (_e, { kind, id } = {}) => extensions.remove(kind, id));
+// 「✨ AI 起草」:一句话描述 → 按 Skill/Agent 模板扩写(复用 gems:rewrite 链路)
+ipcMain.handle('ext:draft', async (_e, { kind, hint, existing, keyId, model } = {}) => {
+  const keyEntry = keys.byId(keyId) || keys.activeKey();
+  const mdl = model
+    || (((keys.enabledModels() || []).find((e) => keyEntry && e.keyId === keyEntry.id) || {}).model);
+  if (!keyEntry || !keyEntry.key || !mdl) return { ok: false, error: '无可用 chat 模型' };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(`${aux.apiRoot(keyEntry.baseUrl)}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...aux.authHeaders(keyEntry) },
+      body: JSON.stringify({
+        model: mdl,
+        messages: [{ role: 'user', content: extensions.buildDraftPrompt(kind, hint, existing) }],
+        max_tokens: 1200,
+        stream: false,
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return { ok: false, error: '模型请求失败:' + res.status };
+    const json = await res.json();
+    const text = json && json.choices && json.choices[0] && json.choices[0].message
+      && String(json.choices[0].message.content || '').trim();
+    return text ? { ok: true, text } : { ok: false, error: '模型未返回内容' };
+  } catch (e) {
+    return { ok: false, error: e.name === 'AbortError' ? '请求超时' : e.message };
+  } finally {
+    clearTimeout(timer);
+  }
+});
+// 导出为 Claude Code 原生 frontmatter .md;导入反向解析(不落库,渲染层确认后走 ext:save)
+ipcMain.handle('ext:export', async (_e, { kind, id } = {}) => {
+  const item = extensions.byId(kind, id);
+  if (!item) return { ok: false, error: '条目不存在' };
+  const r = await dialog.showSaveDialog({
+    defaultPath: extensions.slugify(item.name, item.name) + '.md',
+    filters: [{ name: 'Markdown', extensions: ['md'] }],
+  });
+  if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+  try {
+    fs.writeFileSync(r.filePath, extensions.serializeMd(item, kind), 'utf8');
+    return { ok: true, path: r.filePath };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('ext:import', async (_e, { kind } = {}) => {
+  const r = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, canceled: true };
+  try {
+    const item = extensions.parseMd(fs.readFileSync(r.filePaths[0], 'utf8'), kind);
+    if (!item.name) item.name = path.basename(r.filePaths[0]).replace(/\.(md|markdown)$/i, '');
+    return { ok: true, item };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
 // renderer error reporting (fire-and-forget; metadata only) + logs folder
 ipcMain.on('renderer:error', (_e, info) => {
   if (!info || typeof info !== 'object') return;
@@ -766,7 +831,7 @@ function firstText(content) {
   return '';
 }
 
-ipcMain.handle('sess:send', async (_e, { sid, content }) => {
+ipcMain.handle('sess:send', async (_e, { sid, content, pinSkillIds }) => {
   const s = sessions.get(sid);
   if (!s) return false;
   // /add-dir(v0.9.2):SDK 流式输入不会执行该命令,客户端拦截——登记 extraDirs 并重启 query 生效
@@ -784,10 +849,23 @@ ipcMain.handle('sess:send', async (_e, { sid, content }) => {
     sessions.send('sess:event', { sid, ev: { type: 'ui_aux', message: note + dir } });
     return true;
   }
+  // 本条消息手动指定的技能(v0.15.16):仅限已挂载(meta.skillIds)的子集;
+  // 全文拼到 SDK 内容前(历史回显保留原文),并登记给 use_skill 处理器判优先级
+  const mounted = new Set(s.meta.skillIds || []);
+  const pins = (Array.isArray(pinSkillIds) ? pinSkillIds : []).filter((id) => mounted.has(id));
+  s._pinnedSkillIds = pins;
+  let sdkContent = content;
+  if (pins.length) {
+    const block = extensions.composePinnedSkills(extensions.mountedSkills(pins));
+    if (block) {
+      sdkContent = typeof content === 'string' ? block + content
+        : Array.isArray(content) ? [{ type: 'text', text: block }, ...content] : content;
+    }
+  }
   let sent;
   // Code/Chat 辅助模型(v0.9.1):媒体附件块先经辅助模型分析/元信息兜底,再发给主模型
-  if (Array.isArray(content)) {
-    const injected = await aux.injectMedia(content, {
+  if (Array.isArray(sdkContent)) {
+    const injected = await aux.injectMedia(sdkContent, {
       auxModels: store.getSetting('auxModels', {}) || {},
       keysById: (id) => keys.byId(id),
       // 跨 Key 兜底(v0.15.15):辅助分析失败时枚举其他启用 Key 的模型重试
@@ -796,7 +874,7 @@ ipcMain.handle('sess:send', async (_e, { sid, content }) => {
     });
     sent = await s.send(injected, content); // 历史回显保留原始附件卡片,SDK 收注入后的内容
   } else {
-    sent = await s.send(content);
+    sent = await s.send(sdkContent, sdkContent === content ? undefined : content); // pinned 前缀只给 SDK,回显原文
   }
   if (sent) maybeAutoTitle(sid, firstText(content));
   return sent;
@@ -849,6 +927,28 @@ ipcMain.handle('sess:setAgentModels', async (_e, { sid, agentModels }) => {
   // pending:回合进行中只标记了 needRestart,新配置要等回合结束重启后才生效
   //(守卫已按最新勾选拦截新调用,但新增模型在重启注册前不可用,旧子任务仍在跑)
   return { ok: true, agentModels: clean, pending: !!s.needRestart };
+});
+
+// 挂载技能(v0.15.16):索引/全文注入只对 code/chat 会话有意义
+ipcMain.handle('sess:setSkills', async (_e, { sid, skillIds }) => {
+  const s = sessions.get(sid);
+  if (!s) return { ok: false, error: '会话不存在' };
+  if (s.meta.kind && s.meta.kind !== 'code' && s.meta.kind !== 'chat') {
+    return { ok: false, error: '创作会话不支持技能' };
+  }
+  const clean = await s.setSkills(skillIds);
+  return { ok: true, skillIds: clean, pending: !!s.needRestart };
+});
+
+// 会话级自定义 Agent 挂载(v0.15.16)
+ipcMain.handle('sess:setCustomAgents', async (_e, { sid, customAgentIds }) => {
+  const s = sessions.get(sid);
+  if (!s) return { ok: false, error: '会话不存在' };
+  if (s.meta.kind && s.meta.kind !== 'code' && s.meta.kind !== 'chat') {
+    return { ok: false, error: '创作会话不支持子 Agent' };
+  }
+  const clean = await s.setCustomAgents(customAgentIds);
+  return { ok: true, customAgentIds: clean, pending: !!s.needRestart };
 });
 ipcMain.handle('sess:setEffort', (_e, { sid, effort }) => {
   const s = sessions.get(sid);

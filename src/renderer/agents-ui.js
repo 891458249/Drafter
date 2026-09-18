@@ -2,6 +2,7 @@
 import { api, state, $, escapeHtml, ensureGroups } from './state.js';
 
 let entriesCache = [];
+let customAgentsCache = []; // 自定义子 Agent(扩展板块,v0.15.16)
 let toggling = false; // 防快速连点并发提交导致勾选互相覆盖
 
 function isFastChat(s) {
@@ -25,12 +26,17 @@ function selected(s) {
 
 function selectedKey(item) { return `${item.keyId}\u0000${item.model}`; }
 
+// 会话挂载的自定义子 Agent id(扩展板块创建,scope=session 时经此挂载生效)
+function customSelected(s) {
+  return Array.isArray(s && s.meta.customAgentIds) ? s.meta.customAgentIds : [];
+}
+
 export function updateAgentModelsSelector() {
   const s = state.sessions.get(state.activeSid);
   const btn = $('agent-models-btn');
   const name = $('agent-models-name');
   if (!btn || !name) return;
-  const count = selected(s).length;
+  const count = selected(s).length + customSelected(s).length;
   name.textContent = count ? `子 Agent (${count})` : '子 Agent';
   btn.classList.toggle('active', count > 0);
   const disabledReason = !s ? '没有活动会话'
@@ -91,6 +97,31 @@ async function toggleModel(item) {
   }
 }
 
+async function toggleCustomAgent(agent) {
+  const s = state.sessions.get(state.activeSid);
+  if (!s || toggling) return;
+  toggling = true;
+  const sid = s.meta.id;
+  try {
+    const before = customSelected(s);
+    const next = before.includes(agent.id)
+      ? before.filter((x) => x !== agent.id)
+      : [...before, agent.id];
+    const result = await api.sessSetCustomAgents(sid, next);
+    if (!result || !result.ok) {
+      alert((result && result.error) || '自定义子 Agent 挂载失败');
+      return;
+    }
+    const cur = state.sessions.get(sid);
+    if (!cur) return;
+    cur.meta.customAgentIds = result.customAgentIds || [];
+    updateAgentModelsSelector();
+    if (state.activeSid === sid) renderMenu(cur);
+  } finally {
+    toggling = false;
+  }
+}
+
 function renderMenu(s) {
   const menu = $('agent-models-menu');
   if (!menu || !s) return;
@@ -108,6 +139,36 @@ function renderMenu(s) {
       row.className = 'agent-model-row' + (active ? ' active' : '');
       row.innerHTML = `<span class="agent-model-check">${active ? '✓' : ''}</span><span title="${escapeHtml(item.model)}">${escapeHtml(item.model)}</span>`;
       row.onclick = (event) => { event.stopPropagation(); toggleModel(item); };
+      menu.appendChild(row);
+    }
+  }
+  // 自定义子 Agent(扩展板块 v0.15.16):global/project 作用域自动生效,仅列出
+  // 会话作用域的可在此挂载;挂载写 meta.customAgentIds。
+  const customs = customAgentsCache.filter((a) => a.enabled !== false);
+  const sessionScoped = customs.filter((a) => a.scope === 'session');
+  const autoActive = customs.filter((a) => a.scope !== 'session');
+  if (customs.length) {
+    const t = document.createElement('div');
+    t.className = 'agent-menu-title';
+    t.innerHTML = '自定义 Agent <span>扩展板块创建</span>';
+    menu.appendChild(t);
+    const cur = new Set(customSelected(s));
+    for (const a of sessionScoped) {
+      const bound = a.scopeId === s.meta.id; // 创建时绑定了本会话:自动生效
+      const active = bound || cur.has(a.id);
+      const row = document.createElement('button');
+      row.className = 'agent-model-row' + (active ? ' active' : '');
+      row.innerHTML = `<span class="agent-model-check">${active ? '✓' : ''}</span><span title="${escapeHtml(a.desc || a.name)}">${escapeHtml(a.name)}${bound ? ' <small>(已绑定本会话)</small>' : ''}</span>`;
+      if (bound) row.disabled = true;
+      else row.onclick = (event) => { event.stopPropagation(); toggleCustomAgent(a); };
+      menu.appendChild(row);
+    }
+    for (const a of autoActive) {
+      const row = document.createElement('button');
+      row.className = 'agent-model-row active';
+      row.disabled = true;
+      row.title = a.scope === 'global' ? '全局作用域,所有会话自动生效' : '项目作用域,该项目下会话自动生效';
+      row.innerHTML = `<span class="agent-model-check">✓</span><span title="${escapeHtml(a.desc || a.name)}">${escapeHtml(a.name)} <small>(${a.scope === 'global' ? '全局' : '项目'})</small></span>`;
       menu.appendChild(row);
     }
   }
@@ -138,6 +199,7 @@ async function openAgentModelsMenu() {
     await ensureGroups();
     entriesCache = await api.keysEnabledModels() || [];
   } catch { entriesCache = []; }
+  try { customAgentsCache = await api.extList('agent') || []; } catch { customAgentsCache = []; }
   renderMenu(s);
 }
 

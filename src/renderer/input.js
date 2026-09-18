@@ -4,6 +4,7 @@ import { api, state, $, escapeHtml, emit, on, parseModelValue, updateKeyChips, M
 import { addUserMessage, setBusyUI, aigcLocalEcho, aigcBusy, updateAigcSendUI, updateTopbarForSession, isFastChat } from './chat.js';
 import { refreshList } from './sessions-ui.js';
 import { maybeSplitOnSend } from './split.js';
+import { consumePins as extConsumePins } from './extensions.js'; // 本条消息手动指定的技能(v0.15.16,发送后清空)
 
 const inputEl = () => $('input');
 const acEl = () => $('autocomplete');
@@ -81,7 +82,7 @@ export async function sendMessage() {
   clearAttachments();
   hideAc();
 
-  const res = await api.sessSend(state.activeSid, content);
+  const res = await api.sessSend(state.activeSid, content, extConsumePins());
   if (!res) {
     addUserMessage(state.activeSid, '(发送失败:会话未就绪)');
     return;

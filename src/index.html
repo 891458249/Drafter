@@ -21,6 +21,7 @@
         <div id="section-switch" class="section-switch">
           <button data-sec="code" class="active" title="Code 板块:面向项目的完整工作区">Code</button>
           <button data-sec="chat" title="Chat 板块:纯对话 AI,不服务项目">Chat</button>
+          <button data-sec="ext" title="扩展板块:创建/管理 Skill 技能与自定义子 Agent(v0.15.16)">扩展</button>
           <button data-sec="media" title="创作板块:图像/视频/音频/3D 一体化生成(v0.9.38 四大媒体板块合并)">创作</button>
           <button data-sec="canvas" title="画布板块:无限画布节点工作流,多模型 fan-out 对比(v0.10.0)">画布</button>
           <button data-sec="assets" title="素材板块:全部生成产物归档浏览与复用(v0.10.0)">素材</button>
@@ -171,6 +172,21 @@
           <div id="assets-grid" class="assets-grid"></div>
           <div id="assets-empty" class="assets-empty hidden">还没有生成产物——先去「创作」或「画布」生成内容</div>
         </div>
+        <!-- 扩展板块(v0.15.16):Skill 技能 / 自定义子 Agent 的卡片网格管理 -->
+        <div id="ext-root" class="ext-root">
+          <div class="ext-toolbar">
+            <div id="ext-tabs" class="shop-filter ext-tabs">
+              <button data-ext-tab="skill" class="active">技能</button>
+              <button data-ext-tab="agent">子 Agent</button>
+            </div>
+            <span class="ext-hint" id="ext-hint">技能挂载到会话后按需触发(渐进披露);发送前还可在输入区「🧩 技能」里为本条消息指定</span>
+            <span class="grow"></span>
+            <button id="btn-ext-import" class="btn btn-sm" title="从 .md 文件导入(Claude Code frontmatter 格式)">⇪ 导入</button>
+            <button id="btn-ext-new" class="btn btn-sm btn-primary">＋ 新建</button>
+          </div>
+          <div id="ext-grid" class="ext-grid"></div>
+          <div id="ext-empty" class="assets-empty hidden">还没有扩展——点「＋ 新建」或从预置模板复制一个</div>
+        </div>
         <!-- Harness 板块(v0.11.0):DeepSeek Harness 引擎驱动的新会话,经 file://+IPC 桥加载 -->
         <div id="harness-root" class="harness-root">
           <div id="harness-status" class="harness-status">
@@ -187,6 +203,7 @@
             <button id="btn-add-attach" class="btn btn-sm" title="添加附件(图片或文本文件,随下一条消息发送)">＋附件</button>
             <button id="btn-add-folder" class="btn btn-sm code-only" title="为当前项目添加文件夹(常驻共享)">＋文件夹</button>
             <button id="gem-sel-btn" class="btn btn-sm" title="选择 Gem 自定义助手(指令/知识随会话注入)">💎 <span id="gem-sel-name">Gem</span></button>
+            <button id="skill-sel-btn" class="btn btn-sm sdk-only" title="挂载技能到本会话(模型按需调用,渐进披露);还可为下一条消息手动指定,手动指定优先级最高">🧩 <span id="skill-sel-name">技能</span></button>
             <button id="btn-chat-mode" class="btn btn-sm chat-only chat-mode-on" title="极速问答(零工具+极简提示,响应快 5-10 倍,纯问答)。点击切换 Agent 模式">⚡ 极速</button>
             <button id="btn-compact" class="btn btn-sm sdk-only" title="压缩上下文 (/compact)">压缩</button>
             <label class="ctrl sdk-only">模式
@@ -593,6 +610,84 @@
   <!-- Gem 选择器/默认工具 共用小下拉(动态填充) -->
   <div id="gem-menu" class="more-menu gem-menu hidden"></div>
   <div id="agent-models-menu" class="more-menu gem-menu agent-models-menu hidden"></div>
+  <div id="skill-menu" class="more-menu gem-menu hidden"></div>
+
+  <!-- 扩展编辑器(v0.15.16):复用 Gem 三栏结构——列表 | 表单 | 预览;技能/子 Agent 共用,按 kind 显隐字段 -->
+  <div id="ext-modal" class="modal-mask hidden">
+    <div class="modal gem-modal">
+      <div class="gem-cols">
+        <div class="gem-list-col">
+          <div class="gem-list" id="ext-list"></div>
+          <button id="ext-new" class="btn btn-sm gem-new-btn">＋ 新建</button>
+        </div>
+        <div class="gem-form-col">
+          <div class="form-row"><span class="preset-label" id="ext-name-label">名称</span></div>
+          <div class="form-row"><input id="ext-name" class="input-sm grow" placeholder="名称" /></div>
+          <div class="form-row"><span class="preset-label" id="ext-desc-label">说明</span></div>
+          <div class="form-row"><input id="ext-desc" class="input-sm grow" placeholder="什么时候该用它?(会作为触发描述)" /></div>
+          <div class="form-row">
+            <span class="preset-label" id="ext-body-label">指令</span>
+            <span class="grow"></span>
+            <button id="ext-ai-draft" class="btn btn-sm" title="用一两句话描述目标,AI 起草内容">✨ AI 起草</button>
+          </div>
+          <div class="form-row ext-draft-row hidden" id="ext-draft-row">
+            <input id="ext-draft-hint" class="input-sm grow" placeholder="一句话描述目标,回车生成" />
+            <button id="ext-draft-go" class="btn btn-sm btn-primary">生成</button>
+          </div>
+          <div class="form-row">
+            <textarea id="ext-body" class="editor-area gem-instructions" spellcheck="false"></textarea>
+          </div>
+          <!-- 技能专属:参考文件 -->
+          <div class="ext-skill-only">
+            <div class="form-row"><span class="preset-label">参考文件</span><span class="grow"></span>
+              <button id="ext-add-file" class="btn btn-sm">＋ 添加</button></div>
+            <div id="ext-files-list" class="gem-knowledge-list"></div>
+          </div>
+          <!-- 子 Agent 专属:作用域/固定模型/工具 -->
+          <div class="ext-agent-only hidden">
+            <div class="form-row"><span class="preset-label">作用域</span></div>
+            <div class="form-row">
+              <select id="ext-scope" class="input-sm">
+                <option value="global">全局(所有会话)</option>
+                <option value="project">指定项目</option>
+                <option value="session">指定会话</option>
+              </select>
+              <select id="ext-scope-target" class="input-sm grow hidden"></select>
+            </div>
+            <div class="form-row"><span class="preset-label">固定模型(可选)</span></div>
+            <div class="form-row">
+              <select id="ext-model" class="input-sm grow"><option value="">跟随会话默认</option></select>
+            </div>
+            <div class="form-row"><span class="preset-label">允许工具(留空 = 全部)</span></div>
+            <div class="form-row"><button id="ext-tools-btn" class="btn btn-sm">全部工具 ▾</button></div>
+          </div>
+          <label class="gem-knowledge-toggle">
+            <input type="checkbox" id="ext-enabled" checked /> 启用
+          </label>
+          <div class="modal-status" id="ext-status"></div>
+          <div class="modal-actions">
+            <button id="ext-delete" class="btn btn-danger-text">删除</button>
+            <button id="ext-duplicate" class="btn hidden">复制为副本</button>
+            <button id="ext-export" class="btn">导出 .md</button>
+            <span class="grow"></span>
+            <button id="ext-close" class="btn">关闭</button>
+            <button id="ext-save" class="btn btn-primary">保存</button>
+          </div>
+        </div>
+        <div class="gem-preview-col">
+          <div class="gem-preview-head">
+            <span class="gem-avatar gem-avatar-lg" id="ext-preview-avatar">技</span>
+            <div class="gem-preview-name" id="ext-preview-name">扩展</div>
+            <div class="gem-preview-desc" id="ext-preview-desc"></div>
+          </div>
+          <div class="gem-preview-recent">
+            <div class="gem-preview-recent-title">生效方式</div>
+            <div id="ext-preview-effect" class="ext-effect-note"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- 设置面板(v0.9.31):原「⋯」菜单全部入口并入 -->
   <div id="settings-modal" class="modal-mask hidden">

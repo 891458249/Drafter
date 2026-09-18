@@ -85,16 +85,26 @@ contextBridge.exposeInMainWorld('api', {
   gemsDelete: (id) => ipcRenderer.invoke('gems:delete', id),
   gemsRewrite: (payload) => ipcRenderer.invoke('gems:rewrite', payload),
 
+  // 扩展板块(v0.15.16):Skill 技能 / 自定义子 Agent
+  extList: (kind) => ipcRenderer.invoke('ext:list', kind),
+  extSave: (kind, item) => ipcRenderer.invoke('ext:save', { kind, item }),
+  extRemove: (kind, id) => ipcRenderer.invoke('ext:remove', { kind, id }),
+  extDraft: (payload) => ipcRenderer.invoke('ext:draft', payload),
+  extExport: (kind, id) => ipcRenderer.invoke('ext:export', { kind, id }),
+  extImport: (kind) => ipcRenderer.invoke('ext:import', { kind }),
+
   // sessions
   sdkStatus: () => ipcRenderer.invoke('sess:sdkStatus'),
   sessList: () => ipcRenderer.invoke('sess:list'),
   sessCreate: invoke('sess:create'),
-  sessSend: (sid, content) => ipcRenderer.invoke('sess:send', { sid, content }),
+  sessSend: (sid, content, opts) => ipcRenderer.invoke('sess:send', { sid, content, ...(opts || {}) }),
   sessInterrupt: (sid) => ipcRenderer.invoke('sess:interrupt', sid),
   sessPermission: invoke('sess:permission'),
   sessSetMode: (sid, mode) => ipcRenderer.invoke('sess:setMode', { sid, mode }),
   sessSetModel: (sid, model, keyId) => ipcRenderer.invoke('sess:setModel', { sid, model, keyId }),
   sessSetAgentModels: (sid, agentModels) => ipcRenderer.invoke('sess:setAgentModels', { sid, agentModels }),
+  sessSetSkills: (sid, skillIds) => ipcRenderer.invoke('sess:setSkills', { sid, skillIds }),
+  sessSetCustomAgents: (sid, customAgentIds) => ipcRenderer.invoke('sess:setCustomAgents', { sid, customAgentIds }),
   sessSetEffort: (sid, effort) => ipcRenderer.invoke('sess:setEffort', { sid, effort }),
   sessHistory: (sid) => ipcRenderer.invoke('sess:history', sid),
   sessEditRegenerate: invoke('sess:editRegenerate'),

@@ -1136,6 +1136,57 @@ body.sec-assets #sidebar { display: none; }
 /* 画布板块侧栏给画布列表用,隐藏会话筛选项 */
 body.sec-canvas .sidebar-filter { display: none; }
 
+/* ================= 扩展板块(v0.15.16) ================= */
+/* 与素材板块同模式:专属根容器,全宽,隐藏消息流/输入区/侧栏/SDK 要素 */
+#ext-root { display: none; }
+body.sec-ext #ext-root { display: flex; }
+body.sec-ext .messages-wrap, body.sec-ext .composer,
+body.sec-ext #sidebar { display: none !important; }
+body.sec-ext .sdk-only, body.sec-ext .workspace-only,
+body.sec-ext .code-only, body.sec-ext .chat-only { display: none !important; }
+#ext-root { flex: 1; min-height: 0; flex-direction: column; }
+.ext-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+}
+.ext-hint { font-size: 11px; color: var(--text-dim); }
+.ext-grid {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 12px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px; align-content: start;
+}
+.ext-group-label {
+  grid-column: 1 / -1; font-size: 11px; color: var(--text-dim); padding: 4px 2px 0;
+}
+.ext-card {
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  background: var(--bg-panel, rgba(255,255,255,.02)); cursor: pointer;
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+}
+.ext-card:hover { border-color: var(--accent); }
+.ext-card.ext-off { opacity: .55; }
+.ext-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ext-card-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext-card-desc {
+  font-size: 12px; color: var(--text-dim); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  min-height: 2.6em;
+}
+.ext-card-foot { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+.ext-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 8px;
+  border: 1px solid var(--border); color: var(--text-dim);
+}
+.ext-tag.ext-tag-preset { color: var(--accent); border-color: var(--accent); }
+.ext-card-actions { display: flex; gap: 4px; margin-left: auto; }
+.ext-card-actions button { padding: 1px 7px; font-size: 11px; }
+.ext-effect-note { font-size: 12px; color: var(--text-dim); line-height: 1.7; padding: 2px 0; white-space: pre-wrap; }
+.ext-draft-row { display: flex; gap: 6px; }
+.ext-file-row { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
+.ext-file-row .ext-file-head { display: flex; gap: 6px; align-items: center; }
+/* 技能选择器菜单分组标题 */
+.skill-menu-title { padding: 6px 10px 2px; font-size: 11px; color: var(--text-dim); }
+
 /* ================= Harness 板块(v0.11.0) ================= */
 /* Harness 板块:全宽 iframe 承载 harness 前端,隐藏 Drafter 的消息流/输入区/侧栏 */
 #harness-root { display: none; }

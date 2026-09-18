@@ -15,6 +15,7 @@ const { canonicalPath } = require('./path-identity');
 const perms = require('./perms');
 const keys = require('./keys');
 const gems = require('./gems');
+const extensions = require('./extensions'); // 扩展板块(v0.15.16):Skill 渐进披露 + 自定义子 Agent
 const modelGuard = require('./model-guard-proxy');
 const { createSessionCleanup } = require('./debug-resources/session');
 const { compactionSettings, compactionEnv } = require('./context-compaction');
@@ -66,12 +67,7 @@ function currentAgentModels(meta) {
 
 function buildSessionAgents(meta) {
   const list = currentAgentModels(meta);
-  const allowedAgents = new Map(); // agent 定义名 -> 固定模型 ID(委派守卫用)
-  if (!list.length) {
-    // Task 是 Agent 的旧工具名/兼容别名;两者同时禁用,防项目级 agent 定义重新暴露入口。
-    // Workflow/SendMessage 同样可派生/驱动子任务,一并禁用。
-    return { disallowedTools: ['Agent', 'Task', 'Workflow', 'SendMessage'], allowedAgents };
-  }
+  const allowedAgents = new Map(); // agent 定义名 -> 固定模型 ID(null=自定义无钉模型);委派守卫用
   const used = new Set();
   const agents = {};
   for (const item of list) {
@@ -84,6 +80,16 @@ function buildSessionAgents(meta) {
       // 子 Agent 不得再派生下级/给其他任务发消息——嵌套委派绕开主会话的模型白名单
       disallowedTools: ['Agent', 'Task', 'Workflow', 'SendMessage'],
     };
+  }
+  // 自定义子 Agent(v0.15.16):扩展板块创建,按作用域(global/project/session)挂载,
+  // 与勾选模型 agent 共用 used 名称去重;守卫值 null 表示放行但不钉模型
+  const custom = extensions.buildCustomAgents(meta, used);
+  Object.assign(agents, custom.agents);
+  for (const [n, m] of custom.allowedAgents) allowedAgents.set(n, m);
+  if (!Object.keys(agents).length) {
+    // Task 是 Agent 的旧工具名/兼容别名;两者同时禁用,防项目级 agent 定义重新暴露入口。
+    // Workflow/SendMessage 同样可派生/驱动子任务,一并禁用。
+    return { disallowedTools: ['Agent', 'Task', 'Workflow', 'SendMessage'], allowedAgents };
   }
   return { agents, allowedAgents };
 }
@@ -288,6 +294,7 @@ class Session {
     this.cumCostUsd = 0;
     this._resumeQuery = null; // query started with SDK resume; used for targeted recovery
     this._agentRoute = null;  // 本次 query 的委派守卫状态 { allowed: Map(name->model), spawned: Map(id->model) }
+    this._pinnedSkillIds = []; // 本条消息手动指定的技能(v0.15.16);sess:send 时更新,use_skill 处理器读取
   }
 
   _resetBrokenResume(message) {
@@ -415,6 +422,8 @@ class Session {
         if (forkAt) options.resumeSessionAt = forkAt;
       }
     }
+    // 挂载技能(v0.15.16,渐进式披露):提升到外层声明——else 分支的索引与下方 MCP 工具注册都要用
+    const mountedSkillList = extensions.mountedSkills(this.meta.skillIds);
     if (fastOv) {
       // 极速问答:应用隔离覆盖(systemPrompt(含 Gem append)/tools:[]/mcpServers:{}/strictMcpConfig)
       Object.assign(options, fastOv);
@@ -429,12 +438,19 @@ class Session {
     if (this.meta.gemId) {
       try { gemAppend = gems.composeAppend(gems.byId(this.meta.gemId)); } catch {}
     }
+    // 挂载技能索引(v0.15.16,渐进式披露):systemPrompt 只放「名称+描述」,
+    // 完整指令由模型经 use_skill 工具(下方 mcpServers)按需取回;手动指定的技能
+    // 不走索引,发送时全量随消息注入(main.js sess:send 的 pinSkillIds 透传)
+    let skillAppend = '';
+    if (mountedSkillList.length) {
+      try { skillAppend = extensions.buildSkillsIndex(mountedSkillList); } catch {}
+    }
     // 静态提示前缀(v0.10.2):会话创建时按「跨会话共享提示缓存」设置盖戳(meta.staticPrompt)。
     // cwd/git/记忆等动态段移出系统提示(改由首条用户消息携带),前缀跨会话静态 → 缓存命中。
     // 只对创建时盖戳的会话启用:既存会话不中途换提示,避免缓存前缀反复横跳。
     const staticPrompt = !!this.meta.staticPrompt;
-    if (projCtx || gemAppend || debugCleanup) {
-      const combined = ((projCtx && projCtx.append) || '') + gemAppend + '\n\n' + (debugCleanup?.prompt || '');
+    if (projCtx || gemAppend || skillAppend || debugCleanup) {
+      const combined = ((projCtx && projCtx.append) || '') + gemAppend + skillAppend + '\n\n' + (debugCleanup?.prompt || '');
       options.systemPrompt = { type: 'preset', preset: 'claude_code', append: combined };
       if (staticPrompt) options.systemPrompt.excludeDynamicSections = true;
       // 无项目组时的附加目录由下方 else-if 分支统一处理(行为与旧版一致)
@@ -478,6 +494,35 @@ class Session {
     }
     options.settings = { ...(options.settings || {}), ...compactionSettings(this.meta.model) };
     options.env = compactionEnv(options.env);
+    // 挂载技能的渐进披露载体(v0.15.16):进程内 MCP 工具 use_skill——索引在 systemPrompt,
+    // 模型按需调用取回完整指令。SDK 缺 createSdkMcpServer/tool 时静默降级为仅索引
+    //(索引指引随之不成立,故整个特性跳过,保持与旧版完全一致)。
+    if (!fastOv && mountedSkillList.length && typeof sdk.createSdkMcpServer === 'function' && typeof sdk.tool === 'function') {
+      try {
+        const z = require('zod');
+        const self = this;
+        options.mcpServers = {
+          ...(options.mcpServers || {}),
+          drafter_skills: sdk.createSdkMcpServer({
+            name: 'drafter-skills',
+            version: '1.0.0',
+            tools: [sdk.tool(
+              'use_skill',
+              '取回本会话挂载技能的完整指令。当任务匹配 systemPrompt 技能索引中某个技能的描述时调用,参数 name 填索引里的技能名。',
+              { name: z.string() },
+              async (args) => {
+                const r = extensions.useSkill(args && args.name, self.meta.skillIds, self._pinnedSkillIds);
+                const text = r.ok
+                  ? (r.alreadyPinned ? r.text
+                    : `# 技能「${r.name}」\n${r.instructions}${(r.files || []).length ? '\n\n参考文件:\n' + r.files.map((f) => `- ${f.name}\n${String(f.content || '').slice(0, 2000)}`).join('\n') : ''}`)
+                  : r.error;
+                return { content: [{ type: 'text', text }] };
+              },
+            )],
+          }),
+        };
+      } catch (e) { console.error('[sessions] skills mcp failed:', e.message); }
+    }
     try {
       this.q = sdk.query({ prompt: this.queue, options });
       this._resumeQuery = options.resume ? this.q : null;
@@ -678,7 +723,8 @@ class Session {
     const toolUseId = hookInput && hookInput.tool_use_id;
     // 最新勾选(取消勾选立即对新调用生效,不等回合结束后的重启)
     const current = new Set(currentAgentModels(this.meta).map((i) => i.model));
-    const available = [...route.allowed].filter(([, m]) => current.has(m)).map(([n]) => n);
+    // 守卫值 null = 自定义无固定模型 Agent(v0.15.16),恒在可用列表
+    const available = [...route.allowed].filter(([, m]) => m === null || current.has(m)).map(([n]) => n);
 
     if (toolName === 'Workflow') {
       return this._denyDelegation(toolName, 'Workflow 编排会在脚本内部派生子任务、绕开模型白名单,当前会话未启用');
@@ -700,6 +746,16 @@ class Session {
     const type = String(input.subagent_type || '').trim();
     const requested = typeof input.model === 'string' ? input.model.trim() : '';
     const defModel = type ? route.allowed.get(type) : undefined;
+    // 自定义无固定模型 Agent(守卫值 null):放行且不钉模型,跟随会话默认模型计费;
+    // 模型侧自动塞的 model 参数剥掉,避免把子任务钉到未勾选模型
+    if (type && route.allowed.has(type) && defModel === null) {
+      if (requested) {
+        rewrittenInput = { ...input };
+        delete rewrittenInput.model;
+        return { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: rewrittenInput } };
+      }
+      return {};
+    }
     if (!type || !defModel || !current.has(defModel)) {
       return this._denyDelegation(toolName,
         `子 Agent 类型 ${type || '(未指定,走内置默认)'} 不在已启用列表;可用:${available.join(', ') || '(无)'}`,
@@ -1026,6 +1082,30 @@ class Session {
     return true;
   }
 
+  // 挂载技能集合(v0.15.16):索引/use_skill 只在 query 启动时读取,沿用 setGem 的 needRestart 模式
+  async setSkills(skillIds) {
+    const clean = Array.isArray(skillIds) ? skillIds.map(String) : [];
+    this.meta.skillIds = clean;
+    store.upsertSession({ id: this.id, skillIds: clean });
+    if (!this.running) return clean;
+    if (this.busy) { this.needRestart = true; return clean; }
+    this.stop();
+    await this.start({ resume: !!this.meta.sdkSessionId });
+    return clean;
+  }
+
+  // 会话级自定义 Agent 挂载(v0.15.16):同 setSkills 的重启语义
+  async setCustomAgents(ids) {
+    const clean = Array.isArray(ids) ? ids.map(String) : [];
+    this.meta.customAgentIds = clean;
+    store.upsertSession({ id: this.id, customAgentIds: clean });
+    if (!this.running) return clean;
+    if (this.busy) { this.needRestart = true; return clean; }
+    this.stop();
+    await this.start({ resume: !!this.meta.sdkSessionId });
+    return clean;
+  }
+
   // 绑定/切换/清除 Gem(v0.9.11):systemPrompt 只在 query 启动时读取,
   // 因此运行中的会话需重启 query 生效——复用 addDir 的 needRestart 模式:
   // 回合进行中不打断(回合结束后自动重启),空闲则立即 stop+start(resume 保上下文)。
@@ -1134,7 +1214,7 @@ class SessionManager {
     });
   }
 
-  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId, gemId, chatMode, agentModels }) {
+  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId, gemId, chatMode, agentModels, skillIds, customAgentIds }) {
     const id = 's_' + crypto.randomUUID().slice(0, 12);
     const meta = {
       id, cwd, model: model || null,
@@ -1149,6 +1229,8 @@ class SessionManager {
       keyId: keyId || null, // 创建时活跃的 API key(额度归账,v0.8.0)
       agentModels: normalizeAgentModels(agentModels, keyId || null), // 同 Key 子 Agent 模型;空数组 = 禁用 Agent 工具
       gemId: gemId || null, // 绑定的 Gem 自定义助手(v0.9.11)
+      skillIds: Array.isArray(skillIds) ? skillIds.map(String) : [], // 挂载的技能(v0.15.16):渐进披露索引+use_skill 可取
+      customAgentIds: Array.isArray(customAgentIds) ? customAgentIds.map(String) : [], // 会话级挂载的自定义子 Agent(v0.15.16)
       // 极速问答(v0.10.2):chat 会话默认 fast(零工具/SDK 隔离配置);'agent' = 完整 Agent
       chatMode: kind === 'chat' ? (chatMode === 'agent' ? 'agent' : 'fast') : undefined,
       // 静态提示前缀戳(v0.10.2):创建时按设置决定是否启用 excludeDynamicSections
@@ -1181,6 +1263,8 @@ class SessionManager {
       forkAt: canFork ? anchorUuid : null,
       standalone: m.standalone || undefined, kind: m.kind || undefined, // 独立/板块会话的分支同侧栏归属
       chatMode: m.chatMode || undefined, // chat 会话分支继承极速/Agent 模式(v0.10.2)
+      skillIds: m.skillIds || [], // 分支继承挂载技能(v0.15.16)
+      customAgentIds: m.customAgentIds || [], // 分支继承自定义 Agent 挂载(v0.15.16)
     });
     store.writeSessionEvents(meta.id, prefix);
     return { ok: true, meta, warning: canFork ? null : '无 SDK 上下文锚点,分支只复制了可见历史' };

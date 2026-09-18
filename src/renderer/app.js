@@ -18,6 +18,7 @@ import * as canvas from './canvas.js';
 import * as canvas2 from './canvas2.js'; // 原生引擎画布(v0.13.0,默认);settings.canvasEngine='drawflow' 回退旧引擎
 import * as assets from './assets.js';
 import * as harness from './harness.js';
+import * as extensions from './extensions.js'; // 扩展板块(v0.15.16):Skill/子 Agent
 import { THEMES, applyTheme, currentTheme, bootTheme } from './themes.js';
 
 // ---------------------------------------------------------------------------
@@ -1236,12 +1237,13 @@ on('session-activated', async (sid) => {
 // ---------------------------------------------------------------------------
 // 板块切换:Code(项目工作区)/ Chat(纯对话)/ 创作(图·视·音·3D 一体化,v0.9.38 四大媒体板块合并)
 // ---------------------------------------------------------------------------
-const SECTIONS = ['code', 'chat', 'media', 'canvas', 'assets', 'harness'];
+const SECTIONS = ['code', 'chat', 'ext', 'media', 'canvas', 'assets', 'harness'];
 // 画布引擎选择:v0.13.0 起默认原生引擎(canvas2),可回退 Drawflow
 function canvasEngine() { return state.canvasEngine === 'drawflow' ? canvas : canvas2; }
 // 画布/素材板块(v0.10.0)不走会话挑选流程(画布列表/素材网格各有数据源);
-// harness 板块(v0.11.0)由 harness 引擎自管会话,也不走 SDK 会话挑选
-const NON_SESSION_SECTIONS = ['canvas', 'assets', 'harness'];
+// harness 板块(v0.11.0)由 harness 引擎自管会话,也不走 SDK 会话挑选;
+// 扩展板块(v0.15.16)是纯管理界面,不走会话流程
+const NON_SESSION_SECTIONS = ['ext', 'canvas', 'assets', 'harness'];
 function setSection(sec, { skipSessionPick } = {}) {
   if (state.section === sec) return;
   state.section = sec;
@@ -1251,6 +1253,7 @@ function setSection(sec, { skipSessionPick } = {}) {
   }
   $('sidebar-head-label').textContent = sec === 'code' ? '项目 / 会话'
     : sec === 'media' ? '创作会话'
+    : sec === 'ext' ? '扩展'
     : sec === 'canvas' ? '画布'
     : sec === 'assets' ? '素材'
     : sec === 'harness' ? 'Harness' : '会话';
@@ -1259,10 +1262,11 @@ function setSection(sec, { skipSessionPick } = {}) {
   // 其余板块(创作/画布/素材)隐藏。
   if (sec !== 'code' && sec !== 'chat') $('right-panel').classList.add('hidden');
   if (NON_SESSION_SECTIONS.includes(sec)) {
-    // 各板块自行填充侧栏与主区:画布渲染画布列表,素材重扫网格,harness 启动引擎
+    // 各板块自行填充侧栏与主区:画布渲染画布列表,素材重扫网格,harness 启动引擎,扩展重载卡片
     if (sec === 'canvas') canvasEngine().enterSection();
     else if (sec === 'assets') assets.enterSection();
     else if (sec === 'harness') harness.enterSection();
+    else if (sec === 'ext') extensions.enterSection();
     populateModelSelects();
     return;
   }
@@ -1302,6 +1306,7 @@ on('open-project-memory', async (pid) => {
 // --- Gem 自定义助手(v0.9.11) ---
 gems.init();
 agentsUi.init();
+extensions.init(); // 扩展板块(v0.15.16)
 gems.refreshGems();
 codeblock.initCodeCopy(); // 代码卡片复制按钮(#messages 事件委托,v0.9.12)
 // 管理页「开始对话」:按当前板块建会话并绑定 Gem;Gem 带默认模型且下拉未选模型时套用
@@ -1321,6 +1326,7 @@ on('gem:start-chat', async ({ gemId }) => {
 on('gem:activate-session', (sid) => chat.setActiveSession(sid));
 // Gem 增删改后:刷新选择器与侧栏徽标
 on('gems-changed', () => { gems.updateGemSelector(); sessionsUi.refreshList(); });
+on('ext-changed', () => { extensions.updateSkillSelector(); }); // 扩展增删改后刷新技能芯片(v0.15.16)
 
 // ---------------------------------------------------------------------------
 // Boot
