@@ -18,6 +18,7 @@ Session.prototype.start = async () => {};
 after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
 
 function seedKeys() {
+  store.setSetting('extensions', { skills: [], agents: [] });
   store.setSetting('apiKeys', [{
     id: 'k1', name: 'Gateway', key: 'secret', baseUrl: 'https://example.test', enabled: true,
     models: ['gpt-5.6-sol', 'claude-sonnet-5', 'claude-haiku-4-5', 'image-gen'],
@@ -148,6 +149,7 @@ function makeGuardedSession({ agentModels = [{ keyId: 'k1', model: 'claude-haiku
   const built = buildSessionAgents(session.meta);
   session._agentRoute = { allowed: built.allowedAgents, spawned: new Map() };
   session.meta.sdkSessionId = sdkSessionId;
+  store.upsertSession({ id: session.id, sdkSessionId });
   return { mgr, session };
 }
 
@@ -235,7 +237,7 @@ test('守卫:SendMessage 续聊必须能核实模型;PostToolUse 捕获 agentId'
 test('守卫:resume 跨重启经 transcript 核实实际模型', async () => {
   const { session } = makeGuardedSession({ sdkSessionId: 'sdk_guard' });
   const base = transcriptPath('sdk_guard', session.meta.cwd);
-  const dir = path.join(path.dirname(base), 'subagents');
+  const dir = path.join(path.dirname(base), 'sdk_guard', 'subagents');
   fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, 'agent-old1.jsonl');
   // 首条 <synthetic> 占位不应误读为模型
@@ -276,4 +278,124 @@ test('result 按 modelUsage 拆到真实执行模型;无明细回退主模型', 
   session._handleMessage({ type: 'result', session_id: 'sdk_1', usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: 0.01 });
   const data2 = JSON.parse(fs.readFileSync(path.join(tmp, 'drafter-store.json'), 'utf8'));
   assert.strictEqual(data2.modelUsage['gpt-5.6-sol'].input, 610);
+});
+
+const extensions = require('../src/main/extensions');
+function installCustom(session, item = {}) {
+  const result = extensions.save('agent', { name: 'reviewer', prompt: 'Review only', scope: 'global', ...item });
+  assert.equal(result.ok, true, result.error);
+  session._agentRoute = { allowed: buildSessionAgents(session.meta).allowedAgents, spawned: new Map() };
+  return result.item;
+}
+
+test('真实结构化输出登记 agentId、名称及模型，重启后仍可续聊', async () => {
+  const { session } = makeGuardedSession({ sdkSessionId: 'structured-session' });
+  await session._guardDelegation({ tool_name: 'Agent', tool_use_id: 'spawn',
+    tool_input: { subagent_type: 'model-claude-haiku-4-5', name: '审查员' } });
+  await session._trackSpawnedAgent({ tool_use_id: 'spawn', tool_response: {
+    status: 'async_launched', agentId: 'fresh-agent', resolvedModel: 'claude-haiku-4-5' } });
+  for (const to of ['fresh-agent', '审查员']) {
+    assert.deepEqual(await session._guardDelegation({ tool_name: 'SendMessage', tool_input: { to } }), {});
+  }
+  const stored = store.listSessions().find((s) => s.id === session.id);
+  const restored = new Session(session.m, stored);
+  restored._agentRoute = { allowed: buildSessionAgents(stored).allowedAgents, spawned: new Map() };
+  assert.equal(await restored._resolveAgentModel('fresh-agent'), 'claude-haiku-4-5');
+  assert.equal(await restored._resolveAgentModel('审查员'), 'claude-haiku-4-5');
+  restored.meta.sdkSessionId = 'different-session';
+  assert.equal(await restored._resolveAgentModel('fresh-agent'), null, '不可跨 SDK 会话使用旧登记');
+});
+
+test('默认模型自定义 Agent 可创建、续聊、恢复；恢复仍拒绝模型不一致', async () => {
+  const { session } = makeGuardedSession({ agentModels: [] });
+  installCustom(session);
+  const input = { subagent_type: 'reviewer', model: 'sonnet', prompt: 'Review' };
+  const spawned = await session._guardDelegation({ tool_name: 'Agent', tool_use_id: 'free', tool_input: input });
+  assert.equal(spawned.hookSpecificOutput.updatedInput.model, undefined);
+  await session._trackSpawnedAgent({ tool_use_id: 'free', tool_response: {
+    status: 'completed', agentId: 'free-agent', content: [{ type: 'text', text: 'done' }] } });
+  assert.equal(await session._resolveAgentModel('free-agent'), 'gpt-5.6-sol');
+  assert.deepEqual(await session._guardDelegation({ tool_name: 'SendMessage', tool_input: { to: 'free-agent' } }), {});
+  assert.deepEqual(await session._guardDelegation({ tool_name: 'Agent',
+    tool_input: { subagent_type: 'reviewer', resume: 'free-agent' } }), {});
+  session._agentRoute.spawned.set('other-model', 'claude-sonnet-5');
+  assert.ok(denied(await session._guardDelegation({ tool_name: 'Agent',
+    tool_input: { subagent_type: 'reviewer', resume: 'other-model' } })));
+});
+
+test('自定义固定模型自动纳入会话策略，无需重复勾选；跨 Key 不可挂载', async () => {
+  const { session } = makeGuardedSession({ agentModels: [] });
+  installCustom(session, { model: 'k1|claude-sonnet-5' });
+  assert.deepEqual(await session._guardDelegation({ tool_name: 'Agent', tool_use_id: 'fixed',
+    tool_input: { subagent_type: 'reviewer' } }), {});
+  await session._trackSpawnedAgent({ tool_use_id: 'fixed', tool_response: { agentId: 'fixed-agent', status: 'completed' } });
+  assert.deepEqual(await session._guardDelegation({ tool_name: 'SendMessage', tool_input: { to: 'fixed-agent' } }), {});
+  const foreign = extensions.save('agent', { name: 'foreign', scope: 'session', model: 'k2|claude-sonnet-5' }).item;
+  await assert.rejects(session.setCustomAgents([foreign.id]), /其他 Key/);
+  assert.ok(!buildSessionAgents(session.meta).agents.foreign);
+});
+
+test('停用自定义 Agent 立即拒绝新创建和续聊，配置更新发出待生效状态', async () => {
+  const { session, mgr } = makeGuardedSession({ agentModels: [] });
+  const agent = installCustom(session);
+  session._agentDefinitionSignature = JSON.stringify(buildSessionAgents(session.meta).agents);
+  session.running = true; session.busy = true;
+  session._agentRoute.spawned.set('active', session.meta.model);
+  extensions.save('agent', { ...agent, enabled: false });
+  const emitted = [];
+  session._emit = (event) => emitted.push(event);
+  await mgr.refreshAgents();
+  assert.equal(session.needRestart, true);
+  assert.ok(emitted.some((e) => e.type === 'ui_agent_config' && e.config.pending && e.config.count === 0));
+  assert.ok(denied(await session._guardDelegation({ tool_name: 'Agent', tool_input: { subagent_type: 'reviewer' } })));
+  assert.ok(denied(await session._guardDelegation({ tool_name: 'SendMessage', tool_input: { to: 'active' } })));
+});
+
+test('预置模板不参与执行；配置数量和作用域由后端统一计算', () => {
+  const { session, mgr } = makeGuardedSession({ agentModels: [] });
+  extensions.seedPresets();
+  assert.equal(buildSessionAgents(session.meta).allowedAgents.size, 0);
+  assert.ok(buildSessionAgents(session.meta).disallowedTools.includes('Agent'));
+  installCustom(session);
+  extensions.save('agent', { name: 'other-project', scope: 'project', scopeId: 'not-this-project' });
+  extensions.save('agent', { name: 'other-session', scope: 'session', scopeId: 'not-this-session' });
+  const config = mgr.list().find((m) => m.id === session.id).agentConfig;
+  assert.equal(config.count, 1);
+  assert.deepEqual(config.customAgents.map((a) => a.name), ['reviewer']);
+});
+
+test('SDK 日志只读取 assistant 模型，忽略用户内容和截断行，拒绝路径穿越', async () => {
+  const { session } = makeGuardedSession({ sdkSessionId: 'parse-session' });
+  const base = transcriptPath(session.meta.sdkSessionId, session.meta.cwd);
+  const dir = path.join(path.dirname(base), session.meta.sdkSessionId, 'subagents');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'agent-parse.jsonl'), [
+    JSON.stringify({ type: 'user', message: { role: 'user', model: 'fake' } }),
+    JSON.stringify({ type: 'assistant', message: { model: '<synthetic>' } }),
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-haiku-4-5' } }),
+    '{"partial":',
+  ].join('\n'));
+  assert.equal(await session._resolveAgentModel('parse'), 'claude-haiku-4-5');
+  assert.equal(await session._resolveAgentModel('../parse'), null);
+});
+
+test('SDK 后台开始、进度、完成事件持久化，保留任务与工具关联', () => {
+  const { session } = makeGuardedSession();
+  for (const subtype of ['task_started', 'task_progress', 'task_notification']) {
+    session._handleMessage({ type: 'system', subtype, task_id: 'task1', tool_use_id: 'tool1', status: 'stopped' });
+  }
+  const events = store.readSessionEvents(session.id).filter((e) => e.type === 'ui_task');
+  assert.deepEqual(events.map((e) => e.status), ['running', 'running', 'stopped']);
+  assert.ok(events.every((e) => e.taskId === 'task1' && e.parentId === 'tool1'));
+});
+
+test('清理已删除的旧挂载后仍可选择新 Agent；停止会话结清运行中的任务', async () => {
+  const { session } = makeGuardedSession();
+  const active = installCustom(session, { scope: 'session' });
+  session.meta.customAgentIds = ['deleted'];
+  assert.deepEqual(await session.setCustomAgents(['deleted', active.id]), [active.id]);
+  session._handleMessage({ type: 'system', subtype: 'task_started', task_id: 'pending-task', tool_use_id: 'pending-tool' });
+  session.stop();
+  const tasks = store.readSessionEvents(session.id).filter((e) => e.type === 'ui_task');
+  assert.equal(tasks.at(-1).status, 'stopped');
 });

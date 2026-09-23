@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld('api', {
   // sessions
   sdkStatus: () => ipcRenderer.invoke('sess:sdkStatus'),
   sessList: () => ipcRenderer.invoke('sess:list'),
+  sessAgentConfig: (sid) => ipcRenderer.invoke('sess:agentConfig', sid),
   sessCreate: invoke('sess:create'),
   sessSend: (sid, content, opts) => ipcRenderer.invoke('sess:send', { sid, content, ...(opts || {}) }),
   sessInterrupt: (sid) => ipcRenderer.invoke('sess:interrupt', sid),

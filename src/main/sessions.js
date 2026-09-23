@@ -94,6 +94,23 @@ function buildSessionAgents(meta) {
   return { agents, allowedAgents };
 }
 
+function allowedAgentModels(meta) {
+  return new Set([...buildSessionAgents(meta).allowedAgents.values()].map((m) => m || meta.model).filter(Boolean));
+}
+
+function agentConfig(meta, pending = false) {
+  const built = buildSessionAgents(meta);
+  const customAgents = extensions.list('agent').filter((a) => !a.preset && a.enabled !== false)
+    .filter((a) => a.scope === 'global' || (a.scope === 'project' && a.scopeId === meta.projectId)
+      || (a.scope === 'session' && (!a.scopeId || a.scopeId === meta.id)))
+    .map((a) => ({ id: a.id, name: a.name, desc: a.desc, scope: a.scope, scopeId: a.scopeId,
+      active: extensions.scopeMatches(a, meta) && !extensions.agentModelError(a, meta),
+      error: extensions.agentModelError(a, meta) }));
+  const enabled = (!meta.kind || meta.kind === 'code' || (meta.kind === 'chat' && meta.chatMode === 'agent'));
+  return { count: enabled ? built.allowedAgents.size : 0, customAgents,
+    agentModels: currentAgentModels(meta), customAgentIds: meta.customAgentIds || [], pending };
+}
+
 // 极速问答的系统提示(v0.10.2):整体替换 claude_code preset——默认提示+全工具 schema
 // 首轮实测要 ~26k tokens 输入,纯问答场景全是浪费;对齐 Codex CLI 思路(极简提示+
 // 强简洁指令、零工具面),压到百字量级,首轮输入降到 ~2-4k,TTFT 与网页版同量级。
@@ -190,18 +207,24 @@ function migrateTranscript(sessionId, oldCwd, newCwd) {
   try {
     const dstDir = path.join(CLAUDE_PROJECTS_DIR, encodeCwdForProjects(newCwd));
     const dst = path.join(dstDir, sessionId + '.jsonl');
-    if (fs.existsSync(dst)) return true;
+    const alreadyCopied = fs.existsSync(dst);
     let src = oldCwd ? path.join(CLAUDE_PROJECTS_DIR, encodeCwdForProjects(oldCwd), sessionId + '.jsonl') : null;
     if (!src || !fs.existsSync(src)) {
       src = null;
       for (const d of fs.readdirSync(CLAUDE_PROJECTS_DIR)) {
         const p = path.join(CLAUDE_PROJECTS_DIR, d, sessionId + '.jsonl');
-        if (fs.existsSync(p)) { src = p; break; }
+        if (path.resolve(p).toLowerCase() !== path.resolve(dst).toLowerCase() && fs.existsSync(p)) { src = p; break; }
       }
     }
-    if (!src) return false;
+    if (!src) return alreadyCopied;
     fs.mkdirSync(dstDir, { recursive: true });
-    fs.copyFileSync(src, dst);
+    if (!alreadyCopied) fs.copyFileSync(src, dst);
+    // Subagent transcripts live in the sibling session directory, not beside the main JSONL.
+    const sourceTasks = path.join(path.dirname(src), sessionId);
+    const targetTasks = path.join(dstDir, sessionId);
+    if (path.resolve(sourceTasks).toLowerCase() !== path.resolve(targetTasks).toLowerCase() && fs.existsSync(sourceTasks)) {
+      fs.cpSync(sourceTasks, targetTasks, { recursive: true, force: false, errorOnExist: false });
+    }
     return true;
   } catch (e) {
     console.error('[sessions] transcript migrate failed:', e.message);
@@ -294,6 +317,7 @@ class Session {
     this.cumCostUsd = 0;
     this._resumeQuery = null; // query started with SDK resume; used for targeted recovery
     this._agentRoute = null;  // 本次 query 的委派守卫状态 { allowed: Map(name->model), spawned: Map(id->model) }
+    this._agentTasks = new Map();
     this._pinnedSkillIds = []; // 本条消息手动指定的技能(v0.15.16);sess:send 时更新,use_skill 处理器读取
   }
 
@@ -308,6 +332,7 @@ class Session {
 
   async start({ resume = false, fork = false, forkAt = null } = {}) {
     if (this.running || this.starting) return;
+    this.needRestart = false; // This startup consumes configuration changes queued for the previous query.
     this.starting = true;
     // 自愈(v0.9.5):code/chat 会话上残留的新媒体模型(旧版板块切换错绑,发送必 403
     // 「模型未配置」)在启动时清空,回退默认模型
@@ -346,14 +371,14 @@ class Session {
           keyId: this.meta.keyId,
           getAllowedModels: () => [
             this.meta.model,
-            ...currentAgentModels(this.meta).map((item) => item.model),
+            ...allowedAgentModels(this.meta),
           ].filter(Boolean),
           onBlocked: (requestedModel) => {
             this._emit({
               type: 'ui_agent_route', action: 'network-deny', model: requestedModel,
-              allowed: [this.meta.model, ...currentAgentModels(this.meta).map((item) => item.model)].filter(Boolean),
+              allowed: [this.meta.model, ...allowedAgentModels(this.meta)].filter(Boolean),
             }, true);
-            this._emit({ type: 'ui_aux', message: `⛔ 网络层已拦截未勾选模型 ${requestedModel};该请求未发送到网关` }, true);
+            this._emit({ type: 'ui_aux', message: `⛔ 网络层已拦截当前会话未启用的模型 ${requestedModel};该请求未发送到网关` }, true);
           },
         });
         modelGuardBaseUrl = modelGuard.baseUrlFor(this.id);
@@ -365,6 +390,7 @@ class Session {
       cwd: this.meta.cwd,
       permissionMode: fastOv ? 'bypassPermissions' : (this.meta.permissionMode || 'default'),
       includePartialMessages: true,
+      forwardSubagentText: !fastOv,
       env: this.m.buildEnv({ ELECTRON_RUN_AS_NODE: '1', __modelGuardBaseUrl: modelGuardBaseUrl }, this.meta.keyId), // 按会话绑定的 Key 注入凭据(v0.8.2);守卫代理强制模型白名单
       // 不读 user 级 settings(v0.11.6):~/.claude/settings.json 的 env(ANTHROPIC_AUTH_TOKEN/
       // BASE_URL 等)优先级高于 buildEnv 按会话 Key 注入的进程凭据——用户用 CLI 配置过网关时,
@@ -378,9 +404,10 @@ class Session {
     };
     if (this.meta.model) options.model = this.meta.model;
     // AgentDefinitions/disallowedTools 只在 query 启动时读取。极速问答已有 tools:[],
-    // 完整 Agent 模式则按会话多选模型显式提供;空列表彻底禁用子 Agent。
+    // 完整 Agent 模式合并模型选择与生效的自定义 Agent；两者均为空时禁用委派。
     if (!fastOv) {
       const built = buildSessionAgents(this.meta);
+      this._agentDefinitionSignature = JSON.stringify(built.agents || {});
       if (built.agents) options.agents = built.agents;
       if (built.disallowedTools) options.disallowedTools = built.disallowedTools;
       this._agentRoute = { allowed: built.allowedAgents, spawned: new Map() };
@@ -533,6 +560,7 @@ class Session {
     }
     this.starting = false;
     this.running = true;
+    this._emitAgentConfig(false);
     this._pump();
   }
 
@@ -556,6 +584,9 @@ class Session {
     } finally {
       await debugCleanup?.cleanup();
       if (this.q === q) {
+        for (const task of this._agentTasks.values()) {
+          if (task.status === 'running') this._emitTask({ ...task, status: 'stopped' });
+        }
         this.running = false;
         this.busy = false;
         try { modelGuard.unregister(this.id); } catch {}
@@ -580,6 +611,12 @@ class Session {
       if (Array.isArray(msg.slash_commands)) this.slashCommands = msg.slash_commands;
       this.lastInitModel = msg.model || this.lastInitModel;
       this._emit({ type: 'ui_init', model: msg.model, tools: msg.tools, slashCommands: msg.slash_commands });
+      return;
+    }
+    if (msg.type === 'system' && ['task_started', 'task_progress', 'task_notification'].includes(msg.subtype)) {
+      this._emitTask({ taskId: msg.task_id, parentId: msg.tool_use_id || null,
+        status: msg.subtype === 'task_notification' ? msg.status : 'running',
+        description: msg.description, summary: msg.summary, usage: msg.usage });
       return;
     }
     if (msg.type === 'system' && msg.subtype === 'status') {
@@ -697,19 +734,34 @@ class Session {
     this.m.send('sess:event', { sid: this.id, ev });
   }
 
+  _emitTask(event) {
+    let key = event.parentId || event.taskId;
+    if (!key) return;
+    const match = [...this._agentTasks.entries()].find(([, t]) => event.taskId && t.taskId === event.taskId);
+    const previous = this._agentTasks.get(key) || match?.[1] || {};
+    if (match && match[0] !== key && event.parentId) this._agentTasks.delete(match[0]);
+    const parentId = event.parentId || previous.parentId;
+    key = parentId || event.taskId;
+    const next = { ...previous, ...Object.fromEntries(Object.entries(event).filter(([, v]) => v != null)), parentId };
+    const newRun = event.parentId && previous.parentId && event.parentId !== previous.parentId;
+    if (!newRun && previous.status && previous.status !== 'running' && event.status === 'running') next.status = previous.status;
+    this._agentTasks.set(key, next);
+    this._emit({ ...next, type: 'ui_task' }, true);
+  }
+
   // --- 子 Agent 委派守卫(PreToolUse hook) ---
   // agents 选项只是「新增」自定义定义,内置 Explore/Plan/general-purpose 依然可调,
   // 且 Agent 工具的 input.model 可另行指定 Claude 别名。这里在工具执行前强制校验:
-  // 只允许当前勾选模型注册的 Agent;合法 Agent 的覆盖参数直接剥掉,未知类型/
+  // 只允许当前启用的模型/自定义 Agent;合法 Agent 的覆盖参数直接剥掉,未知类型/
   // 恢复续聊/Workflow 仍 fail closed。网络守卫代理另做离机前最后一道白名单。
   _denyDelegation(toolName, reason, extra = {}) {
-    this._emit({ type: 'ui_aux', message: '⛔ 已拦截超出子 Agent 白名单的调用:' + reason }, true);
+    this._emit({ type: 'ui_aux', message: '⛔ 子 Agent 调用未通过校验：' + reason }, true);
     this._emit({ type: 'ui_agent_route', action: 'deny', tool: toolName, reason, ...extra }, true);
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
-        permissionDecisionReason: reason + '。只能调用会话「子 Agent」菜单中勾选的模型,需要调整请先修改勾选。',
+        permissionDecisionReason: reason + '。请使用当前会话已启用的子 Agent；可在「子 Agent」菜单或扩展中调整。',
       },
     };
   }
@@ -722,9 +774,9 @@ class Session {
     let rewrittenInput = null;
     const toolUseId = hookInput && hookInput.tool_use_id;
     // 最新勾选(取消勾选立即对新调用生效,不等回合结束后的重启)
-    const current = new Set(currentAgentModels(this.meta).map((i) => i.model));
-    // 守卫值 null = 自定义无固定模型 Agent(v0.15.16),恒在可用列表
-    const available = [...route.allowed].filter(([, m]) => m === null || current.has(m)).map(([n]) => n);
+    const latest = buildSessionAgents(this.meta).allowedAgents;
+    const current = allowedAgentModels(this.meta);
+    const available = [...route.allowed].filter(([n, m]) => latest.has(n) && latest.get(n) === m).map(([n]) => n);
 
     if (toolName === 'Workflow') {
       return this._denyDelegation(toolName, 'Workflow 编排会在脚本内部派生子任务、绕开模型白名单,当前会话未启用');
@@ -734,10 +786,10 @@ class Session {
       if (!to) return {};
       const model = await this._resolveAgentModel(to);
       if (model == null) {
-        return this._denyDelegation(toolName, `无法核实子任务 ${to} 的模型(可能来自旧配置),请新建已勾选的子 Agent`, { target: to });
+        return this._denyDelegation(toolName, `未找到子任务 ${to} 的模型记录，请重新创建当前已启用的子 Agent`, { target: to });
       }
       if (!current.has(model)) {
-        return this._denyDelegation(toolName, `子任务 ${to} 使用未勾选的模型 ${model}`, { target: to, resolvedModel: model });
+        return this._denyDelegation(toolName, `子任务 ${to} 使用当前子 Agent 配置未启用的模型 ${model}`, { target: to, resolvedModel: model });
       }
       return {};
     }
@@ -745,23 +797,14 @@ class Session {
 
     const type = String(input.subagent_type || '').trim();
     const requested = typeof input.model === 'string' ? input.model.trim() : '';
-    const defModel = type ? route.allowed.get(type) : undefined;
-    // 自定义无固定模型 Agent(守卫值 null):放行且不钉模型,跟随会话默认模型计费;
-    // 模型侧自动塞的 model 参数剥掉,避免把子任务钉到未勾选模型
-    if (type && route.allowed.has(type) && defModel === null) {
-      if (requested) {
-        rewrittenInput = { ...input };
-        delete rewrittenInput.model;
-        return { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: rewrittenInput } };
-      }
-      return {};
-    }
-    if (!type || !defModel || !current.has(defModel)) {
+    const inheritsModel = route.allowed.has(type) && route.allowed.get(type) === null;
+    const defModel = inheritsModel ? this.meta.model : route.allowed.get(type);
+    if (!available.includes(type) || !defModel || !current.has(defModel)) {
       return this._denyDelegation(toolName,
         `子 Agent 类型 ${type || '(未指定,走内置默认)'} 不在已启用列表;可用:${available.join(', ') || '(无)'}`,
         { agentType: type || null, requestedModel: requested || null, available });
     }
-    if (requested && requested !== defModel) {
+    if (requested && (inheritsModel || requested !== defModel)) {
       // Claude Code 的 Agent/Task schema 仍带 model 参数;部分模型(尤其经 Kuro 等
       // 网关驱动时)会自动塞 sonnet 等 Claude 别名。对已注册子 Agent 不能 deny——
       // deny 会让主模型按同一 schema 反复重试;这里剥掉覆盖,让 AgentDefinition.model
@@ -785,6 +828,10 @@ class Session {
       }
     }
     if (toolUseId) route.spawned.set(toolUseId, defModel);
+    if (toolUseId && typeof input.name === 'string' && input.name.trim()) {
+      route.names ||= new Map();
+      route.names.set(toolUseId, input.name.trim());
+    }
     if (!rewrittenInput) this._emit({ type: 'ui_agent_route', action: 'allow', tool: toolName, agentType: type, model: defModel }, true);
     if (rewrittenInput) {
       return {
@@ -811,25 +858,61 @@ class Session {
             ? (typeof res.content === 'string' ? res.content : JSON.stringify(res.content))
             : '';
       const m = text && text.match(/agentId:\s*([A-Za-z0-9_-]+)/);
-      if (m) route.spawned.set(m[1], model);
+      const id = res && typeof res === 'object' && typeof res.agentId === 'string' ? res.agentId : m && m[1];
+      const actualModel = res && typeof res.resolvedModel === 'string' && res.resolvedModel ? res.resolvedModel : model;
+      if (id) this._rememberAgentModel(id, actualModel);
+      const name = route.names?.get(hookInput.tool_use_id);
+      if (id && name) this._rememberAgentModel(name, actualModel, true);
+      const status = res && res.status;
+      this._emitTask({ taskId: id || hookInput.tool_use_id,
+        parentId: hookInput.tool_use_id, model: actualModel,
+        status: status === 'async_launched' || res?.isAsync === true
+          || /running in the background|launched successfully/i.test(text) ? 'running' : 'completed' });
     } catch {}
     return {};
+  }
+
+  _rememberAgentModel(target, model, alias = false) {
+    const id = alias ? String(target || '') : String(target || '').replace(/^agent-/, '');
+    if ((!alias && !/^[A-Za-z0-9_-]+$/.test(id)) || !id || id.length > 256 || !model || !this._agentRoute) return;
+    this._agentRoute.spawned.set(id, model);
+    const sessionId = this.meta.sdkSessionId;
+    if (!sessionId) return;
+    const previous = this.meta.agentModelRecords;
+    const models = previous?.sessionId === sessionId ? { ...previous.models } : {};
+    Object.defineProperty(models, id, { value: model, enumerable: true, configurable: true, writable: true });
+    this.meta.agentModelRecords = { sessionId, models };
+    store.upsertSession({ id: this.id, agentModelRecords: this.meta.agentModelRecords });
   }
 
   // 核实子任务实际使用的模型:先查本 query 的派发记录,再读本会话的子 Agent
   // transcript(跨重启恢复场景);都查不到返回 null(调用方必须拒绝,fail closed)。
   async _resolveAgentModel(target) {
     const route = this._agentRoute;
+    const raw = String(target || '');
     const id = String(target || '').replace(/^agent-/, '');
-    if (!id) return null;
+    if (route && route.spawned.has(raw)) return route.spawned.get(raw);
     if (route && route.spawned.has(id)) return route.spawned.get(id);
+    const records = this.meta.agentModelRecords;
+    if (records?.sessionId === this.meta.sdkSessionId) {
+      if (Object.hasOwn(records.models || {}, raw)) return records.models[raw];
+      if (Object.hasOwn(records.models || {}, id)) return records.models[id];
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
     try {
       const base = transcriptPath(this.meta.sdkSessionId, this.meta.cwd);
       if (!base) return null;
-      const f = path.join(path.dirname(base), 'subagents', 'agent-' + id + '.jsonl');
-      const head = fs.readFileSync(f, 'utf8').slice(0, 262144);
-      const m = head.match(/"model"\s*:\s*"([^"<][^"]*)"/); // 跳过 <synthetic> 占位
-      return m ? m[1] : null;
+      const f = path.join(path.dirname(base), this.meta.sdkSessionId, 'subagents', 'agent-' + id + '.jsonl');
+      let model = null;
+      for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+        try {
+          const row = JSON.parse(line);
+          const msg = row.message;
+          if ((row.type === 'assistant' || msg?.role === 'assistant') && typeof msg?.model === 'string'
+            && msg.model && !msg.model.startsWith('<')) model = msg.model;
+        } catch {} // A live transcript can end with a partial line.
+      }
+      return model;
     } catch { return null; }
   }
 
@@ -1027,6 +1110,7 @@ class Session {
       this.meta.agentModels = kept;
     }
     store.upsertSession({ id: this.id, model, keyId: this.meta.keyId, agentModels: this.meta.agentModels || [] });
+    this._emitAgentConfig(this.busy && (keyChanged || removedAgents > 0));
     if (removedAgents > 0) {
       const why = keyChanged ? '主模型 Key 已切换' : '该模型已成为主模型';
       this._emit({ type: 'ui_aux', message: `${why},已移除 ${removedAgents} 个不再适用的子 Agent 模型` });
@@ -1049,12 +1133,33 @@ class Session {
   }
 
   // 子 Agent 模型只在 query 启动时读取;配置改变沿用 Gem/ChatMode 的安全重启语义。
+  _emitAgentConfig(pending = this.needRestart) {
+    this._emit({ type: 'ui_agent_config', config: agentConfig(this.meta, !!pending) });
+  }
+
+  getAgentConfig() { return agentConfig(this.meta, !!this.needRestart); }
+
+  async refreshAgentDefinitions() {
+    const signature = JSON.stringify(buildSessionAgents(this.meta).agents || {});
+    const usesAgents = !this.meta.kind || this.meta.kind === 'code' || (this.meta.kind === 'chat' && this.meta.chatMode === 'agent');
+    if (usesAgents && this.running && signature !== this._agentDefinitionSignature) {
+      if (this.busy) {
+        this.needRestart = true;
+        this._emitAgentConfig(true);
+        return;
+      }
+      this.stop();
+      await this.start({ resume: !!this.meta.sdkSessionId });
+    }
+    this._emitAgentConfig();
+  }
+
   async setAgentModels(list) {
     const clean = normalizeAgentModels(list, this.meta.keyId, { requireEnabled: true, excludeModel: this.meta.model });
     this.meta.agentModels = clean;
     store.upsertSession({ id: this.id, agentModels: clean });
-    if (!this.running) return clean;
-    if (this.busy) { this.needRestart = true; return clean; }
+    if (!this.running) { this._emitAgentConfig(false); return clean; }
+    if (this.busy) { this.needRestart = true; this._emitAgentConfig(true); return clean; }
     this.stop();
     await this.start({ resume: !!this.meta.sdkSessionId });
     return clean;
@@ -1079,6 +1184,7 @@ class Session {
     if ((this.meta.chatMode || 'fast') === m) return true;
     this.meta.chatMode = m;
     store.upsertSession({ id: this.id, chatMode: m });
+    this._emitAgentConfig(this.running && this.busy);
     if (!this.running) return true;
     if (this.busy) { this.needRestart = true; return true; }
     this.stop();
@@ -1100,11 +1206,24 @@ class Session {
 
   // 会话级自定义 Agent 挂载(v0.15.16):同 setSkills 的重启语义
   async setCustomAgents(ids) {
-    const clean = Array.isArray(ids) ? ids.map(String) : [];
+    const requested = [...new Set(Array.isArray(ids) ? ids.map(String) : [])];
+    const previous = new Set(this.meta.customAgentIds || []);
+    const clean = [];
+    for (const id of requested) {
+      const agent = extensions.byId('agent', id);
+      const error = !agent || agent.preset || agent.enabled === false || agent.scope !== 'session'
+        || (agent.scopeId && agent.scopeId !== this.id) ? '该自定义 Agent 不能挂载到当前会话'
+        : extensions.agentModelError(agent, this.meta);
+      if (error) {
+        if (!previous.has(id)) throw new Error(error);
+        continue; // Removed/disabled old mounts must not prevent editing the remaining selection.
+      }
+      clean.push(id);
+    }
     this.meta.customAgentIds = clean;
     store.upsertSession({ id: this.id, customAgentIds: clean });
-    if (!this.running) return clean;
-    if (this.busy) { this.needRestart = true; return clean; }
+    if (!this.running) { this._emitAgentConfig(false); return clean; }
+    if (this.busy) { this.needRestart = true; this._emitAgentConfig(true); return clean; }
     this.stop();
     await this.start({ resume: !!this.meta.sdkSessionId });
     return clean;
@@ -1175,6 +1294,9 @@ class Session {
   }
 
   stop() {
+    for (const task of this._agentTasks.values()) {
+      if (task.status === 'running') this._emitTask({ ...task, status: 'stopped' });
+    }
     void this._debugCleanup?.cleanup();
     try { modelGuard.unregister(this.id); } catch {}
     if (this.queue) this.queue.end();
@@ -1214,8 +1336,13 @@ class SessionManager {
   list() {
     return store.listSessions().map((meta) => {
       const live = this.sessions.get(meta.id);
-      return { ...meta, running: !!(live && live.running), busy: !!(live && live.busy) };
+      return { ...meta, agentConfig: agentConfig(live?.meta || meta, !!live?.needRestart),
+        running: !!(live && live.running), busy: !!(live && live.busy) };
     });
+  }
+
+  async refreshAgents() {
+    for (const session of this.sessions.values()) await session.refreshAgentDefinitions();
   }
 
   create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId, gemId, chatMode, agentModels, skillIds, customAgentIds }) {

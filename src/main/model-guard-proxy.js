@@ -111,7 +111,7 @@ async function onRequest(req, res) {
       if (!allowed.has(requestedModel)) {
         try { policy.onBlocked && policy.onBlocked(requestedModel, body); } catch {}
         return sendAnthropicError(res, 403,
-          `模型 ${requestedModel} 未在当前会话勾选(允许:${[...allowed].join(', ') || '(无)'}),已在本地拦截,未发送上游`,
+          `模型 ${requestedModel} 未在当前会话启用(允许:${[...allowed].join(', ') || '(无)'}),已在本地拦截,未发送上游`,
           'permission_error');
       }
     }

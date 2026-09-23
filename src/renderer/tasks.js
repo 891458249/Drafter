@@ -15,23 +15,21 @@ function render() {
     el.className = 'task-item';
     const s = state.sessions.get(t.sid);
     const sessName = s && s.meta.title ? s.meta.title : t.sid.slice(0, 8);
-    const statusCls = t.status === 'running' ? 'task-status-running' : t.status === 'error' ? 'task-status-err' : 'task-status-done';
-    const statusTxt = t.status === 'running' ? '◐ 运行中' : t.status === 'error' ? '✖ 出错' : '✔ 完成';
+    const statusCls = t.status === 'running' ? 'task-status-running' : t.status === 'failed' ? 'task-status-err' : 'task-status-done';
+    const statusTxt = t.status === 'running' ? '◐ 运行中' : t.status === 'failed' ? '✖ 出错' : t.status === 'stopped' ? '■ 已停止' : '✔ 完成';
     el.innerHTML = `
       <div class="task-name"><span class="${statusCls}">${statusTxt}</span> ${escapeHtml(t.desc || '子任务')}</div>
-      <div class="task-desc">会话:${escapeHtml(sessName)} · ${id.slice(0, 10)}</div>`;
+      <div class="task-desc">会话:${escapeHtml(sessName)} · ${escapeHtml(t.model || '模型待确认')} · ${escapeHtml((t.taskId || t.parentId || '').slice(0, 10))}</div>`;
     box.appendChild(el);
   }
 }
 
 export function init() {
-  on('task-started', ({ sid, parentId, desc }) => {
-    if (!tasks.has(parentId)) tasks.set(parentId, { sid, desc, status: 'running' });
-    else if (desc) tasks.get(parentId).desc = desc;
+  on('task-status', (task) => {
+    for (const [key, old] of tasks) {
+      if (task.taskId && old.sid === task.sid && old.taskId === task.taskId) tasks.delete(key);
+    }
+    tasks.set(`${task.sid}:${task.parentId || task.taskId}`, task);
     render();
-  });
-  on('task-done', ({ parentId, isError }) => {
-    const t = tasks.get(parentId);
-    if (t) { t.status = isError ? 'error' : 'done'; render(); }
   });
 }

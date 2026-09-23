@@ -16,6 +16,7 @@ process.env.CLAUDE_CONFIG_DIR = path.join(tmp, '.claude');
 const store = require('../src/main/store');
 const modelGuard = require('../src/main/model-guard-proxy');
 const { SessionManager } = require('../src/main/sessions');
+const extensions = require('../src/main/extensions');
 
 before(() => modelGuard.start());
 after(async () => { await modelGuard.stop(); try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
@@ -339,5 +340,59 @@ test('真实运行时:已注册子 Agent 的 sonnet 覆盖被剥掉,实际仍走
   } finally {
     try { s.stop(); } catch {}
     gw.server.close();
+  }
+});
+
+for (const inherit of [false, true]) test(`真实运行时:自定义${inherit ? '默认' : '固定'}模型创建后可 SendMessage 续聊`, { timeout: 90000 }, async () => {
+  let mainRequests = 0;
+  let childRequests = 0;
+  let agentId;
+  const gw = await startGateway((body, raw) => {
+    if (/Write the title in the predominant language/.test(JSON.stringify(body.messages))) return sseText(body.model, 'title');
+    if (body.model === 'gpt-5.4' || JSON.stringify(body.system).includes('AUDIT_CHILD_SCOPE')) {
+      childRequests++;
+      return sseText(body.model, '子 Agent 已完成本次指令。');
+    }
+    mainRequests++;
+    if (mainRequests === 1) return sseToolUse(body.model, 'audit-spawn', 'Agent', {
+      subagent_type: 'audit-reviewer', prompt: '完成一次检查', description: '检查', run_in_background: false, name: 'auditor',
+    });
+    if (mainRequests === 2) {
+      agentId = raw.match(/agentId:\s*([A-Za-z0-9_-]+)/)?.[1];
+      return sseToolUse(body.model, 'audit-followup', 'SendMessage', { to: inherit ? 'auditor' : agentId || 'missing-agent', message: '再检查一次', summary: '再次检查' });
+    }
+    return sseText(body.model, '完成');
+  });
+  const { mgr, events } = makeManager(gw.port);
+  store.setSetting('extensions', { skills: [], agents: [] });
+  const saved = extensions.save('agent', { name: 'audit-reviewer', prompt: 'AUDIT_CHILD_SCOPE: 你是审查员，只需回复完成。',
+    model: inherit ? null : 'k1|gpt-5.4', scope: 'global' });
+  assert.equal(saved.ok, true, saved.error);
+  const cwd = path.join(tmp, 'followup-' + inherit);
+  fs.mkdirSync(cwd, { recursive: true });
+  const meta = mgr.create({ cwd, kind: 'code', keyId: 'k1', model: 'gpt-6-astra',
+    agentModels: [], permissionMode: 'bypassPermissions' });
+  const session = mgr.get(meta.id);
+  try {
+    session.send('请执行检查，然后发消息让子任务再检查一次。');
+    await waitResult(events);
+    assert.ok(agentId, '真实 SDK 结果应提供 agentId: ' + JSON.stringify(events.filter((e) =>
+      ['user', 'ui_agent_route', 'ui_task', 'ui_error'].includes(e.ev.type)).map((e) => e.ev)));
+    assert.equal(await session._resolveAgentModel(agentId), inherit ? 'gpt-6-astra' : 'gpt-5.4');
+    const until = Date.now() + 5000;
+    while (childRequests < 2 && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(childRequests >= 2, `续聊应再次请求子模型，实际 ${childRequests} 次`);
+    assert.ok(!events.some((e) => e.ev.type === 'ui_agent_route' && ['deny', 'network-deny'].includes(e.ev.action)),
+      JSON.stringify(events.filter((e) => e.ev.type === 'ui_agent_route').map((e) => e.ev)));
+    // Clear both caches: exercise the actual SDK-created transcript directory.
+    session._agentRoute.spawned.clear();
+    session.meta.agentModelRecords = null;
+    assert.equal(await session._resolveAgentModel(agentId), inherit ? 'gpt-6-astra' : 'gpt-5.4');
+    assert.ok(events.some((e) => e.ev.type === 'ui_task' && e.ev.status === 'completed'));
+    assert.ok(events.some((e) => e.ev.type === 'ui_task' && e.ev.parentId === 'audit-followup' && e.ev.status === 'running'),
+      '续聊的新一轮应重新显示运行中');
+  } finally {
+    session.stop(); gw.server.close();
+    store.setSetting('extensions', { skills: [], agents: [] });
   }
 });

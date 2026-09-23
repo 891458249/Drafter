@@ -2,7 +2,7 @@
 import { api, state, $, escapeHtml, ensureGroups } from './state.js';
 
 let entriesCache = [];
-let customAgentsCache = []; // 自定义子 Agent(扩展板块,v0.15.16)
+const loadingConfigs = new Map();
 let toggling = false; // 防快速连点并发提交导致勾选互相覆盖
 
 function isFastChat(s) {
@@ -31,12 +31,35 @@ function customSelected(s) {
   return Array.isArray(s && s.meta.customAgentIds) ? s.meta.customAgentIds : [];
 }
 
+function applyConfig(s, config) {
+  if (!config) return;
+  s.meta.agentConfig = config;
+  s.meta.agentModels = config.agentModels;
+  s.meta.customAgentIds = config.customAgentIds;
+  s.meta.agentModelsPending = !!config.pending;
+}
+
+async function refreshConfig(s) {
+  const sid = s.meta.id;
+  if (loadingConfigs.has(sid)) return loadingConfigs.get(sid);
+  const previous = s.meta.agentConfig;
+  const pending = api.sessAgentConfig(sid).then((config) => {
+    // A newer push may arrive while the initial snapshot is in flight.
+    if (s.meta.agentConfig === previous) applyConfig(s, config);
+  }).finally(() => loadingConfigs.delete(sid));
+  loadingConfigs.set(sid, pending);
+  return pending;
+}
+
 export function updateAgentModelsSelector() {
   const s = state.sessions.get(state.activeSid);
   const btn = $('agent-models-btn');
   const name = $('agent-models-name');
   if (!btn || !name) return;
-  const count = selected(s).length + customSelected(s).length;
+  if (s && !s.meta.agentConfig && !loadingConfigs.has(s.meta.id)) {
+    refreshConfig(s).then(() => { if (s.meta.agentConfig) updateAgentModelsSelector(); }).catch(console.error);
+  }
+  const count = s?.meta.agentConfig?.count || 0;
   name.textContent = count ? `子 Agent (${count})` : '子 Agent';
   btn.classList.toggle('active', count > 0);
   const disabledReason = !s ? '没有活动会话'
@@ -46,9 +69,9 @@ export function updateAgentModelsSelector() {
           : null;
   btn.disabled = !!disabledReason;
   btn.title = disabledReason || (s.meta.agentModelsPending
-    ? `已启用 ${count} 个子 Agent 模型(新配置待当前回合结束后生效)`
+    ? `已保存 ${count} 个子 Agent(新配置待当前回合结束后生效)`
     : count
-      ? `已启用 ${count} 个子 Agent 模型;主模型会按任务自动选择调用`
+      ? `已启用 ${count} 个子 Agent;主模型会按任务自动选择调用`
       : '未启用子 Agent,当前会话只使用主模型');
   if (btn.disabled) hideAgentModelsMenu();
 }
@@ -90,6 +113,7 @@ async function toggleModel(item) {
     // 回合进行中:新配置待重启生效;取消勾选已由守卫立即拦截新调用,
     // 但新增模型要等重启注册,旧子任务也仍在按启动配置运行——如实提示
     cur.meta.agentModelsPending = !!result.pending;
+    await refreshConfig(cur);
     updateAgentModelsSelector();
     if (state.activeSid === sid) renderMenu(cur);
   } finally {
@@ -115,6 +139,8 @@ async function toggleCustomAgent(agent) {
     const cur = state.sessions.get(sid);
     if (!cur) return;
     cur.meta.customAgentIds = result.customAgentIds || [];
+    cur.meta.agentModelsPending = !!result.pending;
+    await refreshConfig(cur);
     updateAgentModelsSelector();
     if (state.activeSid === sid) renderMenu(cur);
   } finally {
@@ -144,7 +170,7 @@ function renderMenu(s) {
   }
   // 自定义子 Agent(扩展板块 v0.15.16):global/project 作用域自动生效,仅列出
   // 会话作用域的可在此挂载;挂载写 meta.customAgentIds。
-  const customs = customAgentsCache.filter((a) => a.enabled !== false);
+  const customs = s.meta.agentConfig?.customAgents || [];
   const sessionScoped = customs.filter((a) => a.scope === 'session');
   const autoActive = customs.filter((a) => a.scope !== 'session');
   if (customs.length) {
@@ -155,28 +181,30 @@ function renderMenu(s) {
     const cur = new Set(customSelected(s));
     for (const a of sessionScoped) {
       const bound = a.scopeId === s.meta.id; // 创建时绑定了本会话:自动生效
-      const active = bound || cur.has(a.id);
+      const active = a.active;
       const row = document.createElement('button');
       row.className = 'agent-model-row' + (active ? ' active' : '');
-      row.innerHTML = `<span class="agent-model-check">${active ? '✓' : ''}</span><span title="${escapeHtml(a.desc || a.name)}">${escapeHtml(a.name)}${bound ? ' <small>(已绑定本会话)</small>' : ''}</span>`;
-      if (bound) row.disabled = true;
+      row.innerHTML = `<span class="agent-model-check">${active ? '✓' : ''}</span><span title="${escapeHtml(a.desc || a.name)}">${escapeHtml(a.name)}${bound ? ' <small>(已绑定本会话)</small>' : ''}${a.error ? ` <small>(${escapeHtml(a.error)})</small>` : ''}</span>`;
+      if (bound || (a.error && !cur.has(a.id))) row.disabled = true;
       else row.onclick = (event) => { event.stopPropagation(); toggleCustomAgent(a); };
       menu.appendChild(row);
     }
     for (const a of autoActive) {
       const row = document.createElement('button');
-      row.className = 'agent-model-row active';
+      row.className = 'agent-model-row' + (a.active ? ' active' : '');
       row.disabled = true;
-      row.title = a.scope === 'global' ? '全局作用域,所有会话自动生效' : '项目作用域,该项目下会话自动生效';
-      row.innerHTML = `<span class="agent-model-check">✓</span><span title="${escapeHtml(a.desc || a.name)}">${escapeHtml(a.name)} <small>(${a.scope === 'global' ? '全局' : '项目'})</small></span>`;
+      row.title = a.error || '按作用域自动启用；可在扩展板块停用或修改';
+      row.innerHTML = `<span class="agent-model-check">${a.active ? '✓' : ''}</span><span title="${escapeHtml(a.desc || a.name)}">${escapeHtml(a.name)} <small>(${escapeHtml(a.error || (a.scope === 'global' ? '全局；扩展中停用' : '项目；扩展中停用'))})</small></span>`;
       menu.appendChild(row);
     }
   }
   const note = document.createElement('div');
   note.className = 'agent-menu-note';
+  const count = s.meta.agentConfig?.count || 0;
   note.textContent = s.meta.agentModelsPending
-    ? `已保存 ${current.size} 个,当前回合结束后生效;守卫已立即按最新勾选拦截新调用,但运行中的子任务仍按旧配置执行`
-    : current.size ? `已选择 ${current.size} 个;仅在主模型决定委派时调用` : '未选择时禁用 Agent 工具,只消耗主模型';
+    ? `已保存 ${count} 个，当前回合结束后应用新定义；停用立即限制新调用和后续模型请求，可能中断运行中的子任务`
+    : count ? `已启用 ${count} 个；仅在主模型决定委派时调用。自定义固定模型使用当前会话的同一个 Key`
+      : '当前没有启用子 Agent。预置模板需在扩展中复制并启用后才能使用';
   menu.appendChild(note);
   if (s.meta.agentModelsPending) {
     const stop = document.createElement('button');
@@ -199,7 +227,8 @@ async function openAgentModelsMenu() {
     await ensureGroups();
     entriesCache = await api.keysEnabledModels() || [];
   } catch { entriesCache = []; }
-  try { customAgentsCache = await api.extList('agent') || []; } catch { customAgentsCache = []; }
+  await refreshConfig(s);
+  updateAgentModelsSelector();
   renderMenu(s);
 }
 
@@ -211,13 +240,16 @@ export function hideAgentModelsMenu() {
 export function init() {
   const btn = $('agent-models-btn');
   if (!btn) return;
-  // 回合结束(needRestart 重启)后清除「待生效」状态
+  // Only the backend can confirm definitions have been applied; idle alone is not sufficient.
   api.on('sess:event', ({ sid, ev } = {}) => {
-    if (!sid || !ev || ev.type !== 'ui_status' || ev.busy) return;
+    if (!sid || !ev || ev.type !== 'ui_agent_config') return;
     const s = state.sessions.get(sid);
-    if (!s || !s.meta.agentModelsPending) return;
-    s.meta.agentModelsPending = false;
-    if (sid === state.activeSid) updateAgentModelsSelector();
+    if (!s) return;
+    applyConfig(s, ev.config);
+    if (sid === state.activeSid) {
+      updateAgentModelsSelector();
+      if (!$('agent-models-menu').classList.contains('hidden')) renderMenu(s);
+    }
   });
   btn.onclick = (event) => {
     event.stopPropagation();

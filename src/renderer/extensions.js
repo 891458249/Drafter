@@ -69,7 +69,7 @@ function card(kind, it) {
   const el = document.createElement('div');
   el.className = 'ext-card' + (it.enabled === false ? ' ext-off' : '');
   const tags = [it.preset ? '<span class="ext-tag ext-tag-preset">模板</span>' : '',
-    kind === 'agent' ? `<span class="ext-tag">${scopeLabel(it)}</span>` : '',
+    kind === 'agent' ? `<span class="ext-tag">${it.preset ? '复制后启用' : scopeLabel(it)}</span>` : '',
     it.enabled === false ? '<span class="ext-tag">已停用</span>' : ''].join('');
   el.innerHTML = `
     <div class="ext-card-head">
@@ -95,7 +95,9 @@ function card(kind, it) {
   };
   const toggleBtn = el.querySelector('[data-act="toggle"]');
   if (toggleBtn) toggleBtn.onclick = async () => {
-    await api.extSave(kind, { ...it, enabled: it.enabled === false });
+    const result = await api.extSave(kind, { ...it, enabled: it.enabled === false });
+    if (!result?.ok) { toast(result?.error || '设置失败'); return; }
+    if (result.pending) toast('已保存，运行中的会话将在回合结束后应用新定义');
     await refreshExt();
     renderGrid();
     emit('ext-changed');
@@ -199,7 +201,8 @@ function loadForm() {
   $('ext-name').value = d.name || '';
   $('ext-desc').value = d.desc || '';
   $('ext-body').value = curTab === 'skill' ? (d.instructions || '') : (d.prompt || '');
-  $('ext-enabled').checked = d.enabled !== false;
+  $('ext-enabled').checked = !(curTab === 'agent' && d.preset) && d.enabled !== false;
+  $('ext-enabled').disabled = !!d.preset;
   $('ext-draft-row').classList.add('hidden');
   if (curTab === 'skill') renderFiles();
   else { renderScope(); renderModelOptions(); renderToolChips(); }
@@ -299,11 +302,13 @@ async function renderModelOptions() {
   sel.innerHTML = '<option value="">跟随会话默认</option>';
   try {
     const { list } = await api.keysList();
+    const enabled = new Set((await api.keysEnabledModels() || []).map((e) => `${e.keyId}|${e.model}`));
     for (const k of list || []) {
       if (k.enabled === false || !Array.isArray(k.modelGroups)) continue;
       for (const g of k.modelGroups) {
         if (g.model_type !== 'chat') continue;
         for (const m of g.models || []) {
+          if (!enabled.has(`${k.id}|${m}`)) continue;
           const o = document.createElement('option');
           o.value = `${k.id}|${m}`;
           o.textContent = `${m}(${k.name || k.id})`;
@@ -360,7 +365,7 @@ async function save() {
   renderList();
   loadForm();
   renderGrid();
-  status.textContent = '已保存';
+  status.textContent = r.pending ? '已保存；运行中的会话将在回合结束后应用新定义' : '已保存';
   status.className = 'modal-status ok';
   emit('ext-changed');
 }
@@ -380,7 +385,7 @@ async function removeCurrent() {
 async function duplicatePreset() {
   if (!draft) return;
   syncFromForm();
-  draft = { ...draft, id: null, preset: false, name: (draft.name || '副本') + ' 副本' };
+  draft = { ...draft, id: null, preset: false, enabled: true, name: (draft.name || '副本') + ' 副本' };
   renderList();
   loadForm();
   $('ext-status').textContent = '已复制为副本,保存后生效';

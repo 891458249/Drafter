@@ -669,8 +669,19 @@ ipcMain.handle('shell:openExternal', (_e, url) => {
 // 存储 settings.extensions;预置模板不可改删(extensions.js 内校验)。
 extensions.seedPresets();
 ipcMain.handle('ext:list', (_e, kind) => extensions.list(kind));
-ipcMain.handle('ext:save', (_e, { kind, item } = {}) => extensions.save(kind, item));
-ipcMain.handle('ext:remove', (_e, { kind, id } = {}) => extensions.remove(kind, id));
+ipcMain.handle('ext:save', async (_e, { kind, item } = {}) => {
+  const result = extensions.save(kind, item);
+  if (result.ok && kind === 'agent') {
+    await sessions.refreshAgents();
+    result.pending = [...sessions.sessions.values()].some((s) => s.needRestart);
+  }
+  return result;
+});
+ipcMain.handle('ext:remove', async (_e, { kind, id } = {}) => {
+  const result = extensions.remove(kind, id);
+  if (result.ok && kind === 'agent') await sessions.refreshAgents();
+  return result;
+});
 // 「✨ AI 起草」:一句话描述 → 按 Skill/Agent 模板扩写(复用 gems:rewrite 链路)
 ipcMain.handle('ext:draft', async (_e, { kind, hint, existing, keyId, model } = {}) => {
   const keyEntry = keys.byId(keyId) || keys.activeKey();
@@ -758,6 +769,11 @@ ipcMain.handle('update:repoVersion', () => updater.checkRepoVersion());
 // ---------------------------------------------------------------------------
 ipcMain.handle('sess:sdkStatus', () => sessions.sdkAvailable());
 ipcMain.handle('sess:list', () => sessions.list());
+ipcMain.handle('sess:agentConfig', (_e, sid) => {
+  const session = sessions.get(sid);
+  if (!session) return null;
+  return session.getAgentConfig();
+});
 ipcMain.handle('sess:create', async (_e, opts) => {
   if (isMediaKind(opts.kind)) {
     // 创作板块会话(kind='media'):不进 Agent SDK,只落 store 元数据;
@@ -947,8 +963,10 @@ ipcMain.handle('sess:setCustomAgents', async (_e, { sid, customAgentIds }) => {
   if (s.meta.kind && s.meta.kind !== 'code' && s.meta.kind !== 'chat') {
     return { ok: false, error: '创作会话不支持子 Agent' };
   }
-  const clean = await s.setCustomAgents(customAgentIds);
-  return { ok: true, customAgentIds: clean, pending: !!s.needRestart };
+  try {
+    const clean = await s.setCustomAgents(customAgentIds);
+    return { ok: true, customAgentIds: clean, pending: !!s.needRestart };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('sess:setEffort', (_e, { sid, effort }) => {
   const s = sessions.get(sid);

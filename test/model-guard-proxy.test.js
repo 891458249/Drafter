@@ -57,7 +57,7 @@ test('未勾选模型在本地 403,上游零请求并触发回调', async () => 
     });
     const json = await res.json();
     assert.strictEqual(res.status, 403);
-    assert.match(json.error.message, /未在当前会话勾选/);
+    assert.match(json.error.message, /未在当前会话启用/);
     assert.deepStrictEqual(blocked, ['claude-sonnet-5']);
     assert.strictEqual(up.requests.length, 0);
   } finally {

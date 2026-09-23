@@ -13,6 +13,8 @@ const ext = require('../src/main/extensions');
 beforeEach(() => {
   const store = require('../src/main/store');
   store.setSetting('extensions', { skills: [], agents: [] });
+  store.setSetting('apiKeys', [{ id: 'key1', enabled: true, models: ['gpt-x'], modelsEnabled: ['gpt-x'],
+    modelGroups: [{ model_type: 'chat', models: ['gpt-x'] }] }]);
 });
 
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -136,7 +138,7 @@ test('buildCustomAgents:global 恒生效;project/session 按 meta 过滤', () =>
   const meta = { id: 'sid-9', projectId: 'proj-1' };
   const { agents } = ext.buildCustomAgents(meta);
   assert.deepStrictEqual(Object.keys(agents).sort(), ['g1', 'p1']);
-  const s2 = mkAgent('s2', { scope: 'session', scopeId: 'other' });
+  const s2 = mkAgent('s2', { scope: 'session' });
   const meta2 = { id: 'sid-9', projectId: 'x', customAgentIds: [s2.id] };
   const r2 = ext.buildCustomAgents(meta2);
   assert.deepStrictEqual(Object.keys(r2.agents).sort(), ['g1', 's2'], 'customAgentIds 挂载生效');
@@ -146,7 +148,7 @@ test('buildCustomAgents:禁用跳过;固定模型进守卫,无模型登记 null'
   mkAgent('fixed', { model: 'key1|gpt-x' });
   mkAgent('free');
   mkAgent('off', { enabled: false });
-  const { agents, allowedAgents } = ext.buildCustomAgents({});
+  const { agents, allowedAgents } = ext.buildCustomAgents({ keyId: 'key1' });
   assert.ok(!agents['off']);
   assert.strictEqual(agents['fixed'].model, 'gpt-x', 'keyId|model 取模型段');
   assert.strictEqual(allowedAgents.get('fixed'), 'gpt-x');
@@ -173,6 +175,16 @@ test('buildCustomAgents:tools 白名单透传', () => {
   assert.deepStrictEqual(agents['t1'].tools, ['Read', 'Grep']);
 });
 
+test('固定模型保存校验；失效模型仍允许停用；绑定其他会话不能通过挂载绕过', () => {
+  assert.equal(ext.save('agent', { name: 'bad', model: 'missing|gpt-x' }).ok, false);
+  const fixed = mkAgent('fixed', { model: 'key1|gpt-x' });
+  const store = require('../src/main/store');
+  store.setSetting('apiKeys', []);
+  assert.equal(ext.save('agent', { ...fixed, enabled: false }).ok, true);
+  const bound = mkAgent('bound', { scope: 'session', scopeId: 'owner' });
+  assert.equal(ext.scopeMatches(bound, { id: 'other', customAgentIds: [bound.id] }), false);
+});
+
 // ---------------------------------------------------------------------------
 // 导入/导出
 // ---------------------------------------------------------------------------
@@ -188,7 +200,7 @@ test('serializeMd→parseMd:skill 往返(含参考文件)', () => {
 });
 
 test('serializeMd→parseMd:agent 往返;导入不绑定本机 model', () => {
-  const a = mkAgent('code-reviewer', { desc: '审查', prompt: '你是审查员', tools: ['Read', 'Grep'], model: 'k1|gpt-x' });
+  const a = mkAgent('code-reviewer', { desc: '审查', prompt: '你是审查员', tools: ['Read', 'Grep'], model: 'key1|gpt-x' });
   const md = ext.serializeMd(a, 'agent');
   assert.ok(md.includes('tools: Read, Grep') && md.includes('model: gpt-x'));
   const back = ext.parseMd(md, 'agent');

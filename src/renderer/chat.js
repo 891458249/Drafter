@@ -5,6 +5,7 @@ import { highlightCode } from './hljs.js';
 import { enhanceCodeHtml } from './codeblock.js';
 import { parseFilePath, PATH_IN_TEXT_RE } from './filelink.js';
 import { updateAgentModelsSelector } from './agents-ui.js';
+import { updateTaskState } from './task-state.mjs';
 import { updateSkillSelector } from './extensions.js'; // 技能选择器跟随会话回显(v0.15.16)
 
 const messagesEl = () => $('messages');
@@ -24,6 +25,8 @@ export function ensureSession(sid, meta) {
         currentAssistant: null,   // { el, bubble, buf, thinkBuf }
         toolCards: new Map(),     // tool_use_id -> { el, body, name, input }
         taskGroups: new Map(),    // parent_tool_use_id -> container el
+        taskStates: new Map(),
+        agentModels: new Map(),
         replayed: false,
         busy: false, running: false,
         cumCost: 0, lastUsage: null,
@@ -232,9 +235,31 @@ function containerFor(s, parentId) {
     if (card && card.el.parentElement) card.el.insertAdjacentElement('afterend', group);
     else s.ui.logEl.appendChild(group);
     s.ui.taskGroups.set(parentId, group);
-    emit('task-started', { sid: s.meta.id, parentId, desc });
+    updateTask(s, { parentId, desc, status: 'running', source: 'start' });
   }
   return group;
+}
+
+function updateTask(s, event) {
+  s.ui.taskStates ||= new Map();
+  const task = updateTaskState(s.ui.taskStates, { ...event, sid: s.meta.id });
+  const card = s.ui.toolCards.get(task.parentId);
+  const status = card?.el.querySelector('.act-status');
+  if (status) {
+    status.textContent = { running: '运行中…', completed: '✓', failed: '✕', stopped: '已停止' }[task.status];
+    status.className = 'tool-status act-status ' + (task.status === 'failed' ? 'err' : task.status === 'running' ? '' : 'ok');
+  }
+  if (task.model && task.parentId) rememberMessageModel(s, task.parentId, task.model);
+  emit('task-status', task);
+  return task;
+}
+
+function rememberMessageModel(s, parentId, model) {
+  if (!parentId || !model || model.startsWith('<')) return;
+  s.ui.agentModels ||= new Map();
+  s.ui.agentModels.set(parentId, model);
+  const group = s.ui.taskGroups.get(parentId);
+  if (group) for (const label of group.querySelectorAll('.msg-role')) label.textContent = model;
 }
 
 function metaLine(s, text, cls = '') {
@@ -253,7 +278,8 @@ function ensureAssistant(s, parentId) {
   finalizeAssistant(s);
   const msg = document.createElement('div');
   msg.className = 'msg assistant';
-  msg.innerHTML = `<div class="msg-role">${escapeHtml(sessionModelName(s))}</div><div class="bubble"></div>`;
+  const role = parentId ? (s.ui.agentModels?.get(parentId) || '子 Agent') : sessionModelName(s);
+  msg.innerHTML = `<div class="msg-role">${escapeHtml(role)}</div><div class="bubble"></div>`;
   containerFor(s, parentId).appendChild(msg);
   s.ui.currentAssistant = {
     el: msg, bubble: msg.querySelector('.bubble'),
@@ -717,7 +743,7 @@ function renderToolBody(bodyEl, name, input) {
 }
 
 function addToolCard(s, parentId, id, name, input) {
-  if (name === 'Task') {
+  if (name === 'Task' || name === 'Agent') {
     // 子任务保持原有的分组框
     const a = ensureAssistant(s, parentId);
     const card = document.createElement('div');
@@ -735,7 +761,7 @@ function addToolCard(s, parentId, id, name, input) {
     card.querySelector('.tool-head').onclick = () => body.classList.toggle('collapsed');
     a.bubble.appendChild(card);
     s.ui.toolCards.set(id, { el: card, body, name, input, activity: null });
-    emit('task-started', { sid: s.meta.id, parentId: id, desc: input && input.description });
+    updateTask(s, { parentId: id, desc: input && input.description, status: 'running', source: 'start' });
     scrollBottom(s.meta.id);
     return;
   }
@@ -799,8 +825,9 @@ function completeToolCard(s, id, content, isError) {
     card.activity.pending = Math.max(0, card.activity.pending - 1);
     updateActivitySummary(card.activity);
   }
-  if (card.name === 'Task') {
-    emit('task-done', { sid: s.meta.id, parentId: id, isError });
+  if (card.name === 'Task' || card.name === 'Agent') {
+    const background = /async_launched|running in the background|launched successfully/i.test(text || '');
+    updateTask(s, { parentId: id, status: isError ? 'failed' : background ? 'running' : 'completed', source: 'result' });
   }
   if (card.name === 'Edit' || card.name === 'Write') emit('files-changed', s.meta.cwd);
 }
@@ -1059,6 +1086,7 @@ export function renderEvent(sid, ev, { replay }) {
   if (t === 'aigc_task') { upsertTaskCard(sid, ev, replay); return; } // 新媒体会话:任务卡片
   if (t === 'ui_error') { metaLine(s, '错误:' + ev.message, 'error-line'); return; }
   if (t === 'ui_aux') { metaLine(s, ev.message); return; } // 辅助模型分析附件的进度提示(v0.9.1)
+  if (t === 'ui_task') { updateTask(s, { ...ev, source: 'sdk' }); return; }
   if (t === 'ui_title') { // 自动命名(v0.9.1):更新本地 meta 并刷新侧栏
     s.meta.title = ev.title;
     emit('session-status', { sid });
@@ -1158,6 +1186,7 @@ export function renderEvent(sid, ev, { replay }) {
 }
 
 function handleStreamEvent(s, parentId, ev) {
+  if (ev.type === 'message_start') rememberMessageModel(s, parentId, ev.message?.model);
   if (s.ui.curAction) { // 首个流事件到达:结束「等待响应」阶段(TTFT 提示,v0.10.2)
     s.ui.curAction = null;
     if (s.meta.id === state.activeSid) updateTurnStatus();
@@ -1207,6 +1236,7 @@ function handleStreamEvent(s, parentId, ev) {
 }
 
 function handleAssistantMessage(s, parentId, message, replay) {
+  rememberMessageModel(s, parentId, message.model);
   // token/上下文兜底计数(v0.9.13):部分网关(如 Kimi)流式 message_delta 不带 usage,
   // 回合状态会一直显示 0 tokens——用 assistant 完整消息的 message.usage 补计;
   // 流式已计过的(msgDeltaCounted)不重复计。lastUsage 同步刷新,上下文 % 随回合推进。

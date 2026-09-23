@@ -30,6 +30,22 @@ beforeEach(() => {
 
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
+test('迁移包含会话子目录，主记录已存在时也补齐子 Agent 日志且不覆盖新文件', () => {
+  const oldCwd = 'D:\\old-agents';
+  const newCwd = 'D:\\new-agents';
+  seedTranscript(oldCwd); seedTranscript(newCwd, 'keep-main');
+  const subdir = (cwd) => path.join(PROJECTS, encodeCwdForProjects(cwd), SID, 'subagents');
+  fs.mkdirSync(subdir(oldCwd), { recursive: true });
+  fs.mkdirSync(subdir(newCwd), { recursive: true });
+  fs.writeFileSync(path.join(subdir(oldCwd), 'agent-a.jsonl'), 'old-a');
+  fs.writeFileSync(path.join(subdir(oldCwd), 'agent-b.jsonl'), 'old-b');
+  fs.writeFileSync(path.join(subdir(newCwd), 'agent-b.jsonl'), 'new-b');
+  assert.equal(migrateTranscript(SID, oldCwd, newCwd), true);
+  assert.equal(fs.readFileSync(path.join(subdir(newCwd), 'agent-a.jsonl'), 'utf8'), 'old-a');
+  assert.equal(fs.readFileSync(path.join(subdir(newCwd), 'agent-b.jsonl'), 'utf8'), 'new-b');
+  assert.equal(fs.readFileSync(transcriptPath(SID, newCwd), 'utf8'), 'keep-main');
+});
+
 test('encodeCwdForProjects:非字母数字一律替换为 -(与 claude.exe 的 A0 一致)', () => {
   assert.strictEqual(encodeCwdForProjects('C:\\Users\\dingyongzhen'), 'C--Users-dingyongzhen');
   assert.strictEqual(encodeCwdForProjects('D:\\ClaudeUI'), 'D--ClaudeUI');

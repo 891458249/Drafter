@@ -10,6 +10,7 @@
 // 本模块不依赖 electron(便于单测),store 在 require 时注入。
 const crypto = require('crypto');
 const store = require('./store');
+const keys = require('./keys');
 
 const MAX_INSTRUCTIONS = 30000; // 指令/提示词上限(对齐 gems)
 const MAX_APPEND = 8000;        // 索引/pinned 注入总量截断
@@ -174,6 +175,16 @@ function save(kind, item) {
   if (idx >= 0 && arr[idx].preset) return { ok: false, error: '预置模板不可直接修改,请复制为副本' };
   const clean = kind === 'skill' ? cleanSkill(item, idx >= 0 ? arr[idx] : null)
     : cleanAgent(item, idx >= 0 ? arr[idx] : null);
+  if (kind === 'agent' && clean.enabled && clean.model) {
+    const binding = splitAgentModel(clean.model);
+    if (!binding || !keys.enabledModels().some((e) => e.keyId === binding.keyId && e.model === binding.model)
+      || keys.modelType(binding.keyId, binding.model) !== 'chat') {
+      return { ok: false, error: '请选择已启用 Key 下可用的对话模型，或选择跟随会话默认' };
+    }
+    const bound = clean.scope === 'session' && clean.scopeId
+      ? store.listSessions().find((s) => s.id === clean.scopeId) : null;
+    if (bound && binding.keyId !== bound.keyId) return { ok: false, error: '子 Agent 必须使用绑定会话的同一个 Key' };
+  }
   if (idx >= 0) arr[idx] = clean; else arr.push(clean);
   write(data);
   return { ok: true, item: clean };
@@ -278,13 +289,34 @@ function useSkill(name, skillIds, pinnedIds) {
 // 自定义子 Agent:按作用域过滤后合并进 SDK options.agents
 // ---------------------------------------------------------------------------
 function scopeMatches(agent, meta) {
+  // Templates are examples, never live agents (also covers previously seeded global presets).
+  if (agent.preset) return false;
   if (!meta) return agent.scope === 'global';
   if (agent.scope === 'project') return !!agent.scopeId && agent.scopeId === meta.projectId;
   if (agent.scope === 'session') {
-    return agent.scopeId === meta.id
-      || (Array.isArray(meta.customAgentIds) && meta.customAgentIds.includes(agent.id));
+    return agent.scopeId ? agent.scopeId === meta.id
+      : (Array.isArray(meta.customAgentIds) && meta.customAgentIds.includes(agent.id));
   }
   return true; // global
+}
+
+function splitAgentModel(value) {
+  if (!value) return null;
+  const i = String(value).indexOf('|');
+  if (i <= 0 || i === String(value).length - 1) return null;
+  return { keyId: String(value).slice(0, i), model: String(value).slice(i + 1) };
+}
+
+function agentModelError(agent, meta) {
+  if (!agent.model) return null;
+  const binding = splitAgentModel(agent.model);
+  if (!binding) return '模型配置无效，请在扩展中重新选择';
+  if (binding.keyId !== meta.keyId) return '该 Agent 使用其他 Key，不能在当前会话调用';
+  if (keys.modelType(binding.keyId, binding.model) !== 'chat'
+    || !keys.enabledModels().some((e) => e.keyId === binding.keyId && e.model === binding.model)) {
+    return '该 Agent 的模型或 Key 已停用';
+  }
+  return null;
 }
 
 // 返回 { agents: {定义名: AgentDefinition}, allowedAgents: Map(名→固定模型|null) };
@@ -294,7 +326,7 @@ function buildCustomAgents(meta, used) {
   const allowedAgents = new Map();
   const usedNames = used || new Set();
   for (const a of list('agent')) {
-    if (a.enabled === false || !scopeMatches(a, meta)) continue;
+    if (a.enabled === false || !scopeMatches(a, meta) || agentModelError(a, meta)) continue;
     let name = slugify(a.name, 'custom');
     if (usedNames.has(name)) {
       let i = 2;
@@ -302,7 +334,7 @@ function buildCustomAgents(meta, used) {
       name = `${name}-${i}`;
     }
     usedNames.add(name);
-    const model = a.model ? String(a.model).split('|')[1] || null : null; // 'keyId|model' → model
+    const model = splitAgentModel(a.model)?.model || null;
     const def = {
       description: a.desc || `自定义子 Agent「${a.name}」`,
       prompt: a.prompt,
@@ -394,7 +426,7 @@ function buildDraftPrompt(kind, hint, existing) {
 module.exports = {
   list, byId, save, remove, seedPresets,
   mountedSkills, buildSkillsIndex, composePinnedSkills, useSkill,
-  buildCustomAgents, scopeMatches, slugify,
+  buildCustomAgents, scopeMatches, slugify, agentModelError, splitAgentModel,
   serializeMd, parseMd, buildDraftPrompt,
   MAX_FILES, MAX_INSTRUCTIONS,
 };
