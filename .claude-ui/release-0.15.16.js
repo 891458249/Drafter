@@ -94,6 +94,12 @@ async function main() {
   });
   if (!/^version: 0\.15\.16\s*$/m.test(yml) || !yml.includes('url: ' + assets[0].remote)) throw new Error('Update metadata mismatch');
   if (crypto.createHash('sha512').update(assets[0].data).digest('base64') !== /sha512:\s*(\S+)/.exec(yml)?.[1]) throw new Error('Installer SHA-512 mismatch');
+  // 签名体检(v0.15.17):证书到位前不阻断发布,但每次发版都必须看见签没签。
+  // 拿到证书后设 CSC_LINK / CSC_KEY_PASSWORD 重建即生效;要强制签名可用
+  // DRAFTER_REQUIRE_SIGNING=1 跑 build/verify-package.js。详见 docs/code-signing.md。
+  try {
+    console.log(require('../build/signature-status').signatureLine(path.join(DIST, assets[0].local)));
+  } catch (error) { console.log('signed: unknown (' + error.message + ')'); }
   const credential = execFileSync('git', ['credential', 'fill'], { cwd: ROOT, input: 'protocol=https\nhost=github.com\n\n', encoding: 'utf8', windowsHide: true });
   token = credential.split(/\r?\n/).find((line) => line.startsWith('password='))?.slice(9);
   if (!token) throw new Error('GitHub credential unavailable');

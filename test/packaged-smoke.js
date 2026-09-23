@@ -79,7 +79,7 @@ async function connect(url) {
   await evaluate(`window.api.termClose(${JSON.stringify(term.id)})`);
   // Actual packaged bridge + packaged frontend, loaded by the app's own section navigation.
   assert.equal(await evaluate(`(() => { const b = document.querySelector('#section-switch button[data-sec="harness"]'); if (!b) return false; b.click(); return true; })()`), true);
-  const harness = await until(async () => (await pages()).find((p) => p.url.includes('index.electron.html')), 45000);
+  const harness = await until(async () => (await pages()).find((p) => p.url.includes('harness-web/index.html')), 45000);
   const harnessEvaluate = await connect(harness.webSocketDebuggerUrl);
   await until(() => harnessEvaluate('!!window.__DSH_TRANSPORT__ && !!window.__DSH_BOOT__ && document.body.innerText.length > 30'), 45000);
   assert.equal(await evaluate('document.querySelector("#harness-status").classList.contains("hidden")'), true);

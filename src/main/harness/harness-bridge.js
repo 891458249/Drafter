@@ -26,16 +26,22 @@ function keysBridgePermissionConfig() {
   return permissionBridge.permissionPresetsConfig()
 }
 
-// asar 打包后,vendor/deepseek-harness 的 lib/(ESM 模块)被 asarUnpack 到
-// app.asar.unpacked。__dirname 在打包态指向 app.asar 内,ESM import 读不到 asar
-// 虚拟文件系统,必须把 HARNESS_ROOT 解析到 unpacked 目录。
-// 开发态:__dirname = <repo>/src/main/harness → <repo>/vendor/deepseek-harness
-// 打包态:__dirname = <resources>/app.asar/src/main/harness → <resources>/app.asar.unpacked/vendor/deepseek-harness
+// harness 资源根。开发态:__dirname = <repo>/src/main/harness → <repo>/vendor/deepseek-harness
+// 打包态:__dirname = <resources>/app.asar/src/main/harness → <resources>/app.asar/vendor/deepseek-harness
+//
+// 打包态不再改写到 app.asar.unpacked(v0.15.17)。原注释断言「ESM import 读不到 asar
+// 虚拟文件系统」,经实测证伪 —— 判定性实验(Electron 38.8.6 / Node 22.22.0)结果:
+//   fs.readFileSync(asar 内文件)   OK
+//   fs.readdirSync(asar 内目录)    OK(harness 的插件发现靠它)
+//   import() asar 内 ESM           OK(相对路径 + 经 asar 内 node_modules 的裸包名都通)
+//   require() asar 内 CJS          OK
+//   写 asar                        ENOENT(只读)
+// 所以整套 harness 源码走 asar 即可;只有原生模块与可执行文件必须解包
+// (dlopen / spawn 走不到 asar 虚拟文件系统),见 package.json build.asarUnpack。
+// Electron 的 asar 集成会把 asar 内 .node 的 dlopen 自动重定向到 app.asar.unpacked,
+// 无需在此手工改写路径。
 function resolveHarnessRoot() {
-  const devRoot = path.join(__dirname, '..', '..', '..', 'vendor', 'deepseek-harness')
-  if (!app.isPackaged) return devRoot
-  // __dirname 在 asar 里(…/resources/app.asar/src/main/harness);换成 app.asar.unpacked
-  return path.join(__dirname, '..', '..', '..', 'vendor', 'deepseek-harness').replace('app.asar', 'app.asar.unpacked')
+  return path.join(__dirname, '..', '..', '..', 'vendor', 'deepseek-harness')
 }
 const HARNESS_ROOT = resolveHarnessRoot()
 
@@ -738,26 +744,34 @@ async function handleHarnessLoadBundle(_event, { url }) {
 // —— 渲染 file:// 可加载的 index.html ————————————————————————————————————————
 // harness dist 的 index.html 用绝对路径(/assets/...)且不含 __DSH_BOOT__。
 // 这里读原始 index → 经 webServer.renderIndex 注入 __DSH_BOOT__ 等结构化行 →
-// 把所有 "/assets/..." 与 "/plugins/..." 重写为相对当前文件的 file 路径 → 写到
-// userData/harness-web/index.html 供 loadFile。返回该文件路径。
+// 把这些绝对路径改写为指向 harness dist 的 file:// 绝对 URL(资源在 asar 内,
+// 相对路径会解析到 index.html 所在目录,对不上)→ 写到 userData/harness-web/index.html
+// 供 loadFile。返回该文件路径。
+//
+// 为什么写到 userData 而不是 dist 旁边(v0.15.17):打包态 harness 资源在 app.asar 内,
+// asar 只读(实测写 asar 报 ENOENT);而 per-machine 安装落在 C:\Program Files,
+// 普通用户对安装目录也无写权限。原实现把生成物写进安装目录,每次启动都往
+// Program Files 写文件,既脆弱又必然失败。
 async function renderHarnessIndex() {
   await bootHarness()
   const fs = require('node:fs')
-  const distIndex = path.join(HARNESS_ROOT, 'apps/web/dist/index.html')
-  const raw = fs.readFileSync(distIndex, 'utf8')
+  const distDir = path.join(HARNESS_ROOT, 'apps/web/dist')
+  const raw = fs.readFileSync(path.join(distDir, 'index.html'), 'utf8')
   const webServer = harnessCtx && harnessCtx.get('webServer')
   if (!webServer || typeof webServer.renderIndex !== 'function') {
     throw new Error('webServer stub 未提供 renderIndex')
   }
   let html = webServer.renderIndex(raw)
-  // 绝对路径 → 相对 file 路径。index.electron.html 与 assets/ 同目录,/assets/x → ./assets/x。
+  // 绝对路径 → 指向 dist 的 file:// 绝对 URL。distDir 在打包态位于 app.asar 内,
+  // Electron 的 file:// 协议直接支持 asar(渲染进程的 ipc-client-entry.mjs 一直这么加载)。
   // /plugins/<id>/client.js 的两个 parser-blocking 预加载(modules/runtime)改写为 file:// 绝对
   // 路径(经 clientModules.clientPath 解析);其余 /plugins/ 引用由 preload 的 loadBundle 接管。
-  html = html.replaceAll('href="/', 'href="./').replaceAll('src="/', 'src="./')
+  const distUrl = pathToFileURL(distDir).href
+  html = html.replaceAll('href="/', `href="${distUrl}/`).replaceAll('src="/', `src="${distUrl}/`)
   html = html.replace(/<link rel="manifest"[^>]*>/, '')
   const clientModules = harnessCtx && harnessCtx.get('clientModules')
   if (clientModules && typeof clientModules.clientPath === 'function') {
-    html = html.replace(/src="\.\/plugins\/(.+?)\/client\.js(\?rev=[^"]*)?"/g, (match, id, rev) => {
+    html = html.replace(/src="[^"]*plugins\/(.+?)\/client\.js(\?rev=[^"]*)?"/g, (match, id, rev) => {
       const abs = clientModules.clientPath(decodeURIComponent(id))
       if (!abs) return match
       return `src="${pathToFileURL(abs).href}"`
@@ -770,7 +784,9 @@ async function renderHarnessIndex() {
   const bundleFileUrl = pathToFileURL(path.join(__dirname, '..', '..', 'harness', 'dist', 'ipc-client-entry.mjs')).href
   const transportScript = `<script type="module">import { installDshTransport } from ${JSON.stringify(bundleFileUrl)}; installDshTransport();</script>`
   html = html.replace(/<head>/i, `<head>${transportScript}`)
-  const outPath = path.join(HARNESS_ROOT, 'apps/web/dist/index.electron.html')
+  const outDir = path.join(app.getPath('userData'), 'harness-web')
+  fs.mkdirSync(outDir, { recursive: true })
+  const outPath = path.join(outDir, 'index.html')
   fs.writeFileSync(outPath, html, 'utf8')
   return outPath
 }

@@ -3,13 +3,14 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-let modelCtxMax, lookupCtxWindow, effectiveCtxWindow;
+let modelCtxMax, lookupCtxWindow, effectiveCtxWindow, ctxRingColor;
 test('setup', async () => {
   const m = await import('../src/renderer/ctxwin.js?v=' + Date.now());
   const mod = m.modelCtxMax ? m : m.default; // CJS 双环境导出,import 经 lexer 取命名导出
   modelCtxMax = mod.modelCtxMax;
   lookupCtxWindow = mod.lookupCtxWindow;
   effectiveCtxWindow = mod.effectiveCtxWindow;
+  ctxRingColor = mod.ctxRingColor;
 });
 
 const CASES = [
@@ -59,4 +60,17 @@ test('effectiveCtxWindow:表外模型回退实报,实报缺失回退 200k', () =
   assert.strictEqual(effectiveCtxWindow('some-future-model', 512000), 512000);
   assert.strictEqual(effectiveCtxWindow('some-future-model', null), 200000);
   assert.strictEqual(lookupCtxWindow('some-future-model'), null, '未命中必须返回 null 而非默认值');
+});
+
+// v0.15.17:上下文占用圈三档配色(<30 绿 / 30~80 蓝 / >80 红)。
+test('ctxRingColor:三档阈值', () => {
+  assert.strictEqual(ctxRingColor(0), 'var(--green)');
+  assert.strictEqual(ctxRingColor(29), 'var(--green)');
+  assert.strictEqual(ctxRingColor(30), 'var(--blue, #5b8def)', '30 归蓝档');
+  assert.strictEqual(ctxRingColor(55), 'var(--blue, #5b8def)');
+  assert.strictEqual(ctxRingColor(80), 'var(--blue, #5b8def)', '80 仍归蓝档');
+  assert.strictEqual(ctxRingColor(81), 'var(--red)');
+  assert.strictEqual(ctxRingColor(100), 'var(--red)');
+  assert.strictEqual(ctxRingColor(undefined), 'var(--green)', '非数字按 0 处理');
+  assert.strictEqual(ctxRingColor(NaN), 'var(--green)');
 });

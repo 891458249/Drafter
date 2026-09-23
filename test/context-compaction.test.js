@@ -14,8 +14,10 @@ test('compaction enabled with conservative budget, preserves earlier triggers an
   assert.deepEqual(compactionSettings('deepseek-chat'), { autoCompactEnabled: true, autoCompactWindow: 131072 });
   assert.equal(compactionSettings('gpt-6-astra').autoCompactWindow, 200000);
   assert.equal(compactionSettings('unknown').autoCompactEnabled, true);
-  assert.deepEqual(compactionEnv({ SECRET: 'preserved', CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '50' }), { SECRET: 'preserved', CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '50' });
-  assert.equal(compactionEnv({ CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '100' }).CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, '80');
+  // v0.15.17:自动压缩只在 100% 触发,环境里其它变量原样保留;任何更低覆盖值都被顶成 100
+  assert.deepEqual(compactionEnv({ SECRET: 'preserved' }), { SECRET: 'preserved', CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '100' });
+  assert.equal(compactionEnv({ CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '50' }).CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, '100');
+  assert.equal(compactionEnv({ CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '100' }).CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, '100');
 });
 test('SDK compact status and boundary are forwarded without finishing the turn', () => {
   const events = [];

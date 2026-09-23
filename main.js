@@ -991,9 +991,50 @@ ipcMain.handle('sess:setActive', (_e, sid) => { sessions.setActive(sid); return 
 
 // ---------------------------------------------------------------------------
 // 拆分子任务(v0.15.9):当前会话 AI 把需求拆成子任务,确认后建多个并行 code 会话
+// v0.15.18:拆分前先做一轮判断——能并行的才建会话,需等待的排入目标会话队列
 // ---------------------------------------------------------------------------
 
-// 第一步:调 LLM 拆分需求,返回结构化子任务列表(不改当前会话历史)。
+// 某会话「最近在做的事」:取事件日志里最后一条用户输入,截断后进判断提示词。
+// 读不到(旧会话无 echo / 文件缺失)就返回空串,不影响拆分。
+function lastUserDoing(sid) {
+  if (!sid) return '';
+  try {
+    const evs = store.readSessionEvents(sid, 200);
+    for (let i = evs.length - 1; i >= 0; i--) {
+      const e = evs[i];
+      if (e && e.type === 'ui_user_input') {
+        const text = firstText(e.content).replace(/\s+/g, ' ').trim();
+        if (text) return text.slice(0, 120);
+      }
+    }
+  } catch {}
+  return '';
+}
+
+// 判断依据快照:当前会话 + 同项目组其他并行会话(带 busy/最近在做)
+function splitSessionContext(sid) {
+  const all = store.listSessions();
+  const busy = new Map(sessions.list().map((m) => [m.id, !!m.busy]));
+  const meta = all.find((m) => m.id === sid) || {};
+  const others = splitSubtasks.pickOtherSessions({
+    currentSid: sid,
+    projectId: meta.projectId || null,
+    cwd: meta.cwd || null,
+    all,
+    busyOf: (id) => busy.get(id) || false,
+    doingOf: lastUserDoing,
+  });
+  return {
+    others,
+    current: meta.id ? {
+      title: meta.title || '(未命名会话)',
+      busy: !!busy.get(sid),
+      doing: lastUserDoing(sid),
+    } : null,
+  };
+}
+
+// 第一步:调 LLM 判断+拆分需求,返回结构化子任务列表(不改当前会话历史)。
 // keyId/model 沿用当前会话;缺省回退到活跃 Key 的首个对话模型。
 ipcMain.handle('sess:splitSubtasks', async (_e, { sid, requirement } = {}) => {
   const s = sid ? sessions.get(sid) : null;
@@ -1005,32 +1046,49 @@ ipcMain.handle('sess:splitSubtasks', async (_e, { sid, requirement } = {}) => {
   if (!model) return { ok: false, error: '未找到可用的对话模型' };
   const req = String(requirement || '').trim();
   if (!req) return { ok: false, error: '需求为空,请先在输入框填写要拆解的需求' };
+  const ctx = splitSessionContext(sid);
   const r = await llmtext.complete(keyEntry, {
-    model, prompt: splitSubtasks.buildSplitPrompt(req),
+    model, prompt: splitSubtasks.buildSplitPrompt(req, { current: ctx.current, sessions: ctx.others }),
   });
   if (!r.ok) return { ok: false, error: r.error || '拆分请求失败' };
   const parsed = splitSubtasks.parseSubtasks(r.text);
   if (!parsed.ok) return { ok: false, error: parsed.error };
-  return { ok: true, tasks: parsed.tasks };
+  // sessions 是判断时用的快照:渲染端据此把 "S1" 换成本地会话 id,"S1" 的键位不会漂移
+  return {
+    ok: true, tasks: parsed.tasks,
+    sessions: ctx.others.map((o) => ({ key: o.key, id: o.id, title: o.title, busy: o.busy })),
+  };
 });
 
-// 第二步:按确认的子任务列表批量建 code 会话(继承当前会话 cwd/项目/模型/Key/权限/Gem),
-// 并行发送各自子任务。返回新建的会话 meta 列表。
+// 第二步:按确认的子任务列表落地。
+// 并行项 → 各建一个 code 会话;等待项 → 不建会话,排入目标会话的消息队列
+// (目标当前回合结束后自动接着执行;目标空闲则立即执行,因为「要等的事」本就不存在)。
+// 投递严格按数组顺序,同一目标会话内队列保序,等待项的先后由其被引用的次序决定。
 ipcMain.handle('sess:spawnSubtasks', async (_e, { sid, tasks } = {}) => {
   if (!Array.isArray(tasks) || !tasks.length) return { ok: false, error: '子任务列表为空' };
   const base = sid ? sessions.get(sid) : null;
   const bm = base ? base.meta : {};
   const keyId = bm.keyId || (keys.activeKey() || {}).id || null;
-  const created = [];
-  for (const t of tasks.slice(0, 12)) {
-    const title = String(t.title || '子任务').slice(0, 60);
-    const detail = String(t.detail || t.title || '').trim();
-    if (!detail) continue;
-    // 继承项目归属:有 projectId 则进同组;否则按 cwd 解析/新建组
+  const list = tasks.slice(0, 12).map((t) => {
+    const src = t && typeof t === 'object' ? t : {};
+    const title = String(src.title || '子任务').slice(0, 60);
+    return {
+      title,
+      detail: String(src.detail || src.title || '').trim(),
+      mode: src.mode,
+      waitFor: src.waitFor,
+      via: src.via,
+    };
+  }).filter((t) => t.detail);
+  if (!list.length) return { ok: false, error: '未能创建任何子会话' };
+  const plan = splitSubtasks.resolveWaitTargets(list);
+
+  // 新建并行会话(继承当前会话的项目/cwd/模型/Key/权限/Gem)
+  const createSession = async (title) => {
     let projectId = bm.projectId || null;
     const cwd = bm.cwd || os.homedir();
     if (!projectId && cwd) projectId = projects.ensureForDir(cwd).id;
-    const meta = await sessions.create({
+    return sessions.create({
       cwd, projectId, keyId,
       model: bm.model || null,
       permissionMode: bm.permissionMode || 'default',
@@ -1040,12 +1098,70 @@ ipcMain.handle('sess:spawnSubtasks', async (_e, { sid, tasks } = {}) => {
       title: '⧉ ' + title,
       parentId: bm.id || null,
     });
+  };
+
+  const created = [];
+  const newSid = list.map(() => null);
+  // 第一轮:并行项先建齐会话——等待项可能正指向其中某个
+  for (let i = 0; i < list.length; i++) {
+    if (plan[i].action !== 'spawn') continue;
+    const meta = await createSession(list[i].title);
+    newSid[i] = meta.id;
     created.push(meta);
-    // 并行派发:send 是同步入队(返回 uuid),SDK 回合异步推进,各会话互不等待
-    sessions.get(meta.id).send(detail);
   }
-  if (!created.length) return { ok: false, error: '未能创建任何子会话' };
-  return { ok: true, sessions: created };
+
+  // 目标会话是否可用:必须存在、未归档、且是能跑 Agent 任务的会话
+  const targetOk = (id) => {
+    if (!id || id === sid) return !!id;
+    const m = store.listSessions().find((x) => x.id === id);
+    return !!(m && !m.archived && !splitSubtasks.MEDIA_KINDS.includes(m.kind));
+  };
+
+  // 第二轮:按数组顺序投递
+  const queued = [];
+  for (let i = 0; i < list.length; i++) {
+    const t = list[i];
+    const p = plan[i];
+    if (p.action === 'spawn') {
+      sessions.get(newSid[i]).send(t.detail);
+      continue;
+    }
+    const via = p.via || { kind: 'current' };
+    let target = null;
+    if (via.kind === 'subtask') target = newSid[via.index] || null;
+    else if (via.kind === 'session') target = via.sid || null;
+    else target = sid || null;
+    if (!targetOk(target)) {
+      // 目标不可用(会话被删/归档/引用解析不出来)→ 退回新建会话,不把任务丢掉
+      const meta = await createSession(t.title + '(原等待目标不可用)');
+      created.push(meta);
+      sessions.get(meta.id).send(t.detail);
+      queued.push({ index: i, title: t.title, sid: meta.id, fallback: true });
+      continue;
+    }
+    const ts = sessions.get(target);
+    if (!ts) {
+      const meta = await createSession(t.title);
+      created.push(meta);
+      sessions.get(meta.id).send(t.detail);
+      queued.push({ index: i, title: t.title, sid: meta.id, fallback: true });
+      continue;
+    }
+    // emitEcho:目标会话界面不会自己加气泡(这条是主进程代投的),补一条 live 回显
+    ts.send(t.detail, undefined, { emitEcho: true });
+    const ev = {
+      type: 'ui_aux',
+      message: ts.busy
+        ? `⧉ 已排入子任务「${t.title}」:需等本会话当前回合完成,结束后自动接着执行。`
+        : `⧉ 已排入子任务「${t.title}」:等待目标已空闲,立即开始执行。`,
+    };
+    store.appendSessionEvent(target, ev);
+    sessions.send('sess:event', { sid: target, ev });
+    queued.push({ index: i, title: t.title, sid: target, fallback: false });
+  }
+
+  if (!created.length && !queued.length) return { ok: false, error: '未能创建任何子会话' };
+  return { ok: true, sessions: created, queued };
 });
 
 // ---------------------------------------------------------------------------

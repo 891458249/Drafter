@@ -13,6 +13,8 @@
   --green: #7cae7a;
   --red: #d67d6a;
   --yellow: #d6b46a;
+  /* v0.15.17:上下文占用圈 30~80% 档(缺口蓝);主题系统(themes.js)可整体覆盖 */
+  --blue: #5b8def;
   /* v0.9.31:此前被 msg-nav/.hot 等引用但从未定义,补齐;主题系统(themes.js)可整体覆盖 */
   --accent-bg: rgba(217,119,87,.15);
   --bg-hover: rgba(255,255,255,.07);
@@ -576,6 +578,14 @@ html, body {
 .split-detail { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; line-height: 1.5; resize: vertical; min-height: 44px; font-family: var(--font); }
 .split-del { flex: none; }
 .split-title:focus, .split-detail:focus { outline: none; border-color: var(--accent); }
+/* v0.15.18:每条子任务选「并行 / 等待」,等待项还要选等谁先完成 */
+.split-row-foot { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.split-mode { flex: none; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+.split-wait { flex: 1; min-width: 0; background: var(--bg); color: var(--text-dim); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+.split-mode:focus, .split-wait:focus { outline: none; border-color: var(--accent); }
+.split-row.split-waiting { border-color: var(--border); border-left: 3px solid var(--yellow, #d0a44c); }
+.split-result-line { font-size: 12.5px; line-height: 1.6; padding: 6px 9px; border-radius: 6px; background: var(--bg-input); }
+.split-result-line.wait { color: var(--text-dim); }
 
 .mcp-list { border: 1px solid var(--border); border-radius: 8px; max-height: 200px; overflow-y: auto; }
 .mcp-row { display: flex; gap: 8px; align-items: center; padding: 7px 10px; font-size: 12.5px; border-bottom: 1px solid var(--border); }

@@ -72,11 +72,22 @@ function effectiveCtxWindow(model, reported) {
   return lookupCtxWindow(model) || reported || 200000;
 }
 
+// 上下文占用圈配色(v0.15.17):<30% 绿、30~80% 蓝、>80% 红。
+// 只表达「上下文占了多少」,与自动压缩阈值(100% 才触发)无关,别混为一谈。
+function ctxRingColor(pct) {
+  var n = Number(pct);
+  if (!isFinite(n)) n = 0;
+  if (n > 80) return 'var(--red)';
+  if (n >= 30) return 'var(--blue, #5b8def)';
+  return 'var(--green)';
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports.MODEL_CTX_TABLE = MODEL_CTX_TABLE;
   module.exports.lookupCtxWindow = lookupCtxWindow;
   module.exports.modelCtxMax = modelCtxMax;
   module.exports.effectiveCtxWindow = effectiveCtxWindow;
+  module.exports.ctxRingColor = ctxRingColor;
 } else if (typeof window !== 'undefined') {
-  window.ctxwin = { MODEL_CTX_TABLE: MODEL_CTX_TABLE, lookupCtxWindow: lookupCtxWindow, modelCtxMax: modelCtxMax, effectiveCtxWindow: effectiveCtxWindow };
+  window.ctxwin = { MODEL_CTX_TABLE: MODEL_CTX_TABLE, lookupCtxWindow: lookupCtxWindow, modelCtxMax: modelCtxMax, effectiveCtxWindow: effectiveCtxWindow, ctxRingColor: ctxRingColor };
 }

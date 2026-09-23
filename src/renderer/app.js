@@ -283,7 +283,9 @@ function updateUsageButton() {
   $('btn-usage-label').textContent = compacting ? '上下文压缩中…' : pending ? '上下文待统计' : `上下文 ${pct}%`;
   const ring = document.querySelector('#btn-usage .usage-ring');
   if (ring) {
-    const color = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--yellow, #d29922)' : 'var(--accent)';
+    // v0.15.17:三档配色 <30% 绿 / 30~80% 蓝 / >80% 红(ctxwin.ctxRingColor,有单测锁定)。
+    // 圈只做占用提示;自动压缩在 100% 才触发,见 src/main/context-compaction.js。
+    const color = window.ctxwin.ctxRingColor(pct);
     ring.style.background = `conic-gradient(${color} ${pct * 3.6}deg, transparent 0)`;
     ring.style.borderColor = color;
   }

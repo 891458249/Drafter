@@ -464,14 +464,15 @@
   <div id="split-modal" class="modal-mask hidden">
     <div class="modal modal-wide">
       <h2>拆分子任务</h2>
-      <div class="modal-hint">AI 已把需求拆成以下子任务。可编辑标题/说明、增删条目;确认后将为每个子任务新建一个并行会话执行。</div>
+      <div class="modal-hint" id="split-hint">AI 先做一轮判断:能并行的各建一个会话同时跑,需等待的排入对应会话的队列。</div>
       <div id="split-list"></div>
       <div class="modal-status" id="split-status"></div>
       <div class="modal-actions">
         <button id="split-add" class="btn">＋ 加一条</button>
         <span class="grow"></span>
+        <button id="split-pass" class="btn hidden">不拆,直接发送</button>
         <button id="split-cancel" class="btn">取消</button>
-        <button id="split-confirm" class="btn btn-primary">确认并行执行</button>
+        <button id="split-confirm" class="btn btn-primary">确认执行</button>
       </div>
     </div>
   </div>

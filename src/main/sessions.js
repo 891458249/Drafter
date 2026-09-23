@@ -927,8 +927,10 @@ class Session {
 
   // content: string | array of content blocks ({type:'text'|'image'|'media_ref',...})
   // echoContent: 持久化回显用的原始内容(v0.9.1 辅助分析注入后,历史仍回放附件卡片)
+  // opts.emitEcho(v0.15.18):主进程代用户投递消息时(拆分子任务的等待项排入本会话队列),
+  //   渲染端不会自己加气泡,补一条 live 回显,否则用户要等历史重载才看得到排了什么。
   // 返回发送时生成的消息 uuid(v0.9.9:编辑重生成/分支的定位锚点;isReplay 消息不带 uuid)
-  send(content, echoContent) {
+  send(content, echoContent, opts = {}) {
     if (!this.running && !this.starting) this.start({ resume: !!this.meta.sdkSessionId });
     if (!this.queue) return null;
     const uuid = crypto.randomUUID();
@@ -940,7 +942,9 @@ class Session {
       session_id: this.meta.sdkSessionId || undefined,
     });
     this.busy = true;
-    this._persistUserEcho(echoContent !== undefined ? echoContent : content, uuid);
+    const echo = echoContent !== undefined ? echoContent : content;
+    this._persistUserEcho(echo, uuid);
+    if (opts && opts.emitEcho) this._emit({ type: 'ui_user_input', content: slimEcho(echo), uuid });
     this._emit({ type: 'ui_status', running: true, busy: true });
     return uuid;
   }

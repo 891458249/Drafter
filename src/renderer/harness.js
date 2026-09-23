@@ -3,8 +3,8 @@
 //
 // 结构:
 //  - enterSection():进入板块时启动 harness 引擎(幂等)+ 加载 webview
-//  - harness 前端跑在 <webview> 里(它才能挂 harness 专属 preload),src 是主进程渲染的
-//    index.electron.html
+//  - harness 前端跑在 <webview> 里(它才能挂 harness 专属 preload),src 是主进程渲染到
+//    userData/harness-web/index.html 的入口页
 //  - 状态行(harness-status)显示 boot 进度;webview dom-ready 后淡出
 
 import { $ } from './state.js';
