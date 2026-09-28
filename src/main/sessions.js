@@ -19,6 +19,7 @@ const extensions = require('./extensions'); // 扩展板块(v0.15.16):Skill 渐�
 const modelGuard = require('./model-guard-proxy');
 const { createSessionCleanup } = require('./debug-resources/session');
 const { compactionSettings, compactionEnv } = require('./context-compaction');
+const { guardOversizedSkill } = require('./tool-output-limit');
 // 模型上下文窗口实表(双环境模块):纠正 modelUsage.contextWindow——claude.exe 按自身
 // 注册表本地计算,对第三方网关模型(kimi-k3 等)一律回退默认 200000,并非提供方实报。
 const { effectiveCtxWindow } = require('../renderer/ctxwin.js');
@@ -501,6 +502,9 @@ class Session {
     if (!fastOv) {
       const hooks = options.hooks || {};
       hooks.PreToolUse = [...(hooks.PreToolUse || []), {
+        matcher: '^Skill$',
+        hooks: [guardOversizedSkill],
+      }, {
         hooks: [async (input) => {
           const reason = projects.readonlyToolReason(this.meta.projectId, this.meta.cwd, input.tool_name, input.tool_input);
           return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};

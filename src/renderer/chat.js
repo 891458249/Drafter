@@ -1159,7 +1159,7 @@ export function renderEvent(sid, ev, { replay }) {
     if (ev.num_turns != null) parts.push(ev.num_turns + ' 轮');
     if (ev.total_cost_usd != null) parts.push('$' + ev.total_cost_usd.toFixed(4));
     if (ev.usage) parts.push('↑' + fmtTokens(ctxTokens(ev.usage)) + ' ↓' + fmtTokens(ev.usage.output_tokens));
-    if (ev.is_error) parts.push('(出错:' + (ev.subtype || '') + ')');
+    if (ev.is_error) parts.push(ev.subtype && ev.subtype !== 'success' ? '(出错:' + ev.subtype + ')' : '(出错)');
     if (ev.errors?.length) metaLine(s, ev.errors.join('\n'), 'error-line');
     if (parts.length) {
       const el = document.createElement('div');

@@ -236,6 +236,40 @@ async function main() {
     ok(activated.off === false && activated.disabled === 'false' && activated.label === '深度',
       '取消跟随后滑块解锁并显示「深度」', activated);
 
+    // 宽度、方块拖尾与拖动过程中的实时颜色(不等 pointerup 才改变)
+    const sliderVisual = await evaluate(`(() => {
+      const p = document.querySelector('#effort-pop'), s = document.querySelector('#effort-slider');
+      const rail = s.querySelector('.effort-slider-rail');
+      return { width: rail.getBoundingClientRect().width, pop: p.getBoundingClientRect().width,
+        viewport: window.innerWidth, pixels: s.querySelectorAll('.effort-slider-pixel').length,
+        pulse: getComputedStyle(s.querySelector('.effort-slider-fill'), '::after').content };
+    })()`);
+    ok(sliderVisual.width >= Math.min(976, sliderVisual.viewport - 24) - 50 &&
+      (sliderVisual.viewport < 1000 || sliderVisual.width >= 900),
+      '宽窗口滑轨约为旧版 4 倍,窄窗口按视口收缩', sliderVisual);
+    ok(sliderVisual.pixels === 60 && sliderVisual.pulse === 'none', '60 个小方块替代原脉冲光效', sliderVisual);
+    const liveDrag = await evaluate(`(() => {
+      const s = document.querySelector('#effort-slider'), p = document.querySelector('#effort-pop');
+      const r = s.getBoundingClientRect(), x = (f) => r.left + 8 + (r.width - 16) * f;
+      const send = (type, f) => s.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, pointerId: 2, isPrimary: true,
+        clientX: x(f), clientY: r.top + r.height / 2, buttons: type === 'pointerup' ? 0 : 1,
+      }));
+      send('pointerdown', .1);
+      const before = getComputedStyle(p).getPropertyValue('--effort-c').trim();
+      send('pointermove', .9);
+      const after = getComputedStyle(p).getPropertyValue('--effort-c').trim();
+      const frac = s.style.getPropertyValue('--effort-frac');
+      const label = document.querySelector('#effort-pop-level').textContent;
+      const trail = s.querySelector('.effort-slider-trail-grid').getBoundingClientRect();
+      const knob = s.querySelector('.effort-slider-knob').getBoundingClientRect();
+      send('pointercancel', .9);
+      return { before, after, frac, label, gap: knob.left - trail.right };
+    })()`);
+    ok(liveDrag.before !== liveDrag.after && Math.abs(Number(liveDrag.frac) - .9) < .0001 && liveDrag.label === '极限',
+      'pointermove 即改变档位色、手柄位置与标题,无需松开', liveDrag);
+    ok(liveDrag.gap >= 0 && liveDrag.gap <= 16, '方块拖尾紧随手柄左侧', liveDrag);
+
     // 拖到最右(第 5 格):pointerdown → pointerup 同一位置
     const dragTo = `(frac) => {
       const el = document.querySelector('#effort-slider');

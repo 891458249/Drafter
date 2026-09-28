@@ -114,6 +114,31 @@ async function waitResult(events, ms = 75000) {
   throw new Error('等待 result 超时');
 }
 
+test('真实运行时:内置 claude-api 不注入超大输出', { timeout: 90000 }, async () => {
+  let call = 0;
+  const gw = await startGateway((body, raw) => {
+    if (/Write the title in the predominant language/.test(JSON.stringify(body.messages))) return sseText(body.model, 'title');
+    call++;
+    return call === 1 ? sseToolUse(body.model, 'toolu_skill_fixture', 'Skill', { skill: 'claude-api' }) : sseText(body.model, '已读取技能摘要。');
+  });
+  const { mgr, events } = makeManager(gw.port);
+  const cwd = path.join(tmp, 'skill-output'); fs.mkdirSync(cwd, { recursive: true });
+  const meta = mgr.create({ cwd, kind: 'code', keyId: 'k1', model: 'gpt-6-astra', permissionMode: 'bypassPermissions' });
+  const s = mgr.get(meta.id);
+  try {
+    s.send('调用 claude-api 技能，然后简短回答');
+    const result = await waitResult(events);
+    assert.equal(result.is_error, false, 'Skill 守卫后应正常完成回合');
+    const resultRequest = gw.requests.find((r) => r.raw.includes('tool_result'));
+    assert.ok(resultRequest, '应发出包含 Skill 工具结果的后续请求');
+    assert.ok(resultRequest.raw.length < 100000, '后续请求不应携带完整 58 万字符的技能文本，实际字节=' + resultRequest.raw.length);
+    assert.match(resultRequest.raw, /内置 claude-api 技能会一次注入/);
+  } finally {
+    s.stop(); await s._debugCleanup?.cleanup();
+    await new Promise((resolve) => gw.server.close(resolve));
+  }
+});
+
 for (const kind of ['code', 'chat']) test(`真实运行时:${kind} 自动压缩后保持会话继续对话`, { timeout: 90000 }, async () => {
   let mainRequests = 0;
   const gw = await startGateway((body) => {

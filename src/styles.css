@@ -455,7 +455,7 @@ html, body {
    工具条在 .composer 顶部,面板向上弹出正好覆盖消息列表,不会把输入框顶走。 */
 #btn-effort.active { border-color: var(--accent); color: var(--accent); }
 .effort-pop {
-  position: absolute; bottom: calc(100% + 8px); right: 0; width: 280px;
+  position: absolute; bottom: calc(100% + 8px); right: 0; width: min(976px, calc(100vw - 24px));
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
   box-shadow: 0 10px 32px rgba(0, 0, 0, .5);
   padding: 14px 16px 12px; z-index: 300;
@@ -478,7 +478,7 @@ html, body {
 .effort-pop-model #effort-pop-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .efm-caret { opacity: .7; }
 
-/* 滑块:自绘(仓库无 range 组件),5 格离散。
+/* 滑块:5 格离散,拖动时手柄连续跟随指针,颜色随最近档位切换。
    两端留 8px = 手柄半径,保证 0 档与 4 档的手柄不越出轨道。 */
 .effort-slider { position: relative; height: 26px; margin: 12px 0 4px; cursor: pointer; touch-action: none; }
 .effort-slider-rail {
@@ -486,20 +486,23 @@ html, body {
   transform: translateY(-50%); background: var(--bg-input); border-radius: 3px; overflow: hidden;
 }
 .effort-slider-fill {
-  position: relative; height: 100%; width: calc(var(--effort-frac, 0) * 100%);
+  height: 100%; width: calc(var(--effort-frac, 0) * 100%);
   background: var(--effort-c); border-radius: 3px;
-  transition: width .18s ease, background-color .18s ease;
 }
-/* 流动高光:用户要求「模仿 Claude 那样的 ultra 推理深度滑块特效」 */
-.effort-slider-fill::after {
-  content: ''; position: absolute; inset: 0;
-  background: linear-gradient(100deg, transparent 25%, rgba(255, 255, 255, .55) 50%, transparent 75%);
-  background-size: 200% 100%;
-  animation: effort-flow 2.2s linear infinite;
+/* 方块拖尾只在手柄左侧,视口裁掉起点之外的方块;不做整条轨道上的脉冲动画。 */
+.effort-slider-trail {
+  position: absolute; left: 8px; right: 8px; top: 0; height: 100%;
+  overflow: hidden; pointer-events: none;
 }
-@keyframes effort-flow {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+.effort-slider-trail-grid {
+  position: absolute; top: 50%; left: calc(var(--effort-frac, 0) * 100%);
+  width: 138px; display: grid; grid-template-columns: repeat(20, 4px);
+  grid-template-rows: repeat(3, 4px); gap: 2px 3px;
+  transform: translate(calc(-100% - 10px), -50%);
+}
+.effort-slider-pixel {
+  width: 4px; height: 4px; border-radius: 1px;
+  background: var(--effort-c); opacity: calc(.12 + var(--pixel-i) * .04);
 }
 .effort-slider-knob {
   position: absolute; top: 50%; width: 16px; height: 16px; border-radius: 50%;
@@ -507,7 +510,6 @@ html, body {
   transform: translate(-50%, -50%);
   background: #fff; pointer-events: none;
   box-shadow: 0 0 10px 2px var(--effort-c), 0 1px 3px rgba(0, 0, 0, .5);
-  transition: left .18s ease, box-shadow .18s ease;
 }
 .effort-slider-ticks { position: absolute; left: 8px; right: 8px; top: 50%; pointer-events: none; }
 .effort-slider-tick {
@@ -516,11 +518,11 @@ html, body {
 }
 .effort-slider-tick.on { background: rgba(255, 255, 255, .6); }
 
-/* 熄火态:跟随默认 / 极速模式 / 非 SDK 板块 —— 去掉辉光与流动,降为中性灰 */
+/* 熄火态:跟随默认 / 极速模式 / 非 SDK 板块 —— 去掉辉光与方块拖尾,降为中性灰 */
 .effort-pop.is-off .effort-pop-level { color: var(--text-dim); }
 .effort-pop.is-off .effort-slider { cursor: default; }
 .effort-pop.is-off .effort-slider-fill { background: var(--border); }
-.effort-pop.is-off .effort-slider-fill::after { animation: none; opacity: 0; }
+.effort-pop.is-off .effort-slider-trail { display: none; }
 .effort-pop.is-off .effort-slider-knob {
   background: var(--text-dim); box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
 }
@@ -549,11 +551,6 @@ html, body {
 }
 .effort-model-item:hover { background: var(--bg-input); }
 .effort-model-item.active { color: var(--accent); font-weight: 600; }
-
-@media (prefers-reduced-motion: reduce) {
-  .effort-slider-fill::after { animation: none; opacity: 0; }
-  .effort-slider-fill, .effort-slider-knob { transition: none; }
-}
 
 .attachments { display: flex; gap: 8px; flex-wrap: wrap; }
 .attach-item {

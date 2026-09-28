@@ -25,6 +25,7 @@ let deps = { applyModel: null, refreshTopbar: null };
 let ctx = { sid: null, fast: false };
 let dragging = false;
 let previewIdx = null; // 拖动中的临时档位(只改视觉,pointerup 才落盘)
+let previewFrac = null; // 手柄跟随指针连续移动,颜色按最近档位实时变化
 
 // 模型能力表:主进程取 Query.supportedModels() 后缓存,渲染端经 api.sessEffortCaps() **主动拉**
 // (见主进程 SessionManager.loadEffortCapability 里「为什么是拉而不是推」的实测记录)。
@@ -118,10 +119,10 @@ function render() {
   // 熄火:跟随默认,或该档位在当前会话下根本不生效
   pop.classList.toggle('is-off', !applies || follow);
   pop.classList.toggle('is-disabled', !applies);
-  if (applies && !follow) pop.setAttribute('data-level', String(effortIndex(level)));
+  if (applies && !follow) pop.setAttribute('data-level', String(idx));
   else pop.removeAttribute('data-level'); // 无 data-level → --effort-c 走中性色
 
-  slider.style.setProperty('--effort-frac', String(idx / LAST));
+  slider.style.setProperty('--effort-frac', String(previewFrac != null ? previewFrac : idx / LAST));
   slider.setAttribute('aria-valuenow', String(idx));
   slider.setAttribute('aria-valuetext', effortLabel(indexToLevel(idx)));
   slider.setAttribute('aria-disabled', String(sliderLocked(m)));
@@ -129,7 +130,7 @@ function render() {
     t.classList.toggle('on', Number(t.dataset.i) <= idx);
   }
 
-  $('effort-pop-level').textContent = level ? effortLabel(level) : EFFORT_DEFAULT_LABEL;
+  $('effort-pop-level').textContent = previewIdx != null ? effortLabel(indexToLevel(idx)) : (level ? effortLabel(level) : EFFORT_DEFAULT_LABEL);
 
   const sel = $('model-sel');
   const cur = sel ? sel.selectedOptions[0] : null;
@@ -175,6 +176,8 @@ function closePanel() {
   $('effort-model-list').classList.add('hidden');
   $('btn-effort').classList.remove('active');
   previewIdx = null;
+  previewFrac = null;
+  render();
 }
 
 // ---------------- 模型列表(#model-sel 的展示层) ----------------
@@ -222,14 +225,18 @@ async function setEffort(level) {
 function commitIndex(i) {
   const level = indexToLevel(Math.min(Math.max(i, 0), LAST));
   previewIdx = null;
+  previewFrac = null;
   return setEffort(level);
 }
 
-function indexFromEvent(e) {
+function fractionFromEvent(e) {
   const box = $('effort-slider').getBoundingClientRect();
   const inner = Math.max(1, box.width - 16); // 两端各 8px 手柄半径,与 CSS 一致
-  const x = Math.min(Math.max(e.clientX - box.left - 8, 0), inner);
-  return Math.round((x / inner) * LAST);
+  return Math.min(Math.max((e.clientX - box.left - 8) / inner, 0), 1);
+}
+
+function indexFromEvent(e) {
+  return Math.round(fractionFromEvent(e) * LAST);
 }
 
 // ---------------- 初始化 ----------------
@@ -246,6 +253,11 @@ export function initEffortUi(injected = {}) {
   if (ticks && !ticks.childElementCount) {
     ticks.innerHTML = EFFORT_LEVELS.map((_lv, i) =>
       `<span class="effort-slider-tick" data-i="${i}" style="left:${(i / LAST) * 100}%"></span>`).join('');
+  }
+  const trail = $('effort-slider-trail-grid');
+  if (trail && !trail.childElementCount) {
+    trail.innerHTML = Array.from({ length: 60 }, (_v, i) =>
+      `<span class="effort-slider-pixel" style="--pixel-i:${i % 20}"></span>`).join('');
   }
 
   btn.onclick = (e) => {
@@ -264,13 +276,15 @@ export function initEffortUi(injected = {}) {
     if (sliderLocked((sessionOf() || {}).meta)) return;
     dragging = true;
     try { slider.setPointerCapture(e.pointerId); } catch {}
-    previewIdx = indexFromEvent(e);
+    previewFrac = fractionFromEvent(e);
+    previewIdx = Math.round(previewFrac * LAST);
     render();
     e.preventDefault();
   });
   slider.addEventListener('pointermove', (e) => {
     if (!dragging) return;
-    previewIdx = indexFromEvent(e);
+    previewFrac = fractionFromEvent(e);
+    previewIdx = Math.round(previewFrac * LAST);
     render();
   });
   const endDrag = (e) => {
@@ -280,7 +294,7 @@ export function initEffortUi(injected = {}) {
     commitIndex(indexFromEvent(e));
   };
   slider.addEventListener('pointerup', endDrag);
-  slider.addEventListener('pointercancel', () => { dragging = false; previewIdx = null; render(); });
+  slider.addEventListener('pointercancel', () => { dragging = false; previewIdx = null; previewFrac = null; render(); });
 
   slider.addEventListener('keydown', (e) => {
     const meta = (sessionOf() || {}).meta;
