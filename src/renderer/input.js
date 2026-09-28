@@ -5,6 +5,7 @@ import { addUserMessage, setBusyUI, aigcLocalEcho, aigcBusy, updateAigcSendUI, u
 import { refreshList } from './sessions-ui.js';
 import { maybeSplitOnSend } from './split.js';
 import { consumePins as extConsumePins } from './extensions.js'; // 本条消息手动指定的技能(v0.15.16,发送后清空)
+import { initEffortUi } from './effort-ui.js'; // 模型 + 推理深度合并入口(v0.15.20)
 
 const inputEl = () => $('input');
 const acEl = () => $('autocomplete');
@@ -514,39 +515,40 @@ function askAdoptDir(dir) {
   });
 }
 
-  $('model-sel').onchange = async () => {
-    if (!state.activeSid) return;
-    const s = state.sessions.get(state.activeSid);
-    if (sectionOfKind(s && s.meta.kind) !== state.section) return; // 板块/会话不匹配时不写模型(v0.9.5)
-    const sel = parseModelValue($('model-sel').value);
-    const prevModel = s && s.meta.model, prevKeyId = s && s.meta.keyId;
-    // 主进程拒绝(会话不存在或模型类型与会话不兼容)时不落本地 meta,
-    // 避免 UI 显示的模型与实际绑定凭据脱节(脱节会在发送时以 403「模型未配置」爆发)
-    const ok = await api.sessSetModel(state.activeSid, sel.model, sel.keyId);
-    if (ok === false) {
-      if (s) { s.meta.model = prevModel; s.meta.keyId = prevKeyId; }
-      // 回滚下拉到先前选中值(不重建,避免跨模块依赖 populateModelSelects)
-      if (s) $('model-sel').value = modelSelValue(s.meta);
-      addUserMessage(state.activeSid, `(模型切换失败:该模型不可用于当前会话类型)`);
-      return;
-    }
-    if (s) {
-      s.meta.model = sel.model;
-      s.meta.keyId = sel.keyId;
-      s.meta.agentModels = (s.meta.agentModels || [])
-        .filter((item) => item.keyId === sel.keyId && item.model !== sel.model);
-    }
-    updateKeyChips(); // 同步 Key chip
-    updateTopbarForSession(state.activeSid); // 同步 placeholder 的模型身份与 board class(创作板块)
-    emit('session-status', { sid: state.activeSid });
-  };
+  // 模型选择统一走 applyModelSelection:隐藏下拉(#model-sel)与「选择强度」面板里的
+  // 模型列表都调它,主进程拒绝时的回滚语义只此一处(v0.15.20)。
+  $('model-sel').onchange = () => applyModelSelection($('model-sel').value);
 
-  // 会话级推理深度:仅约束当前会话,空值 = 跟随 SDK/模型默认
-  $('effort-sel-composer').onchange = async () => {
-    if (!state.activeSid) return;
-    const effort = $('effort-sel-composer').value || null;
-    await api.sessSetEffort(state.activeSid, effort);
-    const s = state.sessions.get(state.activeSid);
-    if (s) s.meta.effort = effort;
-  };
+  // 「选择强度」面板(模型 + 推理深度合并入口):两个回调注入进去,
+  // 让 effort-ui.js 不必反向 import chat.js(否则成 import 环)。
+  initEffortUi({ applyModel: applyModelSelection, refreshTopbar: updateTopbarForSession });
+}
+
+// 应用一次模型选择(v0.8.2 原有逻辑,v0.15.20 从 #model-sel.onchange 抽成具名函数)。
+// 主进程拒绝(会话不存在或模型类型与会话不兼容)时不落本地 meta,
+// 避免 UI 显示的模型与实际绑定凭据脱节(脱节会在发送时以 403「模型未配置」爆发)。
+async function applyModelSelection(value) {
+  if (!state.activeSid) return false;
+  const s = state.sessions.get(state.activeSid);
+  if (sectionOfKind(s && s.meta.kind) !== state.section) return false; // 板块/会话不匹配时不写模型(v0.9.5)
+  const sel = parseModelValue(value);
+  const prevModel = s && s.meta.model, prevKeyId = s && s.meta.keyId;
+  const ok = await api.sessSetModel(state.activeSid, sel.model, sel.keyId);
+  if (ok === false) {
+    if (s) { s.meta.model = prevModel; s.meta.keyId = prevKeyId; }
+    // 回滚下拉到先前选中值(不重建,避免跨模块依赖 populateModelSelects)
+    if (s) $('model-sel').value = modelSelValue(s.meta);
+    addUserMessage(state.activeSid, `(模型切换失败:该模型不可用于当前会话类型)`);
+    return false;
+  }
+  if (s) {
+    s.meta.model = sel.model;
+    s.meta.keyId = sel.keyId;
+    s.meta.agentModels = (s.meta.agentModels || [])
+      .filter((item) => item.keyId === sel.keyId && item.model !== sel.model);
+  }
+  updateKeyChips(); // 同步 Key chip
+  updateTopbarForSession(state.activeSid); // 同步 placeholder 的模型身份与 board class(创作板块)
+  emit('session-status', { sid: state.activeSid });
+  return true;
 }

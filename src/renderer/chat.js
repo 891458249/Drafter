@@ -5,6 +5,7 @@ import { highlightCode } from './hljs.js';
 import { enhanceCodeHtml } from './codeblock.js';
 import { parseFilePath, PATH_IN_TEXT_RE } from './filelink.js';
 import { updateAgentModelsSelector } from './agents-ui.js';
+import { syncEffort } from './effort-ui.js'; // 「选择强度」面板回显(v0.15.20)
 import { updateTaskState } from './task-state.mjs';
 import { updateSkillSelector } from './extensions.js'; // 技能选择器跟随会话回显(v0.15.16)
 
@@ -84,8 +85,7 @@ export function updateTopbarForSession(sid) {
   updateKeyChips(); // 回显模型时同步 Key chip
   updateAgentModelsSelector();
   updateSkillSelector();
-  const composerEffort = $('effort-sel-composer');
-  if (composerEffort) composerEffort.value = m.effort || '';
+  syncEffort(sid, { fast: isFastChat(s) }); // 「选择强度」面板回显档位/模型/熄火态(v0.15.20)
   $('usage-chip').textContent = fmtCost(s.ui.cumCost) +
     (s.ui.lastUsage ? ` · ↑${fmtTokens(ctxTokens(s.ui.lastUsage))}` : '');
   // 输入框 placeholder 跟随当前模型身份(v0.9.2);绑定 Gem 时冠以 Gem 名(v0.9.11)

@@ -769,6 +769,8 @@ ipcMain.handle('update:repoVersion', () => updater.checkRepoVersion());
 // ---------------------------------------------------------------------------
 ipcMain.handle('sess:sdkStatus', () => sessions.sdkAvailable());
 ipcMain.handle('sess:list', () => sessions.list());
+// 推理深度:模型能力表拉取入口(渲染端主动拉,见 SessionManager.loadEffortCapability)
+ipcMain.handle('sess:effortCaps', () => sessions.effortCaps());
 ipcMain.handle('sess:agentConfig', (_e, sid) => {
   const session = sessions.get(sid);
   if (!session) return null;

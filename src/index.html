@@ -215,27 +215,44 @@
                 <option value="bypassPermissions">跳过权限</option>
               </select>
             </label>
-            <label class="ctrl composer-model">模型
-              <select id="model-sel">
-                <option value="">默认</option>
-                <option value="claude-fable-5">Fable 5</option>
-                <option value="claude-opus-4-8">Opus 4.8</option>
-                <option value="claude-sonnet-5">Sonnet 5</option>
-                <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-              </select>
-            </label>
-            <span id="model-key-chip" class="key-chip hidden" title="当前模型所属的 API Key"></span>
+            <!-- 模型 + 推理深度合并入口(v0.15.20):面板见 src/renderer/effort-ui.js -->
+            <div class="composer-effort-anchor" id="effort-anchor">
+              <button id="btn-effort" class="btn btn-sm" title="选择模型与推理深度">选择强度</button>
+              <span id="model-key-chip" class="key-chip hidden" title="当前模型所属的 API Key"></span>
+              <!-- 隐藏数据源:app.js/sessions-ui.js/canvas.js/state.js 多处读 #model-sel.value,勿移除 -->
+              <label class="ctrl composer-model visually-hidden">
+                <select id="model-sel">
+                  <option value="">默认</option>
+                  <option value="claude-fable-5">Fable 5</option>
+                  <option value="claude-opus-4-8">Opus 4.8</option>
+                  <option value="claude-sonnet-5">Sonnet 5</option>
+                  <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+                </select>
+              </label>
+              <div id="effort-pop" class="effort-pop hidden">
+                <div class="effort-pop-head">
+                  <div class="effort-pop-level" id="effort-pop-level">默认</div>
+                  <button class="effort-pop-model" id="effort-pop-model-btn" title="切换本会话模型">
+                    <span id="effort-pop-model-name">默认</span><span class="efm-caret">›</span>
+                  </button>
+                </div>
+                <div class="effort-slider" id="effort-slider" role="slider" tabindex="0"
+                     aria-label="推理深度" aria-valuemin="0" aria-valuemax="4" aria-valuenow="2" aria-valuetext="深度">
+                  <div class="effort-slider-rail">
+                    <div class="effort-slider-fill" id="effort-slider-fill"></div>
+                  </div>
+                  <div class="effort-slider-knob" id="effort-slider-knob"></div>
+                  <div class="effort-slider-ticks" id="effort-slider-ticks"></div>
+                </div>
+                <label class="effort-follow" id="effort-follow">
+                  <input type="checkbox" id="effort-follow-chk">
+                  <span>跟随默认<span class="effort-follow-sub">(由模型自适应)</span></span>
+                </label>
+                <div class="effort-pop-hint hidden" id="effort-pop-hint"></div>
+                <div class="effort-model-list hidden" id="effort-model-list"></div>
+              </div>
+            </div>
             <button id="agent-models-btn" class="btn btn-sm sdk-only" title="未启用子 Agent,当前会话只使用主模型">🤖 <span id="agent-models-name">子 Agent</span></button>
-            <label class="ctrl composer-effort sdk-only" title="约束本会话的推理深度(档位越低思考越少、token 越省);默认=跟随模型/SDK(高)">推理深度
-              <select id="effort-sel-composer">
-                <option value="">默认</option>
-                <option value="low">低</option>
-                <option value="medium">中</option>
-                <option value="high">高</option>
-                <option value="xhigh">Extra</option>
-                <option value="max">Max</option>
-              </select>
-            </label>
           </div>
           <div id="turn-status" class="turn-status hidden">
             <span class="turn-star">✳</span><span id="turn-status-text"></span>

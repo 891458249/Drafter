@@ -15,6 +15,13 @@
   --yellow: #d6b46a;
   /* v0.15.17:上下文占用圈 30~80% 档(缺口蓝);主题系统(themes.js)可整体覆盖 */
   --blue: #5b8def;
+  /* v0.15.20:推理深度滑块 5 档色阶(蓝→红)。派生自主题的 --blue/--red,
+     主题切换时 color-mix 在计算值阶段重新求值,因此四个主题自动跟随,无需各写一份 */
+  --effort-l0: color-mix(in srgb, var(--blue) 88%, var(--red));
+  --effort-l1: color-mix(in srgb, var(--blue) 62%, var(--red));
+  --effort-l2: color-mix(in srgb, var(--blue) 38%, var(--red));
+  --effort-l3: color-mix(in srgb, var(--blue) 16%, var(--red));
+  --effort-l4: var(--red);
   /* v0.9.31:此前被 msg-nav/.hot 等引用但从未定义,补齐;主题系统(themes.js)可整体覆盖 */
   --accent-bg: rgba(217,119,87,.15);
   --bg-hover: rgba(255,255,255,.07);
@@ -36,6 +43,11 @@ html, body {
 
 .hidden { display: none !important; }
 .grow { flex: 1; }
+/* v0.15.20:视觉隐藏但保留在 DOM 与无障碍树中(#model-sel 仍是模型数据源) */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 /* ---------------- SDK 缺失警告(原 Landing 样式已随 v0.9.3 首屏移除) ---------------- */
 .sdk-warning {
@@ -434,7 +446,114 @@ html, body {
 /* v0.9.33:窗口过窄时允许换行,并禁止 flex 压缩——默认 shrink 会把中文按钮挤成竖排乱版 */
 .composer-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .composer-toolbar > * { flex-shrink: 0; white-space: nowrap; }
-.composer-model { margin-left: auto; }
+/* v0.15.20:模型 + 推理深度合并入口(原 .composer-model 独占的 margin-left:auto 移到锚点上) */
+.composer-effort-anchor { position: relative; margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.composer-effort-anchor .composer-model { margin: 0; }
+
+/* ---------------- 推理深度滑块面板(v0.15.20)----------------
+   浮层沿用 .usage-pop 的「锚点 relative + 面板 absolute 向上弹出」范式:
+   工具条在 .composer 顶部,面板向上弹出正好覆盖消息列表,不会把输入框顶走。 */
+#btn-effort.active { border-color: var(--accent); color: var(--accent); }
+.effort-pop {
+  position: absolute; bottom: calc(100% + 8px); right: 0; width: 280px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, .5);
+  padding: 14px 16px 12px; z-index: 300;
+  --effort-c: var(--text-dim); /* 未落档(默认/熄火)时的中性色 */
+}
+.effort-pop[data-level="0"] { --effort-c: var(--effort-l0); }
+.effort-pop[data-level="1"] { --effort-c: var(--effort-l1); }
+.effort-pop[data-level="2"] { --effort-c: var(--effort-l2); }
+.effort-pop[data-level="3"] { --effort-c: var(--effort-l3); }
+.effort-pop[data-level="4"] { --effort-c: var(--effort-l4); }
+
+.effort-pop-head { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.effort-pop-level { font-size: 15px; font-weight: 600; color: var(--effort-c); }
+.effort-pop-model {
+  display: inline-flex; align-items: center; gap: 3px; max-width: 100%;
+  background: none; border: none; padding: 2px 6px; border-radius: 6px;
+  color: var(--text-dim); font-family: var(--font); font-size: 12px; cursor: pointer;
+}
+.effort-pop-model:hover { color: var(--text); background: var(--bg-input); }
+.effort-pop-model #effort-pop-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.efm-caret { opacity: .7; }
+
+/* 滑块:自绘(仓库无 range 组件),5 格离散。
+   两端留 8px = 手柄半径,保证 0 档与 4 档的手柄不越出轨道。 */
+.effort-slider { position: relative; height: 26px; margin: 12px 0 4px; cursor: pointer; touch-action: none; }
+.effort-slider-rail {
+  position: absolute; left: 8px; right: 8px; top: 50%; height: 6px;
+  transform: translateY(-50%); background: var(--bg-input); border-radius: 3px; overflow: hidden;
+}
+.effort-slider-fill {
+  position: relative; height: 100%; width: calc(var(--effort-frac, 0) * 100%);
+  background: var(--effort-c); border-radius: 3px;
+  transition: width .18s ease, background-color .18s ease;
+}
+/* 流动高光:用户要求「模仿 Claude 那样的 ultra 推理深度滑块特效」 */
+.effort-slider-fill::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 25%, rgba(255, 255, 255, .55) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: effort-flow 2.2s linear infinite;
+}
+@keyframes effort-flow {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.effort-slider-knob {
+  position: absolute; top: 50%; width: 16px; height: 16px; border-radius: 50%;
+  left: calc(8px + (100% - 16px) * var(--effort-frac, 0));
+  transform: translate(-50%, -50%);
+  background: #fff; pointer-events: none;
+  box-shadow: 0 0 10px 2px var(--effort-c), 0 1px 3px rgba(0, 0, 0, .5);
+  transition: left .18s ease, box-shadow .18s ease;
+}
+.effort-slider-ticks { position: absolute; left: 8px; right: 8px; top: 50%; pointer-events: none; }
+.effort-slider-tick {
+  position: absolute; top: 0; width: 4px; height: 4px; border-radius: 50%;
+  transform: translate(-50%, -50%); background: var(--border);
+}
+.effort-slider-tick.on { background: rgba(255, 255, 255, .6); }
+
+/* 熄火态:跟随默认 / 极速模式 / 非 SDK 板块 —— 去掉辉光与流动,降为中性灰 */
+.effort-pop.is-off .effort-pop-level { color: var(--text-dim); }
+.effort-pop.is-off .effort-slider { cursor: default; }
+.effort-pop.is-off .effort-slider-fill { background: var(--border); }
+.effort-pop.is-off .effort-slider-fill::after { animation: none; opacity: 0; }
+.effort-pop.is-off .effort-slider-knob {
+  background: var(--text-dim); box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+}
+.effort-pop.is-off .effort-slider-tick.on { background: var(--border); }
+
+.effort-follow {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  font-size: 12px; color: var(--text-dim); cursor: pointer; user-select: none;
+}
+.effort-follow input { margin: 0; accent-color: var(--accent); }
+.effort-follow-sub { opacity: .75; }
+.effort-pop.is-off .effort-follow { color: var(--text); }
+/* 不可用(极速问答 / 非 SDK 板块):开关也锁住,只剩模型列表可用 */
+.effort-pop.is-disabled .effort-follow { pointer-events: none; opacity: .55; }
+.effort-pop-hint {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+  font-size: 11px; line-height: 1.5; color: var(--text-dim);
+}
+
+.effort-model-list { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); max-height: 190px; overflow-y: auto; }
+.effort-model-group { padding: 5px 8px 2px; font-size: 10.5px; color: var(--text-dim); }
+.effort-model-item {
+  display: block; width: 100%; text-align: left; padding: 5px 8px;
+  background: none; border: none; border-radius: 6px;
+  color: var(--text); font-family: var(--font); font-size: 12.5px; cursor: pointer;
+}
+.effort-model-item:hover { background: var(--bg-input); }
+.effort-model-item.active { color: var(--accent); font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+  .effort-slider-fill::after { animation: none; opacity: 0; }
+  .effort-slider-fill, .effort-slider-knob { transition: none; }
+}
 
 .attachments { display: flex; gap: 8px; flex-wrap: wrap; }
 .attach-item {

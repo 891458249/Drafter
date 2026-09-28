@@ -562,6 +562,9 @@ class Session {
     this.running = true;
     this._emitAgentConfig(false);
     this._pump();
+    // 顺带取一次模型能力表(供渲染端禁用「模型根本不吃 effort」的档位,如 haiku)。
+    // 不 await:它是全局一次性的旁路信息,拿不到也不影响本轮对话。
+    this.m.loadEffortCapability(this.q, this.id);
   }
 
   async _pump() {
@@ -1315,6 +1318,8 @@ class SessionManager {
     this.buildEnv = buildEnv;
     this.sessions = new Map(); // id -> Session
     this.activeId = null;      // renderer-visible session (for notifications)
+    this._effortCapsModels = null;  // 模型能力表(全局取一次,见 loadEffortCapability)
+    this._effortCapsTried = false;
   }
 
   send(channel, payload) {
@@ -1331,6 +1336,45 @@ class SessionManager {
   async sdkAvailable() {
     const ok = await loadSdk();
     return { ok, error: sdkError };
+  }
+
+  // 模型能力表(v0.15.20):Query.supportedModels() 给的是 claude.exe **内置的静态别名
+  // 注册表**(default/opus/sonnet/haiku/fable-5),与所选 Key、会话、模型无关,实测也不联网
+  // (1.9s 返回)。因此全应用只取一次,由渲染端经 sess:effortCaps 拉取缓存(见 effortCaps)。
+  //
+  // 时机:它必须挂在一条真正跑起来的 query 上。取到的早晚取决于会话何时 start():
+  //   - 新建会话:create() 里就是 s.start(...),所以**建会话即取**,面板立刻可用;
+  //   - 应用重启后直接打开一条已存会话:ensure() 只懒构造、不启动,要等首次发送才 start,
+  //     那之前渲染端拿不到表——此时面板行为与本改动之前完全一致(不做模型级禁用,原样下发,
+  //     由 SDK 自身静默降级兜底)。不为这张表额外常驻一个 claude.exe。
+  //
+  // 为什么是**拉**而不是推(v0.15.20 实测):最初做成一次性 `sess:event` 推送,探针里主进程
+  // 日志确认 `send` 在活着的 winId=1 上无异常发出(载荷可 structuredClone),渲染端的
+  // ipcRenderer 却没有收到——同一 start() 里 730ms 前发出的 ui_agent_config 正常送达。
+  // 推一次就没有第二次机会:窗口重建/会话未就绪/竞态都会让这张全局表永久丢失。改成拉以后,
+  // 渲染端什么时候准备好就什么时候取,取不到也只是维持「未知」旧行为,不会把功能打死。
+  //
+  // 失败只试一次:老版 claude.exe 没有这个方法、或握手异常时,直接放弃并不再重试,
+  // 避免每条会话都白等一次。
+  async loadEffortCapability(q, sid) {
+    if (this._effortCapsModels || this._effortCapsTried) return this._effortCapsModels || null;
+    this._effortCapsTried = true;
+    try {
+      const models = await q.supportedModels();
+      if (Array.isArray(models) && models.length) {
+        this._effortCapsModels = models;
+        return models;
+      }
+    } catch (e) {
+      console.error('[sessions] supportedModels 不可用,推理深度按未知处理:', e && e.message);
+    }
+    return null;
+  }
+
+  // 渲染端拉取入口(ipcMain.handle('sess:effortCaps')):只读已取到的缓存,没取到给 null。
+  // 刻意不在这里触发新抓取——抓取时机仍只挂在会话 start() 上(见 loadEffortCapability)。
+  effortCaps() {
+    return this._effortCapsModels || null;
   }
 
   list() {

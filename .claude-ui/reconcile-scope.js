@@ -19,7 +19,22 @@ async function alive(pid, started) {
   const fixed = [];
   for (const item of items) {
     if (item.status === 'released') continue;
-    if (item.status === 'attached' || !item.pid) continue;
+    if (item.status === 'attached') continue;
+    // 卡在 starting 且从未记下 pid/supervisorPid:supervisor 连 spawn 都没成功
+    // (v0.15.20 实测:launch 返回 status:"starting" 后永久不动),没有任何进程可核对
+    // identity,也就没有任何进程可残留——只清账面记录。runtime 只在 spawn 成功后写 pid,
+    // 故 pid 缺失即可判定「未曾启动」。
+    if (!item.pid && !item.supervisorPid) {
+      const next = { ...item, status: 'released', error: item.error || 'never-spawned (no pid recorded)' };
+      const file = path.join(dir, item.id, 'state.json');
+      const tmp = file + '.' + require('crypto').randomUUID() + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
+      fs.renameSync(tmp, file);
+      try { fs.rmSync(path.join(dir, item.id, 'stop'), { force: true }); } catch {}
+      fixed.push({ id: item.id, pid: null, supervisorPid: null, note: 'never-spawned' });
+      continue;
+    }
+    if (!item.pid) continue;
     const targetAlive = await alive(item.pid, item.started);
     const supAlive = await alive(item.supervisorPid, item.supervisorStarted);
     if (!targetAlive && !supAlive) {

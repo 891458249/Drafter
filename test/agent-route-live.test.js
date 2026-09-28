@@ -120,6 +120,9 @@ for (const kind of ['code', 'chat']) test(`真实运行时:${kind} 自动压缩�
     if (/Write the title in the predominant language/.test(JSON.stringify(body.messages))) return sseText(body.model, 'title');
     mainRequests++;
     const response = sseText(body.model, '记住项目暗号 ORCHID。继续任务。');
+    // 谎报的 input_tokens 只用来让 SDK 决定压缩,不经真实 token。gpt-6-astra 表值
+    // 1050000,v0.15.20 起窗口封顶 1000000(>1000000 时 SDK 完全不主动压缩),
+    // 190000 落在这个窗口的触发范围内。
     return mainRequests === 6 ? response.replace('"input_tokens":10', '"input_tokens":190000') : response;
   });
   const { mgr, events } = makeManager(gw.port);
