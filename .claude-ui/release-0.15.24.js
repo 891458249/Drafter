@@ -83,7 +83,7 @@ async function main() {
     const data = fs.readFileSync(path.join(DIST, local));
     return { local, remote, data, digest: 'sha256:' + crypto.createHash('sha256').update(data).digest('hex') };
   });
-  if (!/^version: 0.15.24\s*$/m.test(yml) || !yml.includes('url: ' + assets[0].remote)) throw new Error('Update metadata mismatch');
+  if (!/^version: 0\.15\.24\s*$/m.test(yml) || !yml.includes('url: ' + assets[0].remote)) throw new Error('Update metadata mismatch');
   if (crypto.createHash('sha512').update(assets[0].data).digest('base64') !== /sha512:\s*(\S+)/.exec(yml)?.[1]) throw new Error('Installer SHA-512 mismatch');
   // 签名体检(v0.15.17):证书到位前不阻断发布,但每次发版都必须看见签没签。
   // 拿到证书后设 CSC_LINK / CSC_KEY_PASSWORD 重建即生效;要强制签名可用
