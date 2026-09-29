@@ -495,19 +495,20 @@ html, body {
 }
 .effort-slider-trail-grid {
   position: absolute; top: 50%; right: 2px;
-  width: 137px; display: grid; grid-template-columns: repeat(20, 4px);
-  grid-template-rows: repeat(3, 4px); gap: 3px;
+  width: 138.5px; display: grid; grid-template-columns: repeat(40, 2px);
+  grid-template-rows: repeat(6, 2px); gap: 1.5px;
   transform: translateY(-50%);
 }
+/* 彗星拖尾:每个方块只朝左单向剥落并淡出,相位由 JS 哈希打散,不做来回波动。 */
 .effort-slider-pixel {
-  width: 4px; height: 4px; border-radius: 1px;
-  background: #fff; opacity: calc(.08 + var(--pixel-i) * .035);
-  animation: effort-comet 1.8s ease-in-out infinite;
-  animation-delay: calc((var(--pixel-i) * -.09s) - (var(--pixel-row) * .13s));
+  width: 2px; height: 2px; border-radius: .5px;
+  background: #fff; opacity: var(--pixel-a);
+  animation: effort-comet 1.1s linear infinite;
+  animation-delay: var(--pixel-d);
 }
 @keyframes effort-comet {
-  0%, 100% { transform: translateX(0); opacity: calc(.08 + var(--pixel-i) * .035); }
-  50% { transform: translateX(-5px); opacity: calc(.02 + var(--pixel-i) * .012); }
+  0% { transform: translateX(0); opacity: var(--pixel-a); }
+  100% { transform: translateX(-7px); opacity: calc(var(--pixel-a) * .1); }
 }
 .effort-slider-knob {
   position: absolute; top: 50%; width: 16px; height: 16px; border-radius: 50%;

@@ -199,3 +199,5 @@
 - 2026-09-29 「Drafter 比 Codex 慢」排查(只读,未改代码):最大的 Drafter 专属开销是调试收尾机制——`debug-resources/session.js` 每次 Bash/PowerShell/mcp 调用都注入约 1.6KB `additionalContext`(HARU 会话 b2a8 注入 64 次/104KB,fd42 86 次/131KB),而且强制走受管启动器:6046 会话 10 次启动器调用耗 371s,占工具总时间 689s 的一半以上。启动器结构缺陷可解释截图里「running 但进程和父进程都不在 / 卡 starting」:supervisor 是短命 Bash 命令的子进程,没有 detached,工具命令树结束后 Job 句柄关闭,KILL_ON_JOB_CLOSE 连带杀掉目标,状态来不及写回;CreateProcess 不继承 stdio,拿不到输出/日志;Stop hook 每回合结束都会 clean。gpt-6-sol 经 Kuro(Anthropic 协议)每次请求中位等待 6.5-7.1s,输出仅约 200 tok,单任务 54-106 轮;缓存命中约 95%,不是瓶颈;本地 model-guard 按块流式透传,开销可忽略。
 
 - 2026-09-29 v0.15.22 **已发布**:commit/tag `985539ab`,Release ID `398879499` 已设为 Latest,exe SHA-256 `92cbbe7a…0bd4`,**NotSigned**;内容包括规则单次注入、受管启动器 node 中继(`--wait`/日志/短命进程身份)、顶栏接口协议热切换(Anthropic↔OpenAI,model-guard 按请求读取)、滑块纠正以及 running 对账。首次上传 ECONNRESET,重跑后成功,`--verify` 全部通过。**坑:`npx asar extract-file` 会解到 cwd,会覆盖仓库 package.json**,核对打包内容请用 `asar list` 或临时目录。
+
+- 2026-09-29 彗尾加密(未发布):滑块小方块 60→240(40×6,2px/1.5px 间距),动画改为单向向左剥落淡出+JS 锥形亮度衰减+哈希相位,去掉往返波浪;探针断言同步 240,53/53、npm test 485/485。

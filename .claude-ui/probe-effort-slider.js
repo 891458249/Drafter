@@ -250,9 +250,9 @@ async function main() {
     })()`);
     ok(sliderVisual.pop <= 281 && sliderVisual.width <= 250 && sliderVisual.height === 24,
       '面板恢复原宽,滑轨粗细从 6px 增至 24px', sliderVisual);
-    ok(sliderVisual.pixels === 60 && sliderVisual.nested && sliderVisual.railClip === 'hidden' &&
+    ok(sliderVisual.pixels === 240 && sliderVisual.nested && sliderVisual.railClip === 'hidden' &&
       sliderVisual.fillClip === 'hidden' && sliderVisual.animation === 'effort-comet' && sliderVisual.pulse === 'none',
-      '60 个流动小方块在填充区内部裁剪,无整轨脉冲', sliderVisual);
+      '240 个彗尾小方块在填充区内部裁剪,无整轨脉冲', sliderVisual);
     await main.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     try {
       const reduceMotion = await evaluate(`(() => {

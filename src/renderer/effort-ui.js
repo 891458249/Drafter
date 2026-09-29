@@ -256,8 +256,18 @@ export function initEffortUi(injected = {}) {
   }
   const trail = $('effort-slider-trail-grid');
   if (trail && !trail.childElementCount) {
-    trail.innerHTML = Array.from({ length: 60 }, (_v, i) =>
-      `<span class="effort-slider-pixel" style="--pixel-i:${i % 20};--pixel-row:${Math.floor(i / 20)}"></span>`).join('');
+    // 彗尾:40 列 × 6 行。头部(右端,贴手柄)最亮最宽,向左按距离衰减,
+    // 外侧行的尾巴更短,形成锥形;相位用整数哈希打散,避免整齐的波浪。
+    const COLS = 40, ROWS = 6;
+    trail.innerHTML = Array.from({ length: COLS * ROWS }, (_v, n) => {
+      const col = n % COLS, row = Math.floor(n / COLS);
+      const spread = Math.abs(row - (ROWS - 1) / 2) / ((ROWS - 1) / 2); // 0 中心 … 1 边缘
+      const reach = 1 - spread * 0.55;                                   // 该行尾巴长度占比
+      const t = (COLS - 1 - col) / (COLS - 1);                           // 0 头部 … 1 尾端
+      const a = t > reach ? 0 : Math.pow(1 - t / reach, 1.7) * (1 - spread * 0.35);
+      const d = -(((col * 73 + row * 151) % 97) / 97) * 1.1;
+      return `<span class="effort-slider-pixel" style="--pixel-a:${a.toFixed(3)};--pixel-d:${d.toFixed(3)}s"></span>`;
+    }).join('');
   }
 
   btn.onclick = (e) => {
