@@ -283,8 +283,8 @@ export function initEffortUi(injected = {}) {
       `<span class="effort-slider-tick" data-i="${i}" style="left:${(i / LAST) * 100}%"></span>`).join('');
   }
   const sc = $('effort-slider-particles'), bc = $('effort-btn-particles');
-  if (sc) sliderFx = createParticleField(sc, { idleRate: 90, density: 1.2, headOffset: KNOB_R - 2 });
-  if (bc) btnFx = createParticleField(bc, { idleRate: 45, density: 0.9 });
+  if (sc) sliderFx = createParticleField(sc, { seed: 0 });
+  if (bc) btnFx = createParticleField(bc, { seed: 1 });
   render();
 
   btn.onclick = (e) => {

@@ -132,6 +132,16 @@ async function main() {
       if (res.exceptionDetails) throw new Error('eval failed: ' + JSON.stringify(res.exceptionDetails));
       return res.result ? res.result.value : undefined;
     };
+    // SHOT_DIR 设置时,对面板与入口按键截图(放大 3 倍)供肉眼对比
+    const shot = async (name) => {
+      if (!process.env.SHOT_DIR) return;
+      const box = await evaluate(`(() => { const a = document.querySelector('#effort-pop').getBoundingClientRect(),
+        b = document.querySelector('#btn-effort').getBoundingClientRect();
+        const x = Math.min(a.left, b.left) - 8, y = a.top - 8;
+        return { x, y, width: Math.max(a.right, b.right) + 8 - x, height: b.bottom + 8 - y }; })()`);
+      const r = await main.send('Page.captureScreenshot', { format: 'png', clip: { ...box, scale: 3 } });
+      fs.writeFileSync(path.join(process.env.SHOT_DIR, name + '.png'), Buffer.from(r.result.data, 'base64'));
+    };
     await wait(4000);
 
     // ① 存一个指向本地假网关的 Key,让 #model-sel 有真实选项(否则面板模型列表为空)
@@ -251,8 +261,9 @@ async function main() {
       '彗尾改为铺满滑轨的 canvas 粒子场(旧贴图网格已移除),由滑轨裁剪', sliderVisual);
     await wait(400);
     const idleFx = await evaluate(fx, true);
-    ok(idleFx.slider && idleFx.slider.running && idleFx.slider.emitting && idleFx.slider.count > 5,
-      '静止时滑块头部持续发射粒子', idleFx.slider);
+    await shot('1-idle-high');
+    ok(idleFx.slider && idleFx.slider.running && idleFx.slider.emitting && idleFx.slider.cells > 60,
+      '静止时手柄后方有 40×6 平铺彗尾方阵持续动画', idleFx.slider);
     await evaluate(`(() => {
       const s = document.querySelector('#effort-slider');
       const r = s.getBoundingClientRect(), x = (f) => r.left + 14 + (r.width - 28) * f;
@@ -284,18 +295,24 @@ async function main() {
       '拖动中入口按键的档位名/颜色/背景宽度与滑块实时同步', liveDrag);
     await wait(120);
     const midFx = await evaluate(fx, true);
+    await shot('2-drag-0.1-to-0.9');
     const w = midFx.slider.width;
     ok(midFx.slider.count > 60 && midFx.slider.minX < w * 0.25 && midFx.btn && midFx.btn.emitting && midFx.btn.count > 0,
       '拖动扫过的路径留下粒子(左侧远离手柄处仍有方块),按键粒子同步发射', { slider: midFx.slider, btn: midFx.btn });
+    ok(midFx.slider.onGrid && midFx.slider.rows.length === 6 && midFx.slider.gridH >= midFx.slider.height * 0.75,
+      '留痕方块对齐方格且铺满 6 行(纵向平铺,不聚在中线)', { rows: midFx.slider.rows, gridH: midFx.slider.gridH, h: midFx.slider.height });
+    ok(midFx.slider.maxDrift <= 15 && midFx.btn.maxDrift <= 15,
+      '单个方块漂移不超过 15px(小幅剥落,不乱窜)', { slider: midFx.slider.maxDrift, btn: midFx.btn.maxDrift });
     await evaluate(`window.__dragSend('pointermove', .3)`);
     await wait(100);
     const back = await evaluate(fx, true);
+    await shot('3-drag-back-to-0.3');
     ok(back.slider.maxX <= back.slider.frac * back.slider.width + 0.5 && (back.btn.count === 0 || back.btn.maxX <= back.btn.frac * back.btn.width + 0.5),
       '往回拖后头部右侧无粒子溢出(滑块与按键)', back);
     await evaluate(`window.__dragSend('pointercancel', .3)`);
     await wait(2600);
     const settled = await evaluate(fx, true);
-    ok(settled.slider.minX > w * 0.25,
+    ok(settled.slider.count === 0 || settled.slider.minX > w * 0.25,
       '经过处的粒子随时间消散,不再锁定跟随', settled.slider);
     await main.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     try {
@@ -320,6 +337,7 @@ async function main() {
     }`;
     await evaluate(`(${dragTo})(1)`);
     await wait(600);
+    await shot('4-idle-max');
     const atMax = await evaluate(`(() => { const p = document.querySelector('#effort-pop'), s = document.querySelector('#effort-slider');
       return { level: p.getAttribute('data-level'), now: s.getAttribute('aria-valuenow'), text: s.getAttribute('aria-valuetext'),
                disabled: s.getAttribute('aria-disabled'), label: document.querySelector('#effort-pop-level').textContent,
