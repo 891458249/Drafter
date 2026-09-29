@@ -201,3 +201,4 @@
 - 2026-09-29 v0.15.22 **已发布**:commit/tag `985539ab`,Release ID `398879499` 已设为 Latest,exe SHA-256 `92cbbe7a…0bd4`,**NotSigned**;内容包括规则单次注入、受管启动器 node 中继(`--wait`/日志/短命进程身份)、顶栏接口协议热切换(Anthropic↔OpenAI,model-guard 按请求读取)、滑块纠正以及 running 对账。首次上传 ECONNRESET,重跑后成功,`--verify` 全部通过。**坑:`npx asar extract-file` 会解到 cwd,会覆盖仓库 package.json**,核对打包内容请用 `asar list` 或临时目录。
 
 - 2026-09-29 彗尾加密(未发布):滑块小方块 60→240(40×6,2px/1.5px 间距),动画改为单向向左剥落淡出+JS 锥形亮度衰减+哈希相位,去掉往返波浪;探针断言同步 240,53/53、npm test 485/485。
+- 2026-09-29 v0.15.23 **已发布**:tag `e6ac304a`,Release ID `398909676` Latest,exe SHA-256 `603e0dec…0ebf`,NotSigned;仅彗尾加密(240 方块)+单向拖尾动画。一次上传成功,--verify 通过。
