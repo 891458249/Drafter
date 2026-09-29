@@ -6,8 +6,8 @@
 //   C. 「跟随默认」→ .is-off + meta.effort===null + aria-disabled="true";取消 → 恢复上次显式档
 //   D. ⚡极速 chat 会话 → 滑块禁用(.is-disabled)但模型列表仍可点
 //
-// 注:受管 launch 会 KILL_ON_JOB_CLOSE 硬杀长探针(v0.15.14 已坐实),故隔离直跑
-// (独立 userData/独立 CDP 端口/独立假网关)+ finally 自清理。
+// 注:受管 launch 曾因 KILL_ON_JOB_CLOSE 提前终止长探针(v0.15.14 已坐实)。
+// 本探针使用独立 userData/CDP/假网关,并在 finally 关闭连接、等待自有 Electron 退出。
 const { spawn } = require('node:child_process');
 const http = require('node:http');
 const path = require('node:path');
@@ -27,7 +27,7 @@ let passed = 0;
 
 // 受管 launch 不转发子进程 stdout(v0.15.14 已坐实),故自写日志——
 // 无论经受管入口还是隔离直跑,结果都落同一文件。
-const LOG = 'D:/ClaudeUI/.claude-ui/probe-effort.out.txt';
+const LOG = 'D:/ClaudeUI/.claude-ui/probe-effort-width-correction.out.txt';
 const _log = console.log.bind(console);
 const _err = console.error.bind(console);
 try { fs.writeFileSync(LOG, ''); } catch {}
@@ -236,18 +236,33 @@ async function main() {
     ok(activated.off === false && activated.disabled === 'false' && activated.label === '深度',
       '取消跟随后滑块解锁并显示「深度」', activated);
 
-    // 宽度、方块拖尾与拖动过程中的实时颜色(不等 pointerup 才改变)
+    // 轨道加厚四倍,彗尾应在填充区域内部且只在可用态流动
     const sliderVisual = await evaluate(`(() => {
       const p = document.querySelector('#effort-pop'), s = document.querySelector('#effort-slider');
-      const rail = s.querySelector('.effort-slider-rail');
-      return { width: rail.getBoundingClientRect().width, pop: p.getBoundingClientRect().width,
-        viewport: window.innerWidth, pixels: s.querySelectorAll('.effort-slider-pixel').length,
-        pulse: getComputedStyle(s.querySelector('.effort-slider-fill'), '::after').content };
+      const rail = s.querySelector('.effort-slider-rail'), fill = s.querySelector('.effort-slider-fill');
+      const trail = s.querySelector('.effort-slider-trail'), pixel = trail.querySelector('.effort-slider-pixel');
+      return { width: rail.getBoundingClientRect().width, height: rail.getBoundingClientRect().height,
+        pop: p.getBoundingClientRect().width, viewport: window.innerWidth,
+        pixels: s.querySelectorAll('.effort-slider-pixel').length,
+        nested: fill.contains(trail), railClip: getComputedStyle(rail).overflow,
+        fillClip: getComputedStyle(fill).overflow, animation: getComputedStyle(pixel).animationName,
+        pulse: getComputedStyle(fill, '::after').content };
     })()`);
-    ok(sliderVisual.width >= Math.min(976, sliderVisual.viewport - 24) - 50 &&
-      (sliderVisual.viewport < 1000 || sliderVisual.width >= 900),
-      '宽窗口滑轨约为旧版 4 倍,窄窗口按视口收缩', sliderVisual);
-    ok(sliderVisual.pixels === 60 && sliderVisual.pulse === 'none', '60 个小方块替代原脉冲光效', sliderVisual);
+    ok(sliderVisual.pop <= 281 && sliderVisual.width <= 250 && sliderVisual.height === 24,
+      '面板恢复原宽,滑轨粗细从 6px 增至 24px', sliderVisual);
+    ok(sliderVisual.pixels === 60 && sliderVisual.nested && sliderVisual.railClip === 'hidden' &&
+      sliderVisual.fillClip === 'hidden' && sliderVisual.animation === 'effort-comet' && sliderVisual.pulse === 'none',
+      '60 个流动小方块在填充区内部裁剪,无整轨脉冲', sliderVisual);
+    await main.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    try {
+      const reduceMotion = await evaluate(`(() => {
+        const pixel = document.querySelector('.effort-slider-pixel');
+        return matchMedia('(prefers-reduced-motion: reduce)').matches && getComputedStyle(pixel).animationName === 'none';
+      })()`);
+      ok(reduceMotion, '减少动态效果时停用彗尾动画', reduceMotion);
+    } finally {
+      await main.send('Emulation.setEmulatedMedia', { features: [] });
+    }
     const liveDrag = await evaluate(`(() => {
       const s = document.querySelector('#effort-slider'), p = document.querySelector('#effort-pop');
       const r = s.getBoundingClientRect(), x = (f) => r.left + 8 + (r.width - 16) * f;
@@ -263,12 +278,17 @@ async function main() {
       const label = document.querySelector('#effort-pop-level').textContent;
       const trail = s.querySelector('.effort-slider-trail-grid').getBoundingClientRect();
       const knob = s.querySelector('.effort-slider-knob').getBoundingClientRect();
+      const fill = s.querySelector('.effort-slider-fill').getBoundingClientRect();
+      const rail = s.querySelector('.effort-slider-rail').getBoundingClientRect();
       send('pointercancel', .9);
-      return { before, after, frac, label, gap: knob.left - trail.right };
+      return { before, after, frac, label, gap: knob.left - trail.right,
+        inside: fill.left >= rail.left && fill.right <= rail.right &&
+          trail.top >= rail.top && trail.bottom <= rail.bottom };
     })()`);
     ok(liveDrag.before !== liveDrag.after && Math.abs(Number(liveDrag.frac) - .9) < .0001 && liveDrag.label === '极限',
       'pointermove 即改变档位色、手柄位置与标题,无需松开', liveDrag);
-    ok(liveDrag.gap >= 0 && liveDrag.gap <= 16, '方块拖尾紧随手柄左侧', liveDrag);
+    ok(liveDrag.inside && liveDrag.gap >= -10 && liveDrag.gap <= 10,
+      '彗尾完全在填充轨道内,末端紧随手柄', liveDrag);
 
     // 拖到最右(第 5 格):pointerdown → pointerup 同一位置
     const dragTo = `(frac) => {
@@ -407,28 +427,42 @@ async function main() {
 
     console.log(`PASS: 「选择强度」面板端到端(${passed} 项断言)`);
   } finally {
-    try { if (mainWs) mainWs.close(); } catch {}
-    server.close();
-    await stopChild(child);
-    // 必须等 electron 真正退出后再删:userData 在 temp 里,进程未退时文件被占,
-    // 直接 rmSync 会静默失败并留下一堆临时目录(实测 7 次运行留下 7 个)。
-    try { fs.rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); }
-    catch (e) { console.error('清理临时目录失败(需人工核对):' + temp + ' — ' + e.message); }
+    if (mainWs) {
+      try {
+        if (mainWs.readyState !== 3) {
+          const closed = new Promise((resolve) => mainWs.once('close', resolve));
+          mainWs.close();
+          await Promise.race([closed, wait(2000)]);
+          if (mainWs.readyState !== 3) mainWs.terminate();
+        }
+      } catch (e) { console.error('CDP 断开失败:', e.message); }
+    }
+    await new Promise((resolve) => server.close(resolve));
+    const exited = await stopChild(child);
+    if (!exited) console.error('Electron 退出未确认,保留目录待核对:', temp);
+    else {
+      try { fs.rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); }
+      catch (e) { console.error('清理临时目录失败(需人工核对):' + temp + ' — ' + e.message); }
+    }
   }
 }
 
-// 先 SIGTERM,5s 未退再 SIGKILL,确保子进程树在自己退出后才做目录清理
+// 先 SIGTERM,5s 未退再 SIGKILL;只有观察到 exit 才允许删除 userData。
 function stopChild(child) {
   return new Promise((resolve) => {
-    if (child.exitCode !== null || child.signalCode) return resolve();
+    if (child.exitCode !== null || child.signalCode) return resolve(true);
     let settled = false;
-    const done = () => { if (!settled) { settled = true; resolve(); } };
-    child.once('exit', done);
+    const done = (exited) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(force);
+      clearTimeout(limit);
+      resolve(exited);
+    };
+    child.once('exit', () => done(true));
     try { child.kill(); } catch {}
-    setTimeout(() => {
-      try { child.kill('SIGKILL'); } catch {}
-      setTimeout(done, 2000);
-    }, 5000);
+    const force = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 5000);
+    const limit = setTimeout(() => done(false), 7000);
   });
 }
 

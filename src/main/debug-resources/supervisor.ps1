@@ -19,19 +19,42 @@ public static class DebugJob {
   [DllImport("kernel32.dll")] public static extern bool TerminateJobObject(IntPtr job,uint code);
   [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int type,IntPtr data,uint size,IntPtr length);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr process,out uint code);
+  [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int which);
+  [DllImport("kernel32.dll")] static extern bool SetHandleInformation(IntPtr handle,uint mask,uint flags);
+  [StructLayout(LayoutKind.Sequential)] struct SECURITY_ATTRIBUTES { public int length; public IntPtr descriptor; public bool inherit; }
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateFile(string name,uint access,uint share,ref SECURITY_ATTRIBUTES sa,uint disposition,uint flags,IntPtr template);
   static void Check(bool ok) { if (!ok) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()); }
+  // The target's handle stays open so the exit code can be recorded after the Job drains.
+  public static IntPtr Process = IntPtr.Zero;
+  static IntPtr Inheritable(string name,uint access,uint disposition) {
+    var sa=new SECURITY_ATTRIBUTES(); sa.length=Marshal.SizeOf(sa); sa.inherit=true;
+    var h=CreateFile(name,access,7,ref sa,disposition,0x80,IntPtr.Zero); Check(h!=new IntPtr(-1)); return h;
+  }
+  public static int ExitCode() { uint code; return Process!=IntPtr.Zero && GetExitCodeProcess(Process,out code) ? (int)code : -1; }
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetProcessTimes(IntPtr process,out long creation,out long exit,out long kernel,out long user);
+  // Same format as Process.StartTime.ToUniversalTime().Ticks, but read from the held handle so a
+  // target that exits immediately (launch --wait on a short script) still gets a recorded identity.
+  public static string Started() { long c,e,k,u; return Process!=IntPtr.Zero && GetProcessTimes(Process,out c,out e,out k,out u) ? DateTime.FromFileTimeUtc(c).Ticks.ToString() : null; }
   public static IntPtr Create() {
     var job=CreateJobObject(IntPtr.Zero,null); Check(job!=IntPtr.Zero);
     var info=new EXTENDED_LIMIT(); info.basic.flags=0x2000; // KILL_ON_JOB_CLOSE, no breakaway
     try { Check(SetInformationJobObject(job,9,ref info,(uint)Marshal.SizeOf(info))); return job; }
     catch { CloseHandle(job); throw; }
   }
-  public static uint Start(IntPtr job,string app,string command,string cwd) {
-    var si=new STARTUPINFO(); si.cb=Marshal.SizeOf(si); PROCESS_INFORMATION pi;
-    Check(CreateProcess(app,new StringBuilder(command),IntPtr.Zero,IntPtr.Zero,false,0x00000004|0x00000400,IntPtr.Zero,cwd,ref si,out pi));
-    try { Check(AssignProcessToJobObject(job,pi.process)); Check(ResumeThread(pi.thread)!=0xffffffff); return pi.pid; }
-    catch { TerminateProcess(pi.process,1); throw; }
-    finally { CloseHandle(pi.thread); CloseHandle(pi.process); }
+  // stdout/stderr go to a log file the agent can read; stdin is NUL. CREATE_NO_WINDOW keeps
+  // console targets hidden now that the supervisor itself has no console.
+  public static uint Start(IntPtr job,string app,string command,string cwd,string log) {
+    // The supervisor's own stdio pipes to the launcher must not leak into the target,
+    // otherwise the target would keep the launcher's pipe open after the handshake.
+    foreach (var std in new[] { -10, -11, -12 }) { var h=GetStdHandle(std); if (h!=IntPtr.Zero && h!=new IntPtr(-1)) SetHandleInformation(h,1,0); }
+    var output=Inheritable(log,0x40000000,2); var input=Inheritable("NUL",0x80000000,3);
+    var si=new STARTUPINFO(); si.cb=Marshal.SizeOf(si); si.flags=0x100; si.input=input; si.output=output; si.error=output; PROCESS_INFORMATION pi;
+    try { Check(CreateProcess(app,new StringBuilder(command),IntPtr.Zero,IntPtr.Zero,true,0x00000004|0x00000400|0x08000000,IntPtr.Zero,cwd,ref si,out pi)); }
+    finally { CloseHandle(output); CloseHandle(input); }
+    try { Check(AssignProcessToJobObject(job,pi.process)); Check(ResumeThread(pi.thread)!=0xffffffff); Process=pi.process; return pi.pid; }
+    catch { TerminateProcess(pi.process,1); CloseHandle(pi.process); throw; }
+    finally { CloseHandle(pi.thread); }
   }
   public static uint[] Members(IntPtr job) {
     int size=65536; IntPtr mem=Marshal.AllocHGlobal(size);
@@ -61,8 +84,9 @@ try {
   if ((Identity $spec.ownerPid) -ne $spec.ownerStarted) { throw 'Debug owner has already exited or changed identity' }
   if ($spec.env) { foreach ($entry in $spec.env.PSObject.Properties) { [Environment]::SetEnvironmentVariable($entry.Name, [string]$entry.Value, 'Process') } }
   $job = [DebugJob]::Create()
-  $childId = [DebugJob]::Start($job, $spec.exe, $spec.command, $spec.cwd)
-  $state = @{ version=1; id=$spec.id; scope=$spec.scope; status='running'; pid=$childId; started=(Identity $childId); exe=$spec.exe; supervisorPid=$PID; supervisorStarted=(Identity $PID); ownerPid=$spec.ownerPid; ownerStarted=$spec.ownerStarted; ports=@($spec.ports); error=$null }
+  $log = Join-Path $Directory 'output.log'
+  $childId = [DebugJob]::Start($job, $spec.exe, $spec.command, $spec.cwd, $log)
+  $state = @{ version=1; id=$spec.id; scope=$spec.scope; status='running'; pid=$childId; started=[DebugJob]::Started(); exe=$spec.exe; supervisorPid=$PID; supervisorStarted=(Identity $PID); ownerPid=$spec.ownerPid; ownerStarted=$spec.ownerStarted; ports=@($spec.ports); log=$log; exitCode=$null; error=$null }
   Save-State $state
   [Console]::Out.WriteLine('ready')
   $stopFile = Join-Path $Directory 'stop'
@@ -82,6 +106,7 @@ try {
   $deadline = [DateTime]::UtcNow.AddSeconds(5)
   while (([DebugJob]::Members($job)).Count -gt 0 -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
   if (([DebugJob]::Members($job)).Count -ne 0) { throw 'Debug Job still contains active processes' }
+  $state.exitCode = [DebugJob]::ExitCode()
   $state.status = 'released'
   Save-State $state
 } catch {
@@ -89,5 +114,6 @@ try {
   [Console]::Error.WriteLine($_.Exception.Message)
   exit 1
 } finally {
+  if ([DebugJob]::Process -ne [IntPtr]::Zero) { [void][DebugJob]::CloseHandle([DebugJob]::Process) }
   if ($job -ne [IntPtr]::Zero) { [void][DebugJob]::CloseHandle($job) }
 }

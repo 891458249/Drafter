@@ -18,6 +18,7 @@ export const state = {
   canvasEngine: 'native', // 画布引擎(v0.13.0):native=自研 Canvas 2D 引擎;'drawflow'=旧 Drawflow,boot 时从设置载入
   comfyAdvancedMode: false, // 外部 ComfyUI 服务为高级可选后端;默认 API Key 原生画布
   mediaShop: 'all',      // 创作板块工坊筛选:'all'|'image'|'video'|'audio'|'model'(v0.9.38)
+  KeyProtocols: new Map(),// keyId → Key 默认接口协议 'anthropic'|'openai'(v0.15.22 协议热切换按钮回显用)
   GroupsCache: new Map(),// Kuro 模型分组缓存:keyId → [{category, model_type, models}](populateModelSelects/ensureGroups 填充)
 };
 
@@ -43,7 +44,10 @@ export async function ensureGroups() {
   groupsLoaded = true;
   try {
     const { list } = await api.keysList();
-    for (const k of list || []) if (Array.isArray(k.modelGroups)) state.GroupsCache.set(k.id, k.modelGroups);
+    for (const k of list || []) {
+      if (Array.isArray(k.modelGroups)) state.GroupsCache.set(k.id, k.modelGroups);
+      state.KeyProtocols.set(k.id, k.protocol === 'openai' ? 'openai' : 'anthropic');
+    }
   } catch {}
 }
 
@@ -51,6 +55,13 @@ export async function ensureGroups() {
 // 缓存里的 model_type;查不到(分组失效)依次回退会话 board 戳(主进程在迁移/
 // 建会话/换模型时盖的最近已知类型)与旧 kind;都不行返回 null。
 const MEDIA_BOARDS = ['image', 'video', 'audio', 'model'];
+// 会话实际生效的接口协议(v0.15.22):会话覆盖 > Key 默认 > anthropic
+export function effectiveProtocol(meta) {
+  if (!meta) return 'anthropic';
+  if (meta.protocol === 'openai' || meta.protocol === 'anthropic') return meta.protocol;
+  return state.KeyProtocols.get(meta.keyId) || 'anthropic';
+}
+
 export function boardOf(keyId, model, kind, board) {
   const groups = keyId ? state.GroupsCache.get(keyId) : null;
   const g = groups && groups.find((x) => Array.isArray(x.models) && x.models.includes(model));

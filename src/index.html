@@ -205,6 +205,7 @@
             <button id="gem-sel-btn" class="btn btn-sm" title="选择 Gem 自定义助手(指令/知识随会话注入)">💎 <span id="gem-sel-name">Gem</span></button>
             <button id="skill-sel-btn" class="btn btn-sm sdk-only" title="挂载技能到本会话(模型按需调用,渐进披露);还可为下一条消息手动指定,手动指定优先级最高">🧩 <span id="skill-sel-name">技能</span></button>
             <button id="btn-chat-mode" class="btn btn-sm chat-only chat-mode-on" title="极速问答(零工具+极简提示,响应快 5-10 倍,纯问答)。点击切换 Agent 模式">⚡ 极速</button>
+            <button id="btn-protocol" class="btn btn-sm sdk-only" title="接口协议:点击在 Anthropic 原生 / OpenAI 原生之间热切换(本会话,下一次请求生效)">A 协议</button>
             <button id="btn-compact" class="btn btn-sm sdk-only" title="压缩上下文 (/compact)">压缩</button>
             <label class="ctrl sdk-only">模式
               <select id="perm-mode">
@@ -239,9 +240,10 @@
                 <div class="effort-slider" id="effort-slider" role="slider" tabindex="0"
                      aria-label="推理深度" aria-valuemin="0" aria-valuemax="4" aria-valuenow="2" aria-valuetext="深度">
                   <div class="effort-slider-rail">
-                    <div class="effort-slider-fill" id="effort-slider-fill"></div>
+                    <div class="effort-slider-fill" id="effort-slider-fill">
+                      <div class="effort-slider-trail" aria-hidden="true"><div class="effort-slider-trail-grid" id="effort-slider-trail-grid"></div></div>
+                    </div>
                   </div>
-                  <div class="effort-slider-trail" aria-hidden="true"><div class="effort-slider-trail-grid" id="effort-slider-trail-grid"></div></div>
                   <div class="effort-slider-knob" id="effort-slider-knob"></div>
                   <div class="effort-slider-ticks" id="effort-slider-ticks"></div>
                 </div>

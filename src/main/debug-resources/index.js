@@ -23,7 +23,7 @@ function atomicWrite(file, data) {
 async function identity(pid) {
   if (!Number.isSafeInteger(pid) || pid < 1) throw new Error('Invalid process id');
   const { stdout } = await exec(psExe(), ['-NoProfile', '-NonInteractive', '-Command',
-    `try { $p=[Diagnostics.Process]::GetProcessById(${pid}); $p.StartTime.ToUniversalTime().Ticks.ToString() } catch { exit 3 }`], { windowsHide: true, timeout: 5000, cwd: os.tmpdir() });
+    `try { $p=[Diagnostics.Process]::GetProcessById(${pid}); $p.StartTime.ToUniversalTime().Ticks.ToString() } catch [System.ArgumentException] { exit 3 } catch { exit 4 }`], { windowsHide: true, timeout: 5000, cwd: os.tmpdir() });
   return stdout.trim();
 }
 async function hookOwner() {
@@ -52,24 +52,58 @@ async function portFree(port) {
     server.listen({ port, host: '127.0.0.1', exclusive: true }, () => server.close(() => resolve(true)));
   });
 }
+async function originalProcessGone(pid, started) {
+  if (!Number.isSafeInteger(pid) || pid < 1 || !started) return false;
+  try { return await identity(pid) !== started; }
+  catch (e) { if (e.code === 3) return true; throw e; }
+}
+const STARTUP_TIMEOUT = 20000;
+async function reconcile(scope, item) {
+  // A launch that never reached `running` has no recorded process. Once the startup
+  // window has passed, its supervisor is gone and closing the supervisor's only Job
+  // handle already terminated anything it created, so the record can be retired.
+  if (item.status === 'starting' && !item.pid && !item.supervisorPid) {
+    let age = 0;
+    try { age = Date.now() - fs.statSync(path.join(scopeDir(scope), item.id, 'state.json')).mtimeMs; } catch { return item; }
+    if (age < STARTUP_TIMEOUT * 2) return item;
+    const current = records(scope).find((record) => record.id === item.id);
+    if (!current || current.status !== 'starting' || current.pid || current.supervisorPid) return current || item;
+    const released = { ...current, status: 'released', error: 'Launch never reached running' };
+    atomicWrite(path.join(scopeDir(scope), item.id, 'state.json'), released);
+    return released;
+  }
+  if (!['running', 'failed'].includes(item.status) || !item.pid || !item.started || !item.supervisorPid || !item.supervisorStarted) return item;
+  try {
+    if (!await originalProcessGone(item.supervisorPid, item.supervisorStarted) ||
+        !await originalProcessGone(item.pid, item.started)) return item;
+    for (const port of item.ports || []) if (!await portFree(port)) return item;
+  } catch { return item; }
+  // The supervisor is gone; re-read before writing to avoid reverting an update it already saved.
+  const current = records(scope).find((record) => record.id === item.id);
+  if (!current || !['running', 'failed'].includes(current.status) ||
+      current.pid !== item.pid || current.started !== item.started ||
+      current.supervisorPid !== item.supervisorPid || current.supervisorStarted !== item.supervisorStarted) return current || item;
+  const released = { ...current, status: 'released', error: null };
+  atomicWrite(path.join(scopeDir(scope), item.id, 'state.json'), released);
+  return released;
+}
 async function verify(scope) {
   const items = records(scope);
   const pending = [];
-  for (const item of items) {
+  for (const recorded of items) {
+    const item = await reconcile(scope, recorded);
     if (item.status !== 'released') { pending.push({ id: item.id, reason: item.error || item.status }); continue; }
-    if (item.supervisorPid) {
+    for (const [pid, started, name] of [[item.supervisorPid, item.supervisorStarted, 'Supervisor'], [item.pid, item.started, 'Debug process']]) {
+      if (!pid) continue;
       try {
-        if (await identity(item.supervisorPid) === item.supervisorStarted) {
-          pending.push({ id: item.id, reason: 'Supervisor has not exited' });
-          continue;
-        }
-      } catch (e) { if (e.code !== 3) { pending.push({ id: item.id, reason: 'Cannot verify supervisor exit' }); continue; } }
+        if (!await originalProcessGone(pid, started)) pending.push({ id: item.id, reason: `${name} has not exited or has no recorded identity` });
+      } catch { pending.push({ id: item.id, reason: `Cannot verify ${name.toLowerCase()} exit` }); }
     }
     for (const port of item.ports || []) if (!await portFree(port)) pending.push({ id: item.id, reason: `Port ${port} remains occupied (ownership unknown; not terminated)` });
   }
   return { ok: pending.length === 0, count: items.length, pending };
 }
-async function launch({ scope, exe, args = [], cwd = os.tmpdir(), env, ports = [], ownerPid = process.pid }) {
+async function launch({ scope, exe, args = [], cwd = os.tmpdir(), env, ports = [], ownerPid = process.pid, wait = 0 }) {
   if (process.platform !== 'win32') throw new Error('Managed debug launch currently requires Windows; use explicit finally cleanup on this platform');
   if (!scope || !path.isAbsolute(exe) || !path.isAbsolute(cwd)) throw new Error('scope and absolute exe/cwd are required');
   if (!ports.every((p) => Number.isInteger(p) && p > 0 && p < 65536)) throw new Error('Invalid debug ports');
@@ -81,16 +115,26 @@ async function launch({ scope, exe, args = [], cwd = os.tmpdir(), env, ports = [
   // The supervisor script and cwd live outside the software being tested.
   const script = path.join(dir, 'supervisor.ps1');
   fs.copyFileSync(path.join(__dirname, 'supervisor.ps1'), script);
-  const child = spawn(psExe(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-Directory', dir], {
-    cwd: os.tmpdir(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+  const relay = path.join(dir, 'relay.js');
+  fs.copyFileSync(path.join(__dirname, 'relay.js'), relay);
+  // libuv puts every non-detached child into the parent's KILL_ON_JOB_CLOSE Job, so a short-lived
+  // `cli.js launch` would take the supervisor (and its target) down on exit. PowerShell cannot run
+  // detached (no console), so a detached node relay hosts it; see relay.js.
+  const child = spawn(process.execPath, [relay, psExe(), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-Directory', dir], {
+    cwd: os.tmpdir(), windowsHide: true, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
   });
   let error = '';
+  let output = '';
   child.stderr.on('data', (data) => { error = (error + data).slice(-4000); });
   const ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Debug supervisor startup timeout')), 20000);
+    const timer = setTimeout(() => reject(new Error('Debug supervisor startup timeout')), STARTUP_TIMEOUT);
     child.once('error', (e) => { clearTimeout(timer); reject(e); });
     child.once('exit', (code) => { clearTimeout(timer); reject(new Error(error || `Debug supervisor exited: ${code}`)); });
-    child.stdout.once('data', () => { clearTimeout(timer); resolve(); });
+    child.stdout.on('data', (data) => {
+      output = (output + data).slice(-200);
+      if (/(^|\n)ready\r?\n/.test(output)) { clearTimeout(timer); resolve(); }
+    });
   });
   child.stdin.on('error', () => {});
   child.stdin.end(JSON.stringify({ id, scope, exe, command: [exe, ...args].map(quote).join(' '), cwd, env, ports, ownerPid, ownerStarted }) + '\n');
@@ -102,7 +146,34 @@ async function launch({ scope, exe, args = [], cwd = os.tmpdir(), env, ports = [
     throw e;
   }
   child.stdout.destroy(); child.stderr.destroy(); child.unref();
-  return records(scope).find((item) => item.id === id);
+  const record = records(scope).find((item) => item.id === id);
+  return wait ? waitForExit(scope, id, wait) : record;
+}
+function tail(file, bytes = 8000) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const size = fs.fstatSync(fd).size;
+    const buf = Buffer.alloc(Math.min(size, bytes));
+    fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+    return (size > bytes ? '…(truncated)\n' : '') + buf.toString('utf8');
+  } catch { return ''; } finally { if (fd !== undefined) fs.closeSync(fd); }
+}
+// Foreground mode: block until the target exits (or the timeout stops it), then return
+// its exit code and output. The record is released by then, so nothing is left to clean.
+async function waitForExit(scope, id, timeoutMs) {
+  const dir = path.join(scopeDir(scope), id);
+  const end = Date.now() + timeoutMs;
+  let timedOut = false;
+  for (;;) {
+    const item = records(scope).find((r) => r.id === id);
+    if (!item || ['released', 'failed'].includes(item.status)) {
+      return { ...item, timedOut, output: tail(path.join(dir, 'output.log')) };
+    }
+    if (!timedOut && Date.now() > end) { timedOut = true; fs.writeFileSync(path.join(dir, 'stop'), 'wait timeout'); }
+    if (timedOut && Date.now() > end + 15000) return { ...item, timedOut, output: tail(path.join(dir, 'output.log')) };
+    await delay(100);
+  }
 }
 function attach(scope, { name, release, verify: check }) {
   if (typeof release !== 'function' || typeof check !== 'function') throw new Error('Attached debug resources require release and verify callbacks');

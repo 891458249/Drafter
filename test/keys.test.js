@@ -413,3 +413,10 @@ test('protocol:主流 OpenAI 协议主机自动识别(v0.15.2 预设配套)', ()
   assert.strictEqual(keys.guessProtocol('https://open.bigmodel.cn/api/anthropic'), 'anthropic');
   assert.strictEqual(keys.guessProtocol('https://api.minimaxi.com/anthropic'), 'anthropic');
 });
+
+test('endpointOf:会话协议覆盖优先于 Key 设置,null 跟随 Key(v0.15.22)', () => {
+  assert.strictEqual(keys.endpointOf({ protocol: 'anthropic' }, 'openai').viaProxy, true);
+  assert.strictEqual(keys.endpointOf({ protocol: 'openai' }, 'anthropic').viaProxy, false);
+  assert.strictEqual(keys.endpointOf({ protocol: 'openai' }, null).viaProxy, true);
+  assert.strictEqual(keys.endpointOf({ protocol: 'anthropic' }, 'bogus').viaProxy, false);
+});

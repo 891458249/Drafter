@@ -364,12 +364,14 @@ class Session {
     // 有明确主模型时把 ANTHROPIC_BASE_URL 指到本地守卫代理;每次请求离机前按
     //「当前主模型 + 当前勾选子 Agent」硬校验;OpenAI 协议再向内转发给 oai-proxy 翻译。
     let modelGuardBaseUrl = null;
+    this._guarded = false;
     if (this.meta.model && this.meta.keyId && modelGuard.isRunning()) {
       const keyEntry = keys.byId(this.meta.keyId);
       if (keyEntry) {
         modelGuard.register({
           sid: this.id,
           keyId: this.meta.keyId,
+          getProtocol: () => this.meta.protocol || null,
           getAllowedModels: () => [
             this.meta.model,
             ...allowedAgentModels(this.meta),
@@ -383,6 +385,7 @@ class Session {
           },
         });
         modelGuardBaseUrl = modelGuard.baseUrlFor(this.id);
+        this._guarded = true;
       }
     }
     const debugCleanup = fastOv ? null : createSessionCleanup(this.id, (event) => this._emit(event, true));
@@ -392,7 +395,7 @@ class Session {
       permissionMode: fastOv ? 'bypassPermissions' : (this.meta.permissionMode || 'default'),
       includePartialMessages: true,
       forwardSubagentText: !fastOv,
-      env: this.m.buildEnv({ ELECTRON_RUN_AS_NODE: '1', __modelGuardBaseUrl: modelGuardBaseUrl }, this.meta.keyId), // 按会话绑定的 Key 注入凭据(v0.8.2);守卫代理强制模型白名单
+      env: this.m.buildEnv({ ELECTRON_RUN_AS_NODE: '1', __modelGuardBaseUrl: modelGuardBaseUrl, __protocol: this.meta.protocol || null }, this.meta.keyId), // 按会话绑定的 Key 注入凭据(v0.8.2);守卫代理强制模型白名单
       // 不读 user 级 settings(v0.11.6):~/.claude/settings.json 的 env(ANTHROPIC_AUTH_TOKEN/
       // BASE_URL 等)优先级高于 buildEnv 按会话 Key 注入的进程凭据——用户用 CLI 配置过网关时,
       // 所有会话都会被钉到那个网关(切 Key 无效,报 403 模型未配置)。app 凭据一律按 Key 注入,
@@ -1182,6 +1185,21 @@ class Session {
     return false;
   }
 
+  // 接口协议热切换(v0.15.22):'anthropic' 原生 Messages | 'openai' 经 oai-proxy 翻译为
+  // Chat Completions | null 跟随 Key 设置。任何模型均可选。经 model-guard 的会话每个请求
+  // 现取 meta.protocol,下一次请求即生效、不重启;未经守卫(无明确模型)的会话在空闲时
+  // stop+start(resume 保上下文),回合中则回合结束后生效。
+  async setProtocol(protocol) {
+    const p = protocol === 'openai' || protocol === 'anthropic' ? protocol : null;
+    this.meta.protocol = p;
+    store.upsertSession({ id: this.id, protocol: p });
+    if (!this.running || this._guarded) return { protocol: p, pending: false };
+    if (this.busy) { this.needRestart = true; return { protocol: p, pending: true }; }
+    this.stop();
+    await this.start({ resume: !!this.meta.sdkSessionId });
+    return { protocol: p, pending: false };
+  }
+
   // 极速问答 ⇄ Agent 模式切换(v0.10.2,仅 chat 会话):系统提示/工具集只在 query
   // 启动时读取,复用 setGem 的 needRestart 模式——回合中标记,空闲立即
   // stop+start(resume 保上下文,可见历史与 SDK 上下文都不丢)。
@@ -1393,7 +1411,7 @@ class SessionManager {
     for (const session of this.sessions.values()) await session.refreshAgentDefinitions();
   }
 
-  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId, gemId, chatMode, agentModels, skillIds, customAgentIds }) {
+  create({ cwd, model, permissionMode, title, parentId, worktreePath, forkFrom, forkAt, projectId, effort, standalone, kind, keyId, gemId, chatMode, agentModels, skillIds, customAgentIds, protocol }) {
     const id = 's_' + crypto.randomUUID().slice(0, 12);
     const meta = {
       id, cwd, model: model || null,
@@ -1406,6 +1424,7 @@ class SessionManager {
       standalone: !!standalone, // 独立会话:不属于任何项目组(v0.5.0 起新会话默认)
       kind: kind || null, // 板块标记:'chat'(v0.6.0)/'media'(v0.9.38 起);null = code
       keyId: keyId || null, // 创建时活跃的 API key(额度归账,v0.8.0)
+      protocol: protocol === 'openai' || protocol === 'anthropic' ? protocol : null, // 接口协议覆盖(v0.15.22):null = 跟随 Key
       agentModels: normalizeAgentModels(agentModels, keyId || null), // 同 Key 子 Agent 模型;空数组 = 禁用 Agent 工具
       gemId: gemId || null, // 绑定的 Gem 自定义助手(v0.9.11)
       skillIds: Array.isArray(skillIds) ? skillIds.map(String) : [], // 挂载的技能(v0.15.16):渐进披露索引+use_skill 可取
@@ -1444,6 +1463,7 @@ class SessionManager {
       chatMode: m.chatMode || undefined, // chat 会话分支继承极速/Agent 模式(v0.10.2)
       skillIds: m.skillIds || [], // 分支继承挂载技能(v0.15.16)
       customAgentIds: m.customAgentIds || [], // 分支继承自定义 Agent 挂载(v0.15.16)
+      protocol: m.protocol || null, // 分支继承接口协议(v0.15.22)
     });
     store.writeSessionEvents(meta.id, prefix);
     return { ok: true, meta, warning: canFork ? null : '无 SDK 上下文锚点,分支只复制了可见历史' };

@@ -1,5 +1,5 @@
 // App entry: boot, project open, topbar, panels, modals, shortcuts, wiring.
-import { api, state, $, escapeHtml, on, emit, fmtTokens, parseModelValue, updateKeyChips, MEDIA_TYPE_LABEL, sectionOfKind } from './state.js';
+import { api, state, $, escapeHtml, on, emit, fmtTokens, parseModelValue, updateKeyChips, MEDIA_TYPE_LABEL, sectionOfKind, ensureGroups, effectiveProtocol } from './state.js';
 import * as chat from './chat.js';
 import * as sessionsUi from './sessions-ui.js';
 import * as input from './input.js';
@@ -218,6 +218,19 @@ $('perm-mode').onchange = async () => {
 // 模型下拉(会话级,输入区工具栏)的 change 处理器在 input.js,此处不再绑定
 
 $('view-mode').onchange = () => chat.setViewMode($('view-mode').value);
+
+// 接口协议热切换(v0.15.22):Anthropic 原生 ⇄ OpenAI 原生,任意模型可用,单会话内即时生效
+$('btn-protocol').onclick = async () => {
+  const sid = state.activeSid;
+  const s = state.sessions.get(sid);
+  if (!s) return;
+  await ensureGroups();
+  const next = effectiveProtocol(s.meta) === 'openai' ? 'anthropic' : 'openai';
+  const r = await api.sessSetProtocol(sid, next);
+  s.meta.protocol = (r && r.protocol) || next;
+  chat.updateTopbarForSession(sid);
+  if (r && r.pending) alert('接口协议将在本回合结束后切换(上文保留)。');
+};
 
 // 极速问答 ⇄ Agent 模式切换(v0.10.2,仅 chat 会话;按钮为 chat-only,其他板块不可见)
 $('btn-chat-mode').onclick = async () => {
@@ -991,6 +1004,8 @@ async function populateModelSelects() {
     // 刷新 Kuro 分组缓存(state.GroupsCache):boardOf/工坊筛选等懒加载路径共用
     state.GroupsCache.clear();
     for (const k of list) if (Array.isArray(k.modelGroups)) state.GroupsCache.set(k.id, k.modelGroups);
+    state.KeyProtocols.clear();
+    for (const k of list) state.KeyProtocols.set(k.id, k.protocol === 'openai' ? 'openai' : 'anthropic');
   } catch {}
   // 某模型在某 key 下的类别:查分组缓存;无分组(非 Kuro key)或查不到时视为 chat
   const want = SECTION_MODEL_TYPES[state.section] || ['chat'];

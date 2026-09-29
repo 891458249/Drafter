@@ -119,7 +119,9 @@ async function onRequest(req, res) {
     const rest = m[2] || '/';
     // Anthropic 协议直连真实网关;OpenAI 协议继续走 oai-proxy 翻译层。
     // 本层只负责在两种协议共同的入站 Anthropic 请求上做模型白名单。
-    const upstreamBase = keys.endpointOf(keyEntry).viaProxy
+    // getProtocol(v0.15.22):每个请求现取会话协议,UI 切换后下一次请求即生效,无需重启 query。
+    const protocol = typeof policy.getProtocol === 'function' ? policy.getProtocol() : null;
+    const upstreamBase = keys.endpointOf(keyEntry, protocol).viaProxy
       ? oaiProxy.baseUrlFor(keyEntry.id)
       : keys.apiRoot(keyEntry.baseUrl);
     const upstreamUrl = upstreamBase + rest;

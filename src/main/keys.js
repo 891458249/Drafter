@@ -78,9 +78,11 @@ function guessProtocol(baseUrl) {
   return 'anthropic';
 }
 
-// buildEnv 路由判定:pure function,供 main.js 与单测
-function endpointOf(key) {
-  return { viaProxy: (key && key.protocol) === 'openai' };
+// buildEnv 路由判定:pure function,供 main.js 与单测。
+// protocol(v0.15.22):会话级协议覆盖('anthropic'|'openai'|null=跟随 Key),用于单会话热切换
+function endpointOf(key, protocol = null) {
+  const p = protocol === 'openai' || protocol === 'anthropic' ? protocol : (key && key.protocol);
+  return { viaProxy: p === 'openai' };
 }
 
 // save: { id?, name, key, baseUrl?, kind?, usageUrl?, ... } → 保存后返回脱敏列表

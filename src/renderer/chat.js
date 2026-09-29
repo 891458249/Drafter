@@ -1,6 +1,6 @@
 // Chat rendering: per-session logs, streaming, tool cards, permission cards,
 // plan approval, subagent grouping, view modes, history replay.
-import { api, state, $, escapeHtml, truncate, renderMarkdown, fmtCost, fmtTokens, emit, modelSelValue, updateKeyChips, MEDIA_KINDS, modelLabel, sessionModelName, gemNameOf, boardOf, setBoardClass, ensureGroups } from './state.js';
+import { api, state, $, escapeHtml, truncate, renderMarkdown, fmtCost, fmtTokens, emit, modelSelValue, updateKeyChips, MEDIA_KINDS, modelLabel, sessionModelName, gemNameOf, boardOf, setBoardClass, ensureGroups, effectiveProtocol } from './state.js';
 import { highlightCode } from './hljs.js';
 import { enhanceCodeHtml } from './codeblock.js';
 import { parseFilePath, PATH_IN_TEXT_RE } from './filelink.js';
@@ -78,6 +78,7 @@ export function updateTopbarForSession(sid) {
       ? '当前:极速问答(零工具+极简提示,响应快)。点击切换 Agent 模式(全部工具能力)'
       : '当前:Agent 模式(全部工具能力)。点击切换极速问答(响应快 5-10 倍,纯问答)';
   }
+  syncProtocolBtn(m);
   const permissionSelect = $('perm-mode');
   if (permissionSelect) permissionSelect.disabled = isFastChat(s);
   if (m.permissionMode) $('perm-mode').value = m.permissionMode;
@@ -97,7 +98,22 @@ export function updateTopbarForSession(sid) {
   ensureGroups().then(() => {
     if (state.activeSid !== sid) return;
     setBoardClass(MEDIA_KINDS.includes(m.kind) ? boardOf(m.keyId, m.model, m.kind, m.board) : null);
+    syncProtocolBtn(m); // Key 默认协议随分组缓存首拉就绪
   });
+}
+
+// 接口协议按钮回显(v0.15.22):会话覆盖优先,否则跟随 Key 设置
+function syncProtocolBtn(m) {
+  const protocolBtn = $('btn-protocol');
+  if (protocolBtn) {
+    const p = effectiveProtocol(m);
+    protocolBtn.textContent = p === 'openai' ? 'OpenAI 协议' : 'Anthropic 协议';
+    protocolBtn.classList.toggle('protocol-openai', p === 'openai');
+    protocolBtn.title = (p === 'openai'
+      ? '当前:OpenAI 原生接口(Chat Completions,经本地翻译)'
+      : '当前:Anthropic 原生接口(Messages)')
+      + (m.protocol ? '·本会话已覆盖' : '·跟随 Key 设置') + '。点击热切换到另一种协议,本会话下一次请求生效,上文保留';
+  }
 }
 
 // 输入框 placeholder:Gem 名(若绑定) + 模型身份

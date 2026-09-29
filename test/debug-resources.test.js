@@ -30,6 +30,55 @@ test('attached callbacks release only their own scope, retry failures and are id
   ready = true;
   assert.equal((await resources.cleanup('retry')).ok, true);
 });
+test('stale managed running state reconciles only after both identities and ports are free', { skip: process.platform !== 'win32' }, async () => {
+  const scope = 'stale:' + crypto.randomUUID();
+  const id = crypto.randomUUID();
+  const dir = path.join(resources.scopeDir(scope), id);
+  const state = { version: 1, scope, id, status: 'running', pid: 2147483647, started: 'old', supervisorPid: 2147483646, supervisorStarted: 'old', ports: [] };
+  resources.atomicWrite(path.join(dir, 'state.json'), state);
+  fs.writeFileSync(path.join(dir, 'stop'), 'cleanup');
+  assert.equal((await resources.verify(scope)).ok, true);
+  assert.equal(resources.records(scope)[0].status, 'released');
+  assert.deepEqual(await resources.cleanup(scope), { ok: true, count: 1, pending: [] });
+
+  const activeScope = 'active:' + crypto.randomUUID();
+  const started = await resources.identity(process.pid);
+  const active = { ...state, scope: activeScope, status: 'running', id: crypto.randomUUID(), supervisorPid: process.pid, supervisorStarted: started };
+  resources.atomicWrite(path.join(resources.scopeDir(activeScope), active.id, 'state.json'), active);
+  assert.equal((await resources.verify(activeScope)).ok, false);
+  assert.equal(resources.records(activeScope)[0].status, 'running');
+  const childScope = 'active-child:' + crypto.randomUUID();
+  const child = { ...state, scope: childScope, id: crypto.randomUUID(), pid: process.pid, started };
+  resources.atomicWrite(path.join(resources.scopeDir(childScope), child.id, 'state.json'), child);
+  assert.equal((await resources.verify(childScope)).ok, false);
+  assert.equal(resources.records(childScope)[0].status, 'running');
+
+  const unknownScope = 'unknown-identity:' + crypto.randomUUID();
+  const unknown = { ...state, scope: unknownScope, id: crypto.randomUUID(), supervisorStarted: null };
+  resources.atomicWrite(path.join(resources.scopeDir(unknownScope), unknown.id, 'state.json'), unknown);
+  assert.equal((await resources.verify(unknownScope)).ok, false);
+  assert.equal(resources.records(unknownScope)[0].status, 'running');
+
+  const server = require('node:net').createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const portScope = 'occupied:' + crypto.randomUUID();
+    const occupied = { ...state, scope: portScope, id: crypto.randomUUID(), ports: [server.address().port] };
+    resources.atomicWrite(path.join(resources.scopeDir(portScope), occupied.id, 'state.json'), occupied);
+    assert.equal((await resources.verify(portScope)).ok, false);
+    assert.equal(resources.records(portScope)[0].status, 'running');
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+test('Stop reports a main-scope cleanup failure once', async () => {
+  const { createSessionCleanup } = require('../src/main/debug-resources/session');
+  const events = [];
+  const session = createSessionCleanup('stop-once', (event) => events.push(event));
+  const scope = JSON.parse(session.prompt.match(/--scope ("[^"]+")/)[1]);
+  resources.attach(scope, { name: 'unreleased', release: () => {}, verify: () => false });
+  const result = await session.hooks.Stop[0].hooks[0]({ session_id: 'stop-once' });
+  assert.equal(result.decision, 'block');
+  assert.equal(events.filter((event) => event.type === 'ui_error').length, 1);
+});
 test('unknown attached resources never execute stored commands or kill a process', async () => {
   const id = crypto.randomUUID();
   resources.atomicWrite(path.join(resources.scopeDir('unknown'), id, 'state.json'), { version: 1, scope: 'unknown', id, status: 'attached', pid: process.pid, release: 'exit' });
@@ -43,6 +92,9 @@ test('corrupt state is visible, never reported as clean', async () => {
 test('hooks supply scoped instructions and avoid infinite Stop block', async () => {
   const start = await hook({ hook_event_name: 'SessionStart', session_id: 'hook', owner_pid: process.pid });
   assert.match(start.hookSpecificOutput.additionalContext, /cli:hook/);
+  // 旧版安装残留的逐工具调用条目:不再注入任何内容
+  assert.deepEqual(await hook({ hook_event_name: 'PreToolUse', session_id: 'hook' }), {});
+  assert.deepEqual(await hook({ hook_event_name: 'PostToolUseFailure', session_id: 'hook' }), {});
   resources.attach('cli:hook', { name: 'stuck', release: () => {}, verify: () => false });
   assert.equal((await hook({ hook_event_name: 'Stop', session_id: 'hook' })).decision, 'block');
   assert.ok((await hook({ hook_event_name: 'Stop', session_id: 'hook', stop_hook_active: true })).systemMessage);
@@ -52,20 +104,76 @@ test('hook installation merges settings without replacing existing arrays', () =
   const original = { env: { KEEP: 'yes' }, hooks: { Stop: [{ hooks: [{ type: 'command', command: 'existing' }] }] } };
   const merged = mergeHooks(original, temp);
   assert.equal(merged.hooks.Stop.length, 2);
+  assert.equal(merged.hooks.PreToolUse, undefined);
   assert.deepEqual(merged.env, original.env);
   assert.deepEqual(mergeHooks(merged, temp), merged);
   assert.equal(original.hooks.Stop.length, 1);
+  // 旧版装进去的 PreToolUse/PostToolUseFailure 条目被移除,其他条目保留
+  const command = `node "${path.join(temp, 'cli.js')}" hook`;
+  const legacy = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command }] }, { hooks: [{ type: 'command', command: 'mine' }] }],
+    PostToolUseFailure: [{ hooks: [{ type: 'command', command }] }] } };
+  const upgraded = mergeHooks(legacy, temp);
+  assert.deepEqual(upgraded.hooks.PreToolUse, [{ hooks: [{ type: 'command', command: 'mine' }] }]);
+  assert.equal(upgraded.hooks.PostToolUseFailure, undefined);
+});
+test('stale starting record with no process is retired after the startup window', async () => {
+  const scope = 'stale-starting:' + crypto.randomUUID();
+  const id = crypto.randomUUID();
+  const file = path.join(resources.scopeDir(scope), id, 'state.json');
+  resources.atomicWrite(file, { version: 1, scope, id, status: 'starting', ports: [] });
+  assert.equal((await resources.verify(scope)).ok, false); // fresh: launch may still be in progress
+  const old = new Date(Date.now() - 120000);
+  fs.utimesSync(file, old, old);
+  assert.deepEqual(await resources.verify(scope), { ok: true, count: 1, pending: [] });
+  assert.equal(resources.records(scope)[0].status, 'released');
+});
+test('Windows managed target survives the launching process and logs its output', { skip: process.platform !== 'win32', timeout: 40000 }, async () => {
+  const { execFile } = require('node:child_process');
+  const scope = 'survive:' + crypto.randomUUID();
+  const cli = path.join(__dirname, '../src/main/debug-resources/cli.js');
+  // 与模型的 Bash 工具相同:一个短命进程执行 launch 后立即退出
+  const stdout = await new Promise((resolve, reject) => execFile(process.execPath, [cli, 'launch', '--scope', scope, '--owner', String(process.pid), '--cwd', temp, '--',
+    process.execPath, '-e', 'console.log("hello-from-target"); setInterval(()=>{},1000)'], { env: { ...process.env, DRAFTER_DEBUG_ROOT: temp } }, (e, out) => e ? reject(e) : resolve(out)));
+  const record = JSON.parse(stdout.trim().split('\n').pop());
+  try {
+    assert.equal(record.status, 'running');
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal(await resources.identity(record.pid), record.started); // 仍存活
+    assert.match(fs.readFileSync(record.log, 'utf8'), /hello-from-target/);
+  } finally {
+    const report = await resources.cleanup(scope);
+    assert.equal(report.ok, true, JSON.stringify(report));
+  }
+  await assert.rejects(resources.identity(record.pid), (e) => e.code === 3);
+});
+test('Windows --wait runs in the foreground and returns output and exit code', { skip: process.platform !== 'win32', timeout: 40000 }, async () => {
+  const scope = 'wait:' + crypto.randomUUID();
+  const done = await resources.launch({ scope, exe: process.execPath, args: ['-e', 'console.log("out-line"); console.error("err-line"); process.exit(3)'], wait: 20000 });
+  assert.equal(done.status, 'released');
+  assert.equal(done.exitCode, 3);
+  assert.equal(done.timedOut, false);
+  assert.match(done.output, /out-line/);
+  assert.match(done.output, /err-line/);
+  assert.deepEqual(await resources.verify(scope), { ok: true, count: 1, pending: [] });
+
+  const slow = 'wait-timeout:' + crypto.randomUUID();
+  const stopped = await resources.launch({ scope: slow, exe: process.execPath, args: ['-e', 'setInterval(()=>{},1000)'], wait: 1000 });
+  assert.equal(stopped.timedOut, true);
+  assert.equal(stopped.status, 'released');
+  await assert.rejects(resources.identity(stopped.pid), (e) => e.code === 3);
 });
 test('SDK cleanup hooks isolate query generations and merge with guards', async () => {
   const { createSessionCleanup } = require('../src/main/debug-resources/session');
   const a = createSessionCleanup('same');
   const b = createSessionCleanup('same');
   const input = { session_id: 'sdk' };
-  const context = async (session) => (await session.hooks.PreToolUse[0].hooks[0](input)).hookSpecificOutput.additionalContext;
   const scope = (text) => JSON.parse(text.match(/--scope ("[^"]+")/)[1]);
-  const scopeA = scope(await context(a));
-  const scopeB = scope(await context(b));
+  const scopeA = scope(a.prompt);
+  const scopeB = scope(b.prompt);
   assert.notEqual(scopeA, scopeB);
+  // 规则只随系统提示下发一次,不再逐次工具调用注入
+  assert.equal(b.hooks.PreToolUse, undefined);
+  assert.equal(b.hooks.PostToolUseFailure, undefined);
   let released = false;
   resources.attach(scopeB, { name: 'new query connection', release: () => { released = true; }, verify: () => true });
   await a.cleanup();

@@ -257,7 +257,7 @@ export function initEffortUi(injected = {}) {
   const trail = $('effort-slider-trail-grid');
   if (trail && !trail.childElementCount) {
     trail.innerHTML = Array.from({ length: 60 }, (_v, i) =>
-      `<span class="effort-slider-pixel" style="--pixel-i:${i % 20}"></span>`).join('');
+      `<span class="effort-slider-pixel" style="--pixel-i:${i % 20};--pixel-row:${Math.floor(i / 20)}"></span>`).join('');
   }
 
   btn.onclick = (e) => {

@@ -5,13 +5,16 @@ const { FILES } = require('../src/main/debug-resources/runtime');
 function mergeHooks(settings, directory) {
   const command = `node "${path.join(directory, 'cli.js')}" hook`;
   const hooks = { ...(settings.hooks || {}) };
-  for (const event of ['SessionStart', 'PreToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd']) {
+  for (const event of ['SessionStart', 'Stop', 'SessionEnd']) {
     const entries = hooks[event] || [];
     if (entries.some((entry) => entry.hooks?.some((h) => h.command === command))) continue;
-    hooks[event] = [...entries, {
-      ...(['PreToolUse', 'PostToolUseFailure'].includes(event) ? { matcher: 'Bash|PowerShell|mcp__.*' } : {}),
-      hooks: [{ type: 'command', command, timeout: 30 }],
-    }];
+    hooks[event] = [...entries, { hooks: [{ type: 'command', command, timeout: 30 }] }];
+  }
+  // 旧版安装的逐工具调用注入条目一并移除
+  for (const event of ['PreToolUse', 'PostToolUseFailure']) {
+    if (!hooks[event]) continue;
+    hooks[event] = hooks[event].filter((entry) => !entry.hooks?.some((h) => h.command === command));
+    if (!hooks[event].length) delete hooks[event];
   }
   return { ...settings, hooks };
 }

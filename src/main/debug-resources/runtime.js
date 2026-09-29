@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const FILES = ['index.js', 'rules.js', 'cli.js', 'supervisor.ps1'];
+const FILES = ['index.js', 'rules.js', 'cli.js', 'supervisor.ps1', 'relay.js'];
 function runtimeDirectory() {
   if (!__dirname.includes('app.asar')) return __dirname;
   const content = FILES.map((file) => fs.readFileSync(path.join(__dirname, file)));

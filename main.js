@@ -194,7 +194,7 @@ if (store.getSetting('disableGpu')) {
 // credential/env vars so per-key switching wins over ~/.claude/settings.json
 // env and inherited process env.
 function buildEnv(extra = {}, keyId = null) {
-  const { __modelGuardBaseUrl, ...extraEnv } = extra || {};
+  const { __modelGuardBaseUrl, __protocol, ...extraEnv } = extra || {};
   const env = { ...process.env, FORCE_COLOR: '0', ...extraEnv };
   const k = (keyId && keys.byId(keyId)) || keys.activeKey();
   if (k) {
@@ -210,7 +210,7 @@ function buildEnv(extra = {}, keyId = null) {
     // OpenAI 协议的 Key(v0.15.0):claude.exe 只讲 Anthropic Messages,
     // 经本地翻译代理(127.0.0.1 回环)走 OpenAI Chat Completions。
     // Anthropic 协议会话(v0.15.5):优先走 model-guard 本地代理,未勾选模型离机前 403。
-    env.ANTHROPIC_BASE_URL = __modelGuardBaseUrl || (keys.endpointOf(k).viaProxy ? oaiProxy.baseUrlFor(k.id) : keys.apiRoot(k.baseUrl));
+    env.ANTHROPIC_BASE_URL = __modelGuardBaseUrl || (keys.endpointOf(k, __protocol).viaProxy ? oaiProxy.baseUrlFor(k.id) : keys.apiRoot(k.baseUrl));
   }
   return env;
 }
@@ -980,6 +980,12 @@ ipcMain.handle('sess:setGem', async (_e, { sid, gemId }) => {
   if (!s) return false;
   await s.setGem(gemId || null);
   return true;
+});
+// 接口协议热切换(v0.15.22):Anthropic 原生 ⇄ OpenAI 原生(经 oai-proxy),单会话即时生效
+ipcMain.handle('sess:setProtocol', async (_e, { sid, protocol }) => {
+  const s = sessions.get(sid);
+  if (!s) return null;
+  return s.setProtocol(protocol);
 });
 // 极速问答 ⇄ Agent 模式切换(v0.10.2,仅 chat 会话;重启 query 生效,resume 保上下文)
 ipcMain.handle('sess:setChatMode', async (_e, { sid, mode }) => {
