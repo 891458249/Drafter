@@ -236,59 +236,76 @@ async function main() {
     ok(activated.off === false && activated.disabled === 'false' && activated.label === '深度',
       '取消跟随后滑块解锁并显示「深度」', activated);
 
-    // 轨道加厚四倍,彗尾应在填充区域内部且只在可用态流动
+    // 轨道粗细不变;彗尾改为 canvas 粒子场,粒子留在经过处消散,按键背景与拖动实时同步
+    const fx = `import('./renderer/effort-ui.js').then(m => m.effortFxStats())`;
     const sliderVisual = await evaluate(`(() => {
       const p = document.querySelector('#effort-pop'), s = document.querySelector('#effort-slider');
-      const rail = s.querySelector('.effort-slider-rail'), fill = s.querySelector('.effort-slider-fill');
-      const trail = s.querySelector('.effort-slider-trail'), pixel = trail.querySelector('.effort-slider-pixel');
+      const rail = s.querySelector('.effort-slider-rail'), c = rail.querySelector('canvas.effort-particles');
       return { width: rail.getBoundingClientRect().width, height: rail.getBoundingClientRect().height,
-        pop: p.getBoundingClientRect().width, viewport: window.innerWidth,
-        pixels: s.querySelectorAll('.effort-slider-pixel').length,
-        nested: fill.contains(trail), railClip: getComputedStyle(rail).overflow,
-        fillClip: getComputedStyle(fill).overflow, animation: getComputedStyle(pixel).animationName,
-        pulse: getComputedStyle(fill, '::after').content };
+        pop: p.getBoundingClientRect().width, canvas: !!c, canvasW: c && c.clientWidth,
+        railClip: getComputedStyle(rail).overflow, oldGrid: document.querySelectorAll('.effort-slider-pixel').length };
     })()`);
     ok(sliderVisual.pop <= 281 && sliderVisual.width <= 250 && sliderVisual.height === 24,
-      '面板恢复原宽,滑轨粗细从 6px 增至 24px', sliderVisual);
-    ok(sliderVisual.pixels === 240 && sliderVisual.nested && sliderVisual.railClip === 'hidden' &&
-      sliderVisual.fillClip === 'hidden' && sliderVisual.animation === 'effort-comet' && sliderVisual.pulse === 'none',
-      '240 个彗尾小方块在填充区内部裁剪,无整轨脉冲', sliderVisual);
-    await main.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
-    try {
-      const reduceMotion = await evaluate(`(() => {
-        const pixel = document.querySelector('.effort-slider-pixel');
-        return matchMedia('(prefers-reduced-motion: reduce)').matches && getComputedStyle(pixel).animationName === 'none';
-      })()`);
-      ok(reduceMotion, '减少动态效果时停用彗尾动画', reduceMotion);
-    } finally {
-      await main.send('Emulation.setEmulatedMedia', { features: [] });
-    }
-    const liveDrag = await evaluate(`(() => {
-      const s = document.querySelector('#effort-slider'), p = document.querySelector('#effort-pop');
+      '面板原宽,滑轨粗细 24px', sliderVisual);
+    ok(sliderVisual.canvas && sliderVisual.canvasW === Math.round(sliderVisual.width) && sliderVisual.railClip === 'hidden' && sliderVisual.oldGrid === 0,
+      '彗尾改为铺满滑轨的 canvas 粒子场(旧贴图网格已移除),由滑轨裁剪', sliderVisual);
+    await wait(400);
+    const idleFx = await evaluate(fx, true);
+    ok(idleFx.slider && idleFx.slider.running && idleFx.slider.emitting && idleFx.slider.count > 5,
+      '静止时滑块头部持续发射粒子', idleFx.slider);
+    await evaluate(`(() => {
+      const s = document.querySelector('#effort-slider');
       const r = s.getBoundingClientRect(), x = (f) => r.left + 14 + (r.width - 28) * f;
-      const send = (type, f) => s.dispatchEvent(new PointerEvent(type, {
+      window.__dragSend = (type, f) => s.dispatchEvent(new PointerEvent(type, {
         bubbles: true, cancelable: true, pointerId: 2, isPrimary: true,
         clientX: x(f), clientY: r.top + r.height / 2, buttons: type === 'pointerup' ? 0 : 1,
       }));
-      send('pointerdown', .1);
+      window.__dragSend('pointerdown', .1);
+    })()`);
+    await wait(150); // 让粒子场在 0.1 处跑几帧,之后的扫动路径才从 0.1 起算
+    const liveDrag = await evaluate(`(() => {
+      const s = document.querySelector('#effort-slider'), p = document.querySelector('#effort-pop'), b = document.querySelector('#btn-effort');
+      const send = window.__dragSend;
       const before = getComputedStyle(p).getPropertyValue('--effort-c').trim();
+      const btnBefore = { level: b.querySelector('#effort-btn-level').textContent, frac: b.style.getPropertyValue('--effort-frac') };
       send('pointermove', .9);
       const after = getComputedStyle(p).getPropertyValue('--effort-c').trim();
       const frac = s.style.getPropertyValue('--effort-frac');
       const label = document.querySelector('#effort-pop-level').textContent;
-      const trail = s.querySelector('.effort-slider-trail-grid').getBoundingClientRect();
       const knob = s.querySelector('.effort-slider-knob').getBoundingClientRect();
-      const fill = s.querySelector('.effort-slider-fill').getBoundingClientRect();
-      const rail = s.querySelector('.effort-slider-rail').getBoundingClientRect();
-      send('pointercancel', .9);
-      return { before, after, frac, label, gap: (knob.left + knob.width / 2) - trail.right, knobSize: knob.width,
-        inside: fill.left >= rail.left && fill.right <= rail.right &&
-          trail.top >= rail.top && trail.bottom <= rail.bottom };
+      return { before, after, frac, label, knobSize: knob.width, btnBefore,
+        btnAfter: { level: b.querySelector('#effort-btn-level').textContent, frac: b.style.getPropertyValue('--effort-frac'),
+          dl: b.getAttribute('data-level'), c: getComputedStyle(b).getPropertyValue('--effort-c').trim() } };
     })()`);
-    ok(liveDrag.before !== liveDrag.after && Math.abs(Number(liveDrag.frac) - .9) < .0001 && liveDrag.label === '极限',
-      'pointermove 即改变档位色、手柄位置与标题,无需松开', liveDrag);
-    ok(liveDrag.inside && liveDrag.gap >= -10 && liveDrag.gap <= 10 && liveDrag.knobSize === 28,
-      '彗尾完全在填充轨道内,末端紧随手柄,圆形手柄 28px', liveDrag);
+    ok(liveDrag.before !== liveDrag.after && Math.abs(Number(liveDrag.frac) - .9) < .0001 && liveDrag.label === '极限' && liveDrag.knobSize === 28,
+      'pointermove 即改变档位色、手柄位置与标题,无需松开;圆形手柄 28px', liveDrag);
+    ok(liveDrag.btnAfter.level === '极限' && liveDrag.btnAfter.dl === '4' && liveDrag.btnAfter.c === liveDrag.after &&
+      Number(liveDrag.btnAfter.frac) > Number(liveDrag.btnBefore.frac || 0),
+      '拖动中入口按键的档位名/颜色/背景宽度与滑块实时同步', liveDrag);
+    await wait(120);
+    const midFx = await evaluate(fx, true);
+    const w = midFx.slider.width;
+    ok(midFx.slider.count > 60 && midFx.slider.minX < w * 0.25 && midFx.btn && midFx.btn.emitting && midFx.btn.count > 0,
+      '拖动扫过的路径留下粒子(左侧远离手柄处仍有方块),按键粒子同步发射', { slider: midFx.slider, btn: midFx.btn });
+    await evaluate(`window.__dragSend('pointermove', .3)`);
+    await wait(100);
+    const back = await evaluate(fx, true);
+    ok(back.slider.maxX <= back.slider.frac * back.slider.width + 0.5 && (back.btn.count === 0 || back.btn.maxX <= back.btn.frac * back.btn.width + 0.5),
+      '往回拖后头部右侧无粒子溢出(滑块与按键)', back);
+    await evaluate(`window.__dragSend('pointercancel', .3)`);
+    await wait(2600);
+    const settled = await evaluate(fx, true);
+    ok(settled.slider.minX > w * 0.25,
+      '经过处的粒子随时间消散,不再锁定跟随', settled.slider);
+    await main.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    try {
+      await evaluate(`document.querySelector('#effort-slider').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))`);
+      await wait(700);
+      const rm = await evaluate(fx, true);
+      ok(rm.slider.count === 0 && !rm.slider.running, '减少动态效果时粒子动画停止(仅静态绘制)', rm.slider);
+    } finally {
+      await main.send('Emulation.setEmulatedMedia', { features: [] });
+    }
 
     // 拖到最右(第 5 格):pointerdown → pointerup 同一位置
     const dragTo = `(frac) => {
@@ -317,10 +334,10 @@ async function main() {
     const btnLit = await evaluate(`(() => { const b = document.querySelector('#btn-effort'), t = b.querySelector('.effort-btn-trail');
       return { model: b.querySelector('#effort-btn-model').textContent, level: b.querySelector('#effort-btn-level').textContent,
         lit: b.classList.contains('is-lit'), dl: b.getAttribute('data-level'), trail: getComputedStyle(t).display,
-        pixels: t.querySelectorAll('.effort-slider-pixel').length, frac: b.style.getPropertyValue('--effort-frac'),
+        canvas: !!b.querySelector('canvas.effort-particles'), frac: b.style.getPropertyValue('--effort-frac'),
         c: getComputedStyle(b).getPropertyValue('--effort-c').trim() }; })()`);
     ok(btnLit.model && btnLit.model !== '选择强度' && btnLit.level === '极限' && btnLit.lit && btnLit.dl === '4' &&
-      btnLit.trail === 'block' && btnLit.pixels === 240 && btnLit.frac === '1',
+      btnLit.trail === 'block' && btnLit.canvas && btnLit.frac === '1',
       '入口按键显示「模型名 + 推理深度」,落档后以对应档位彗尾作背景', btnLit);
 
     // 拖到最左(第 1 格)

@@ -469,7 +469,8 @@ html, body {
 .effort-btn-level { color: var(--text-dim); white-space: nowrap; }
 .effort-btn-level:empty { display: none; }
 .effort-btn-caret { color: var(--text-dim); flex: none; }
-.effort-btn-model, .effort-btn-level, .effort-btn-caret { position: relative; z-index: 1; }
+.effort-btn-model, .effort-btn-level, .effort-btn-caret { position: relative; z-index: 2; }
+#btn-effort .effort-particles { z-index: 1; }
 .effort-btn-trail {
   position: absolute; left: 0; top: 0; bottom: 0; z-index: 0; overflow: hidden; pointer-events: none;
   width: calc(var(--effort-frac, 0) * 100%); display: none;
@@ -517,27 +518,9 @@ html, body {
   position: relative; height: 100%; width: calc(var(--effort-frac, 0) * 100%);
   background: var(--effort-c); border-radius: 12px; overflow: hidden;
 }
-/* 彗尾只在已填充的轨道内:右端靠近手柄,向左渐稀;裁剪由 fill 与 rail 双重保证。 */
-.effort-slider-trail {
-  position: absolute; inset: 0; overflow: hidden; pointer-events: none;
-}
-.effort-slider-trail-grid {
-  position: absolute; top: 50%; right: 2px;
-  width: 138.5px; display: grid; grid-template-columns: repeat(40, 2px);
-  grid-template-rows: repeat(6, 2px); gap: 1.5px;
-  transform: translateY(-50%);
-}
-/* 彗星拖尾:每个方块只朝左单向剥落并淡出;亮度、速度、漂移距离、上下偏移都由 JS 逐个乱序,不做来回波动。 */
-.effort-slider-pixel {
-  width: 2px; height: 2px; border-radius: .5px;
-  background: #fff; opacity: var(--pixel-a);
-  animation: effort-comet var(--pixel-dur, 1.1s) linear infinite;
-  animation-delay: var(--pixel-d);
-}
-@keyframes effort-comet {
-  0% { transform: translate(0, 0); opacity: var(--pixel-a); }
-  100% { transform: translate(var(--pixel-dx, -7px), var(--pixel-dy, 0)); opacity: 0; }
-}
+/* 彗尾粒子(v0.15.25):canvas 铺满整条滑轨 / 整个按键,粒子留在经过处自行消散;
+   裁剪靠宿主 overflow:hidden + 圆角,绘制见 src/renderer/effort-particles.js。 */
+.effort-particles { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: block; }
 .effort-slider-knob {
   position: absolute; top: 50%; width: calc(var(--effort-knob-r) * 2); height: calc(var(--effort-knob-r) * 2); border-radius: 50%;
   left: calc(var(--effort-knob-r) + (100% - var(--effort-knob-r) * 2) * var(--effort-frac, 0));
@@ -556,10 +539,6 @@ html, body {
 .effort-pop.is-off .effort-pop-level { color: var(--text-dim); }
 .effort-pop.is-off .effort-slider { cursor: default; }
 .effort-pop.is-off .effort-slider-fill { background: var(--border); }
-.effort-pop.is-off .effort-slider-trail { display: none; }
-@media (prefers-reduced-motion: reduce) {
-  .effort-slider-pixel { animation: none; }
-}
 .effort-pop.is-off .effort-slider-knob {
   background: var(--text-dim); box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
 }

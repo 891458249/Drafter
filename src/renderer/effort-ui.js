@@ -13,6 +13,7 @@
 //    (state.js:26-29),极速 chat 固定 thinking:'disabled'(src/main/sessions.js:425-427),
 //    两者下档位都不生效——此时滑块「熄火」并禁用,而不是留一个能拖却无效的活滑块。
 import { api, state, $, escapeHtml, MEDIA_KINDS } from './state.js';
+import { createParticleField } from './effort-particles.js';
 import {
   EFFORT_LEVELS, EFFORT_DEFAULT_LABEL, EFFORT_FALLBACK_INDEX,
   effortIndex, indexToLevel, effortLabel, normalizeEffort, effortDowngradeNote,
@@ -27,6 +28,8 @@ let ctx = { sid: null, fast: false };
 let dragging = false;
 let previewIdx = null; // 拖动中的临时档位(只改视觉,pointerup 才落盘)
 let previewFrac = null; // 手柄跟随指针连续移动,颜色按最近档位实时变化
+let sliderFx = null;    // 面板滑轨彗尾粒子场
+let btnFx = null;       // 入口按键背景彗尾粒子场(与滑块同步,拖动预览也实时跟随)
 
 // 模型能力表:主进程取 Query.supportedModels() 后缓存,渲染端经 api.sessEffortCaps() **主动拉**
 // (见主进程 SessionManager.loadEffortCapability 里「为什么是拉而不是推」的实测记录)。
@@ -139,19 +142,28 @@ function render() {
   $('effort-pop-model-name').textContent = modelName;
   btn.title = `选择模型与推理深度(当前:${modelName} · ${level ? effortLabel(level) : '跟随默认'})`;
 
-  // 入口按键 = 模型名 + 推理深度;落档后以该档位颜色与彗尾作背景(按已提交档位,不随拖动预览)
-  const lit = applies && !follow && !!level;
+  // 入口按键 = 模型名 + 推理深度;落档后以该档位颜色与彗尾作背景。
+  // 拖动预览期间与滑块实时同步(颜色/档位名/宽度/粒子头部),松手取消则回到已提交档位。
+  const previewing = previewIdx != null;
+  const lit = applies && !follow && (previewing || !!level);
+  const shownIdx = previewing ? idx : effortIndex(level);
+  const sliderFrac = previewFrac != null ? previewFrac : idx / LAST;
+  // 按键宽度映射:0 档占 1/5,满档占满;拖动时按连续比例
+  const btnFrac = previewing ? (1 + sliderFrac * LAST) / (LAST + 1) : (shownIdx + 1) / (LAST + 1);
   $('effort-btn-model').textContent = modelName;
-  $('effort-btn-level').textContent = !applies ? '' : (level ? effortLabel(level) : EFFORT_DEFAULT_LABEL);
+  $('effort-btn-level').textContent = !applies ? ''
+    : (previewing ? effortLabel(indexToLevel(idx)) : (level ? effortLabel(level) : EFFORT_DEFAULT_LABEL));
   btn.classList.toggle('is-lit', lit);
   if (lit) {
-    const li = effortIndex(level);
-    btn.setAttribute('data-level', String(li));
-    btn.style.setProperty('--effort-frac', String((li + 1) / (LAST + 1)));
+    btn.setAttribute('data-level', String(shownIdx));
+    btn.style.setProperty('--effort-frac', String(btnFrac));
   } else {
     btn.removeAttribute('data-level');
     btn.style.removeProperty('--effort-frac');
   }
+  const popOpen = !pop.classList.contains('hidden');
+  if (sliderFx) sliderFx.update(sliderFrac, popOpen && applies && !follow);
+  if (btnFx) btnFx.update(lit ? btnFrac : 0, lit);
 
   const chk = $('effort-follow-chk');
   chk.checked = follow;
@@ -185,6 +197,7 @@ function openPanel() {
   renderModelList();
   $('effort-pop').classList.remove('hidden');
   $('btn-effort').classList.add('active');
+  render(); // 面板可见后才能量到滑轨尺寸,启动粒子
 }
 function closePanel() {
   $('effort-pop').classList.add('hidden');
@@ -256,34 +269,6 @@ function indexFromEvent(e) {
 
 // ---------------- 初始化 ----------------
 
-// 确定性伪随机(整数哈希 → [0,1)):每次启动图案一致,但相邻方块之间毫无规律
-function hash01(n) {
-  let x = (n | 0) * 0x9e3779b1;
-  x ^= x >>> 15; x = Math.imul(x, 0x85ebca6b);
-  x ^= x >>> 13; x = Math.imul(x, 0xc2b2ae35);
-  x ^= x >>> 16;
-  return (x >>> 0) / 4294967296;
-}
-
-// 彗尾:40 列 × 6 行。头部(右端)最亮,向左按距离衰减,外侧行尾巴更短形成锥形;
-// 每个方块的亮度、速度、漂移距离、上下偏移、是否存在都各自乱序,越靠尾端越稀疏。
-function cometPixelsHtml(seed) {
-  const COLS = 40, ROWS = 6;
-  return Array.from({ length: COLS * ROWS }, (_v, n) => {
-    const col = n % COLS, row = Math.floor(n / COLS);
-    const r = (k) => hash01(n * 7 + k + seed * 7919);
-    const spread = Math.abs(row - (ROWS - 1) / 2) / ((ROWS - 1) / 2); // 0 中心 … 1 边缘
-    const reach = 1 - spread * 0.5 + (r(1) - 0.5) * 0.3;              // 该行尾巴长度占比,带抖动
-    const t = (COLS - 1 - col) / (COLS - 1);                           // 0 头部 … 1 尾端
-    const base = t > reach ? 0 : Math.pow(1 - t / reach, 1.5) * (1 - spread * 0.3);
-    const a = r(2) < t * 0.55 ? 0 : Math.min(1, base * (0.35 + r(3) * 1.2));
-    const dur = 0.7 + r(4) * 1.2;
-    const style = `--pixel-a:${a.toFixed(3)};--pixel-dur:${dur.toFixed(2)}s;--pixel-d:${(-r(5) * dur).toFixed(2)}s;` +
-      `--pixel-dx:${(-3 - r(6) * 9).toFixed(1)}px;--pixel-dy:${((r(7) - 0.5) * 2.5).toFixed(1)}px`;
-    return `<span class="effort-slider-pixel" style="${style}"></span>`;
-  }).join('');
-}
-
 export function initEffortUi(injected = {}) {
   deps = { ...deps, ...injected };
   const btn = $('btn-effort');
@@ -297,10 +282,10 @@ export function initEffortUi(injected = {}) {
     ticks.innerHTML = EFFORT_LEVELS.map((_lv, i) =>
       `<span class="effort-slider-tick" data-i="${i}" style="left:${(i / LAST) * 100}%"></span>`).join('');
   }
-  const trail = $('effort-slider-trail-grid');
-  if (trail && !trail.childElementCount) trail.innerHTML = cometPixelsHtml(0);
-  const btnTrail = $('effort-btn-trail-grid');
-  if (btnTrail && !btnTrail.childElementCount) btnTrail.innerHTML = cometPixelsHtml(1);
+  const sc = $('effort-slider-particles'), bc = $('effort-btn-particles');
+  if (sc) sliderFx = createParticleField(sc, { idleRate: 90, density: 1.2, headOffset: KNOB_R - 2 });
+  if (bc) btnFx = createParticleField(bc, { idleRate: 45, density: 0.9 });
+  render();
 
   btn.onclick = (e) => {
     e.stopPropagation();
@@ -385,6 +370,11 @@ export function initEffortUi(injected = {}) {
     $('effort-model-list').classList.add('hidden');
     if (deps.applyModel) await deps.applyModel(v);
   };
+}
+
+// 粒子场状态供探针查询
+export function effortFxStats() {
+  return { slider: sliderFx && sliderFx.stats(), btn: btnFx && btnFx.stats() };
 }
 
 // 面板开合状态供探针/其它模块查询
