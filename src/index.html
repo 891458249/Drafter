@@ -218,7 +218,11 @@
             </label>
             <!-- 模型 + 推理深度合并入口(v0.15.20):面板见 src/renderer/effort-ui.js -->
             <div class="composer-effort-anchor" id="effort-anchor">
-              <button id="btn-effort" class="btn btn-sm" title="选择模型与推理深度">选择强度</button>
+              <button id="btn-effort" class="btn btn-sm" title="选择模型与推理深度">
+                <span class="effort-btn-trail" aria-hidden="true"><span class="effort-slider-trail-grid" id="effort-btn-trail-grid"></span></span>
+                <span class="effort-btn-model" id="effort-btn-model">默认</span><span class="effort-btn-level" id="effort-btn-level"></span>
+                <svg class="effort-btn-caret" viewBox="0 0 10 6" width="9" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
               <span id="model-key-chip" class="key-chip hidden" title="当前模型所属的 API Key"></span>
               <!-- 隐藏数据源:app.js/sessions-ui.js/canvas.js/state.js 多处读 #model-sel.value,勿移除 -->
               <label class="ctrl composer-model visually-hidden">

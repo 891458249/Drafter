@@ -15,13 +15,14 @@
   --yellow: #d6b46a;
   /* v0.15.17:上下文占用圈 30~80% 档(缺口蓝);主题系统(themes.js)可整体覆盖 */
   --blue: #5b8def;
-  /* v0.15.20:推理深度滑块 5 档色阶(蓝→红)。派生自主题的 --blue/--red,
+  /* v0.15.24:推理深度滑块 5 档色阶改为蓝→紫(原 v0.15.20 为蓝→红)。派生自主题的 --blue 与固定紫,
      主题切换时 color-mix 在计算值阶段重新求值,因此四个主题自动跟随,无需各写一份 */
-  --effort-l0: color-mix(in srgb, var(--blue) 88%, var(--red));
-  --effort-l1: color-mix(in srgb, var(--blue) 62%, var(--red));
-  --effort-l2: color-mix(in srgb, var(--blue) 38%, var(--red));
-  --effort-l3: color-mix(in srgb, var(--blue) 16%, var(--red));
-  --effort-l4: var(--red);
+  --effort-purple: #9a5cf0;
+  --effort-l0: var(--blue);
+  --effort-l1: color-mix(in oklab, var(--blue) 75%, var(--effort-purple));
+  --effort-l2: color-mix(in oklab, var(--blue) 50%, var(--effort-purple));
+  --effort-l3: color-mix(in oklab, var(--blue) 25%, var(--effort-purple));
+  --effort-l4: var(--effort-purple);
   /* v0.9.31:此前被 msg-nav/.hot 等引用但从未定义,补齐;主题系统(themes.js)可整体覆盖 */
   --accent-bg: rgba(217,119,87,.15);
   --bg-hover: rgba(255,255,255,.07);
@@ -453,7 +454,31 @@ html, body {
 /* ---------------- 推理深度滑块面板(v0.15.20)----------------
    浮层沿用 .usage-pop 的「锚点 relative + 面板 absolute 向上弹出」范式:
    工具条在 .composer 顶部,面板向上弹出正好覆盖消息列表,不会把输入框顶走。 */
-#btn-effort.active { border-color: var(--accent); color: var(--accent); }
+/* 入口按键:模型名 + 推理深度 + 下拉箭头;落档后背景 = 该档位颜色填充 + 同款彗尾(长度随档位) */
+#btn-effort {
+  position: relative; overflow: hidden; isolation: isolate;
+  display: inline-flex; align-items: center; gap: 6px; max-width: 260px;
+  --effort-c: var(--text-dim);
+}
+#btn-effort[data-level="0"] { --effort-c: var(--effort-l0); }
+#btn-effort[data-level="1"] { --effort-c: var(--effort-l1); }
+#btn-effort[data-level="2"] { --effort-c: var(--effort-l2); }
+#btn-effort[data-level="3"] { --effort-c: var(--effort-l3); }
+#btn-effort[data-level="4"] { --effort-c: var(--effort-l4); }
+.effort-btn-model { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.effort-btn-level { color: var(--text-dim); white-space: nowrap; }
+.effort-btn-level:empty { display: none; }
+.effort-btn-caret { color: var(--text-dim); flex: none; }
+.effort-btn-model, .effort-btn-level, .effort-btn-caret { position: relative; z-index: 1; }
+.effort-btn-trail {
+  position: absolute; left: 0; top: 0; bottom: 0; z-index: 0; overflow: hidden; pointer-events: none;
+  width: calc(var(--effort-frac, 0) * 100%); display: none;
+  background: linear-gradient(to right, color-mix(in srgb, var(--effort-c) 12%, transparent), color-mix(in srgb, var(--effort-c) 70%, transparent));
+}
+#btn-effort.is-lit .effort-btn-trail { display: block; }
+#btn-effort.is-lit { border-color: color-mix(in srgb, var(--effort-c) 60%, var(--border)); }
+#btn-effort.is-lit .effort-btn-level { color: #fff; font-weight: 600; text-shadow: 0 0 6px var(--effort-c); }
+#btn-effort.active { border-color: var(--accent); }
 .effort-pop {
   position: absolute; bottom: calc(100% + 8px); right: 0; width: min(280px, calc(100vw - 24px));
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
@@ -479,10 +504,13 @@ html, body {
 .efm-caret { opacity: .7; }
 
 /* 滑块:5 格离散,拖动时手柄连续跟随指针,颜色随最近档位切换。
-   两端留 8px = 手柄半径,保证 0 档与 4 档的手柄不越出轨道。 */
-.effort-slider { position: relative; height: 36px; margin: 12px 0 4px; cursor: pointer; touch-action: none; }
+   两端留 --effort-knob-r = 手柄半径(须与 effort-ui.js 的 KNOB_R 一致),保证两端手柄不越出轨道。 */
+.effort-slider {
+  --effort-knob-r: 14px;
+  position: relative; height: 36px; margin: 12px 0 4px; cursor: pointer; touch-action: none;
+}
 .effort-slider-rail {
-  position: absolute; left: 8px; right: 8px; top: 50%; height: 24px;
+  position: absolute; left: var(--effort-knob-r); right: var(--effort-knob-r); top: 50%; height: 24px;
   transform: translateY(-50%); background: var(--bg-input); border-radius: 12px; overflow: hidden;
 }
 .effort-slider-fill {
@@ -499,25 +527,25 @@ html, body {
   grid-template-rows: repeat(6, 2px); gap: 1.5px;
   transform: translateY(-50%);
 }
-/* 彗星拖尾:每个方块只朝左单向剥落并淡出,相位由 JS 哈希打散,不做来回波动。 */
+/* 彗星拖尾:每个方块只朝左单向剥落并淡出;亮度、速度、漂移距离、上下偏移都由 JS 逐个乱序,不做来回波动。 */
 .effort-slider-pixel {
   width: 2px; height: 2px; border-radius: .5px;
   background: #fff; opacity: var(--pixel-a);
-  animation: effort-comet 1.1s linear infinite;
+  animation: effort-comet var(--pixel-dur, 1.1s) linear infinite;
   animation-delay: var(--pixel-d);
 }
 @keyframes effort-comet {
-  0% { transform: translateX(0); opacity: var(--pixel-a); }
-  100% { transform: translateX(-7px); opacity: calc(var(--pixel-a) * .1); }
+  0% { transform: translate(0, 0); opacity: var(--pixel-a); }
+  100% { transform: translate(var(--pixel-dx, -7px), var(--pixel-dy, 0)); opacity: 0; }
 }
 .effort-slider-knob {
-  position: absolute; top: 50%; width: 16px; height: 16px; border-radius: 50%;
-  left: calc(8px + (100% - 16px) * var(--effort-frac, 0));
+  position: absolute; top: 50%; width: calc(var(--effort-knob-r) * 2); height: calc(var(--effort-knob-r) * 2); border-radius: 50%;
+  left: calc(var(--effort-knob-r) + (100% - var(--effort-knob-r) * 2) * var(--effort-frac, 0));
   transform: translate(-50%, -50%);
   background: #fff; pointer-events: none;
-  box-shadow: 0 0 10px 2px var(--effort-c), 0 1px 3px rgba(0, 0, 0, .5);
+  box-shadow: 0 0 12px 3px var(--effort-c), 0 1px 4px rgba(0, 0, 0, .5);
 }
-.effort-slider-ticks { position: absolute; left: 8px; right: 8px; top: 50%; pointer-events: none; }
+.effort-slider-ticks { position: absolute; left: var(--effort-knob-r); right: var(--effort-knob-r); top: 50%; pointer-events: none; }
 .effort-slider-tick {
   position: absolute; top: 0; width: 4px; height: 4px; border-radius: 50%;
   transform: translate(-50%, -50%); background: var(--border);

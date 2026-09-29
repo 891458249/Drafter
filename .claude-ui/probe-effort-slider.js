@@ -265,7 +265,7 @@ async function main() {
     }
     const liveDrag = await evaluate(`(() => {
       const s = document.querySelector('#effort-slider'), p = document.querySelector('#effort-pop');
-      const r = s.getBoundingClientRect(), x = (f) => r.left + 8 + (r.width - 16) * f;
+      const r = s.getBoundingClientRect(), x = (f) => r.left + 14 + (r.width - 28) * f;
       const send = (type, f) => s.dispatchEvent(new PointerEvent(type, {
         bubbles: true, cancelable: true, pointerId: 2, isPrimary: true,
         clientX: x(f), clientY: r.top + r.height / 2, buttons: type === 'pointerup' ? 0 : 1,
@@ -281,21 +281,21 @@ async function main() {
       const fill = s.querySelector('.effort-slider-fill').getBoundingClientRect();
       const rail = s.querySelector('.effort-slider-rail').getBoundingClientRect();
       send('pointercancel', .9);
-      return { before, after, frac, label, gap: knob.left - trail.right,
+      return { before, after, frac, label, gap: (knob.left + knob.width / 2) - trail.right, knobSize: knob.width,
         inside: fill.left >= rail.left && fill.right <= rail.right &&
           trail.top >= rail.top && trail.bottom <= rail.bottom };
     })()`);
     ok(liveDrag.before !== liveDrag.after && Math.abs(Number(liveDrag.frac) - .9) < .0001 && liveDrag.label === '极限',
       'pointermove 即改变档位色、手柄位置与标题,无需松开', liveDrag);
-    ok(liveDrag.inside && liveDrag.gap >= -10 && liveDrag.gap <= 10,
-      '彗尾完全在填充轨道内,末端紧随手柄', liveDrag);
+    ok(liveDrag.inside && liveDrag.gap >= -10 && liveDrag.gap <= 10 && liveDrag.knobSize === 28,
+      '彗尾完全在填充轨道内,末端紧随手柄,圆形手柄 28px', liveDrag);
 
     // 拖到最右(第 5 格):pointerdown → pointerup 同一位置
     const dragTo = `(frac) => {
       const el = document.querySelector('#effort-slider');
       const r = el.getBoundingClientRect();
-      const inner = Math.max(1, r.width - 16);
-      const clientX = r.left + 8 + inner * frac;
+      const inner = Math.max(1, r.width - 28);
+      const clientX = r.left + 14 + inner * frac;
       const clientY = r.top + r.height / 2;
       const mk = (type) => new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, clientX, clientY, buttons: type === 'pointerup' ? 0 : 1 });
       el.dispatchEvent(mk('pointerdown'));
@@ -314,6 +314,14 @@ async function main() {
     ok(atMax.frac === '1', '填充比例 --effort-frac=1', atMax);
     const maxMeta = (await evaluate(`window.api.sessList()`, true) || []).find((s) => s.id === codeMeta.id);
     ok(maxMeta && maxMeta.effort === 'max', '主进程 IPC 回读 meta.effort === "max"', maxMeta && maxMeta.effort);
+    const btnLit = await evaluate(`(() => { const b = document.querySelector('#btn-effort'), t = b.querySelector('.effort-btn-trail');
+      return { model: b.querySelector('#effort-btn-model').textContent, level: b.querySelector('#effort-btn-level').textContent,
+        lit: b.classList.contains('is-lit'), dl: b.getAttribute('data-level'), trail: getComputedStyle(t).display,
+        pixels: t.querySelectorAll('.effort-slider-pixel').length, frac: b.style.getPropertyValue('--effort-frac'),
+        c: getComputedStyle(b).getPropertyValue('--effort-c').trim() }; })()`);
+    ok(btnLit.model && btnLit.model !== '选择强度' && btnLit.level === '极限' && btnLit.lit && btnLit.dl === '4' &&
+      btnLit.trail === 'block' && btnLit.pixels === 240 && btnLit.frac === '1',
+      '入口按键显示「模型名 + 推理深度」,落档后以对应档位彗尾作背景', btnLit);
 
     // 拖到最左(第 1 格)
     await evaluate(`(${dragTo})(0)`);

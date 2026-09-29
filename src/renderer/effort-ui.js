@@ -20,6 +20,7 @@ import {
 } from './effort.js';
 
 const LAST = EFFORT_LEVELS.length - 1; // 4
+const KNOB_R = 14; // 手柄半径 px,须与 styles.css 的 --effort-knob-r 一致
 
 let deps = { applyModel: null, refreshTopbar: null };
 let ctx = { sid: null, fast: false };
@@ -138,6 +139,20 @@ function render() {
   $('effort-pop-model-name').textContent = modelName;
   btn.title = `选择模型与推理深度(当前:${modelName} · ${level ? effortLabel(level) : '跟随默认'})`;
 
+  // 入口按键 = 模型名 + 推理深度;落档后以该档位颜色与彗尾作背景(按已提交档位,不随拖动预览)
+  const lit = applies && !follow && !!level;
+  $('effort-btn-model').textContent = modelName;
+  $('effort-btn-level').textContent = !applies ? '' : (level ? effortLabel(level) : EFFORT_DEFAULT_LABEL);
+  btn.classList.toggle('is-lit', lit);
+  if (lit) {
+    const li = effortIndex(level);
+    btn.setAttribute('data-level', String(li));
+    btn.style.setProperty('--effort-frac', String((li + 1) / (LAST + 1)));
+  } else {
+    btn.removeAttribute('data-level');
+    btn.style.removeProperty('--effort-frac');
+  }
+
   const chk = $('effort-follow-chk');
   chk.checked = follow;
   chk.disabled = !applies;
@@ -231,8 +246,8 @@ function commitIndex(i) {
 
 function fractionFromEvent(e) {
   const box = $('effort-slider').getBoundingClientRect();
-  const inner = Math.max(1, box.width - 16); // 两端各 8px 手柄半径,与 CSS 一致
-  return Math.min(Math.max((e.clientX - box.left - 8) / inner, 0), 1);
+  const inner = Math.max(1, box.width - 2 * KNOB_R); // 两端各留手柄半径,与 CSS 一致
+  return Math.min(Math.max((e.clientX - box.left - KNOB_R) / inner, 0), 1);
 }
 
 function indexFromEvent(e) {
@@ -240,6 +255,34 @@ function indexFromEvent(e) {
 }
 
 // ---------------- 初始化 ----------------
+
+// 确定性伪随机(整数哈希 → [0,1)):每次启动图案一致,但相邻方块之间毫无规律
+function hash01(n) {
+  let x = (n | 0) * 0x9e3779b1;
+  x ^= x >>> 15; x = Math.imul(x, 0x85ebca6b);
+  x ^= x >>> 13; x = Math.imul(x, 0xc2b2ae35);
+  x ^= x >>> 16;
+  return (x >>> 0) / 4294967296;
+}
+
+// 彗尾:40 列 × 6 行。头部(右端)最亮,向左按距离衰减,外侧行尾巴更短形成锥形;
+// 每个方块的亮度、速度、漂移距离、上下偏移、是否存在都各自乱序,越靠尾端越稀疏。
+function cometPixelsHtml(seed) {
+  const COLS = 40, ROWS = 6;
+  return Array.from({ length: COLS * ROWS }, (_v, n) => {
+    const col = n % COLS, row = Math.floor(n / COLS);
+    const r = (k) => hash01(n * 7 + k + seed * 7919);
+    const spread = Math.abs(row - (ROWS - 1) / 2) / ((ROWS - 1) / 2); // 0 中心 … 1 边缘
+    const reach = 1 - spread * 0.5 + (r(1) - 0.5) * 0.3;              // 该行尾巴长度占比,带抖动
+    const t = (COLS - 1 - col) / (COLS - 1);                           // 0 头部 … 1 尾端
+    const base = t > reach ? 0 : Math.pow(1 - t / reach, 1.5) * (1 - spread * 0.3);
+    const a = r(2) < t * 0.55 ? 0 : Math.min(1, base * (0.35 + r(3) * 1.2));
+    const dur = 0.7 + r(4) * 1.2;
+    const style = `--pixel-a:${a.toFixed(3)};--pixel-dur:${dur.toFixed(2)}s;--pixel-d:${(-r(5) * dur).toFixed(2)}s;` +
+      `--pixel-dx:${(-3 - r(6) * 9).toFixed(1)}px;--pixel-dy:${((r(7) - 0.5) * 2.5).toFixed(1)}px`;
+    return `<span class="effort-slider-pixel" style="${style}"></span>`;
+  }).join('');
+}
 
 export function initEffortUi(injected = {}) {
   deps = { ...deps, ...injected };
@@ -255,20 +298,9 @@ export function initEffortUi(injected = {}) {
       `<span class="effort-slider-tick" data-i="${i}" style="left:${(i / LAST) * 100}%"></span>`).join('');
   }
   const trail = $('effort-slider-trail-grid');
-  if (trail && !trail.childElementCount) {
-    // 彗尾:40 列 × 6 行。头部(右端,贴手柄)最亮最宽,向左按距离衰减,
-    // 外侧行的尾巴更短,形成锥形;相位用整数哈希打散,避免整齐的波浪。
-    const COLS = 40, ROWS = 6;
-    trail.innerHTML = Array.from({ length: COLS * ROWS }, (_v, n) => {
-      const col = n % COLS, row = Math.floor(n / COLS);
-      const spread = Math.abs(row - (ROWS - 1) / 2) / ((ROWS - 1) / 2); // 0 中心 … 1 边缘
-      const reach = 1 - spread * 0.55;                                   // 该行尾巴长度占比
-      const t = (COLS - 1 - col) / (COLS - 1);                           // 0 头部 … 1 尾端
-      const a = t > reach ? 0 : Math.pow(1 - t / reach, 1.7) * (1 - spread * 0.35);
-      const d = -(((col * 73 + row * 151) % 97) / 97) * 1.1;
-      return `<span class="effort-slider-pixel" style="--pixel-a:${a.toFixed(3)};--pixel-d:${d.toFixed(3)}s"></span>`;
-    }).join('');
-  }
+  if (trail && !trail.childElementCount) trail.innerHTML = cometPixelsHtml(0);
+  const btnTrail = $('effort-btn-trail-grid');
+  if (btnTrail && !btnTrail.childElementCount) btnTrail.innerHTML = cometPixelsHtml(1);
 
   btn.onclick = (e) => {
     e.stopPropagation();
