@@ -204,3 +204,4 @@
 - 2026-09-29 v0.15.23 **已发布**:tag `e6ac304a`,Release ID `398909676` Latest,exe SHA-256 `603e0dec…0ebf`,NotSigned;仅彗尾加密(240 方块)+单向拖尾动画。一次上传成功,--verify 通过。
 - 2026-09-29 入口按键改版(未发布):手柄 28px(CSS `--effort-knob-r`=JS `KNOB_R`=14 须同步);彗尾逐方块哈希乱序;`#btn-effort` 显示「模型名 + 档位 + ⌄」,落档后背景=档位色+彗尾(宽度随档位);色阶蓝→紫 `#9a5cf0`。探针 54/54。
 - 2026-09-29 v0.15.24 **已发布**:tag `1fc09a75`,Release ID `398969288` Latest,exe SHA-256 `914e2bb9…be48`,NotSigned;内容为入口按键「模型+档位」+档位彗尾背景、蓝→紫、手柄 28px。首传 ECONNRESET,重跑成功。**`test/agent-route-live.test.js` 两个 SendMessage 续聊用例本次时序抖动明显(单文件 13/13 与 11/13 交替),值得专门修。**
+- 2026-09-29 v0.15.25 **已发布**:tag `d48b5fc2`,Release ID `398990777` Latest,exe SHA-256 `b8bdc6a0…5294`,NotSigned。彗尾改为 canvas 粒子场 `src/renderer/effort-particles.js`(粒子留在世界坐标,经过处留下后消散;头部右侧剔除并裁剪,不外溢);拖动时按键与滑块实时同步。探针 58/58,npm test 485/485。
