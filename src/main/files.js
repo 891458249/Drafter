@@ -172,4 +172,23 @@ function savePastedAttachment(userDataDir, name, content) {
   }
 }
 
-module.exports = { listFiles, readFile, saveFile, watchFile, unwatchFile, readImageBase64, statFile, sampleFile, savePastedAttachment, decodeBuffer };
+// 聊天里文件链接右键「在资源管理器中打开」:把链接文本解析成磁盘上真实存在的路径。
+// 绝对路径/相对 cwd 直接命中即用;相对路径落空时(AI 常只写文件名或子目录内的短路径),
+// 在项目文件列表里按路径后缀匹配,多个候选取层级最浅的。找不到返回 ok:false。
+async function resolveExisting(cwd, p) {
+  const raw = String(p || '').trim();
+  if (!raw) return { ok: false, error: '路径为空' };
+  const abs = path.isAbsolute(raw) ? raw : (cwd ? path.join(cwd, raw) : '');
+  if (abs && fs.existsSync(abs)) return { ok: true, path: path.resolve(abs) };
+  if (path.isAbsolute(raw) || !cwd) return { ok: false, error: '文件不存在:' + raw };
+  const want = raw.replace(/\\/g, '/').replace(/^(\.\/)+/, '').toLowerCase();
+  const hits = (await listFiles(cwd)).filter((f) => {
+    const n = f.replace(/\\/g, '/').toLowerCase();
+    return n === want || n.endsWith('/' + want);
+  });
+  if (!hits.length) return { ok: false, error: '在项目中找不到文件:' + raw };
+  hits.sort((a, b) => a.split(/[\\/]/).length - b.split(/[\\/]/).length || a.length - b.length);
+  return { ok: true, path: path.resolve(cwd, hits[0]) };
+}
+
+module.exports = { listFiles, readFile, saveFile, watchFile, unwatchFile, readImageBase64, statFile, sampleFile, savePastedAttachment, decodeBuffer, resolveExisting };

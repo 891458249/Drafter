@@ -164,6 +164,7 @@ contextBridge.exposeInMainWorld('api', {
   fileSave: invoke('files:save'),
   fileWatch: invoke('files:watch'),
   fileUnwatch: (key) => ipcRenderer.invoke('files:unwatch', key),
+  fileReveal: invoke('files:reveal'), // { cwd, path } → 资源管理器中定位(右键菜单)
   fileReadImage: (absPath) => ipcRenderer.invoke('files:readImage', absPath),
   fileStat: (absPath) => ipcRenderer.invoke('files:stat', absPath),
   fileSample: (absPath) => ipcRenderer.invoke('files:sample', absPath),

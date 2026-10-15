@@ -2,9 +2,10 @@
 // - 文本消息右键:复制(有选区复制选区,否则复制整条)/ 引用(markdown 引用块填入输入框)
 // - 图片(用户附件缩略图 .msg-img / 生成产物 .aigc-media)右键:查看 / 复制图片;双击进入查看模式
 // - 用户消息右键(v0.9.9):修改并重新生成(截断其下所有消息)/ 从此消息分支(复制上文为新会话)
-import { $, showCtxMenu, emit } from './state.js';
+import { $, api, state, showCtxMenu, emit } from './state.js';
 import { addUserMessage, renderUserBubble, truncateAfter, ensureSession, setActiveSession } from './chat.js';
 import { refreshList } from './sessions-ui.js';
+import { parseFilePath } from './filelink.js';
 
 // 提取一条消息的纯文本:剔除工具进程组/任务卡片/思考块/代码卡片头部条,只保留正文
 function msgText(msgEl) {
@@ -72,6 +73,31 @@ export function openViewer(src) {
 }
 
 const isMsgImg = (t) => t && t.closest && t.closest('img.msg-img, img.aigc-media');
+
+// 右键目标若是文件(.file-link / 附件卡片 / 指向本地路径的 <a>),返回其路径,否则空串
+function filePathAt(t) {
+  if (!t || !t.closest) return '';
+  const link = t.closest('.file-link[data-file-path]');
+  if (link) return link.dataset.filePath;
+  const chip = t.closest('.file-attach-chip[data-path]');
+  if (chip) return chip.dataset.path;
+  const a = t.closest('a[href]');
+  if (a && !/^https?:\/\//i.test(a.getAttribute('href') || '')) {
+    let p = (a.getAttribute('href') || '').replace(/^file:\/\/\/?/i, '');
+    try { p = decodeURIComponent(p); } catch {}
+    const hit = parseFilePath(p) || parseFilePath(a.textContent || '');
+    if (hit) return hit.path;
+  }
+  return '';
+}
+
+// 在资源管理器中定位文件:相对路径按所在会话的工作目录解析(主进程兜底按文件名在项目内查找)
+async function revealFile(p, fromEl) {
+  const logEl = fromEl.closest('.session-log');
+  const s = logEl && state.sessions.get(logEl.dataset.sid);
+  const r = await api.fileReveal({ cwd: (s && s.meta.cwd) || state.cwd, path: p });
+  if (!r || !r.ok) errLine((r && r.error) || '无法定位文件');
+}
 
 // --- 修改并重新生成 / 从此消息分支(v0.9.9) -----------------------------------
 // 操作失败:在可见会话日志末尾落一条错误行(复用 meta-line 样式)
@@ -181,12 +207,18 @@ export function init() {
       ]);
       return;
     }
+    const fileP = filePathAt(e.target);
+    const fileItem = fileP && { label: '在资源管理器中打开', onClick: () => revealFile(fileP, e.target) };
     const msg = e.target.closest && e.target.closest('.msg');
-    if (!msg || !box.contains(msg)) return;
+    if (!msg || !box.contains(msg)) {
+      if (fileItem && box.contains(e.target)) { e.preventDefault(); showCtxMenu(e.clientX, e.clientY, [fileItem]); }
+      return;
+    }
     e.preventDefault();
     const sel = selectionTextIn(msg);
     const full = msgText(msg);
     const items = [
+      ...(fileItem ? [fileItem, '-'] : []),
       { label: sel ? '复制所选' : '复制', onClick: () => copyText(sel || full) },
       { label: '引用', onClick: () => quote(sel || full) },
     ];

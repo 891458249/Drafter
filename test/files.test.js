@@ -54,3 +54,30 @@ test('saveFile: 过期 mtime 触发冲突拒绝,最新 mtime 正常写入', () =
   assert.strictEqual(fresh.ok, true);
   assert.strictEqual(files.readFile(tmp, 'conflict.txt').content, 'v2');
 });
+
+test('resolveExisting: 绝对/相对命中直接返回,只写文件名时按后缀在项目内查找', async () => {
+  fs.mkdirSync(path.join(tmp, 'standalone', 'Lab_Max'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'standalone', 'Lab_Max', 'Lab_Max.ms'), 'm');
+  const want = path.join(tmp, 'standalone', 'Lab_Max', 'Lab_Max.ms');
+
+  const abs = await files.resolveExisting(tmp, want);
+  assert.deepStrictEqual(abs, { ok: true, path: want });
+  const rel = await files.resolveExisting(tmp, 'standalone/Lab_Max/Lab_Max.ms');
+  assert.strictEqual(rel.path, want);
+  const bare = await files.resolveExisting(tmp, 'Lab_Max.ms');
+  assert.strictEqual(bare.path, want, '只写文件名也能定位');
+  const sub = await files.resolveExisting(tmp, './Lab_Max/Lab_Max.ms');
+  assert.strictEqual(sub.path, want, '子目录短路径按后缀匹配');
+  // 后缀必须按路径段对齐:'ab_Max.ms' 不能误命中 'Lab_Max.ms'
+  assert.strictEqual((await files.resolveExisting(tmp, 'ab_Max.ms')).ok, false);
+  assert.strictEqual((await files.resolveExisting(tmp, path.join(tmp, 'nope.txt'))).ok, false);
+  assert.strictEqual((await files.resolveExisting(tmp, '')).ok, false);
+});
+
+test('resolveExisting: 多个同名文件取层级最浅的', async () => {
+  fs.mkdirSync(path.join(tmp, 'deep', 'er'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'deep', 'er', 'dup.cfg'), '1');
+  fs.writeFileSync(path.join(tmp, 'src', 'dup.cfg'), '2');
+  const r = await files.resolveExisting(tmp, 'dup.cfg');
+  assert.strictEqual(r.path, path.join(tmp, 'src', 'dup.cfg'));
+});

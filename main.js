@@ -1521,6 +1521,12 @@ ipcMain.handle('files:watch', (_e, { key, path: abs }) => {
 });
 ipcMain.handle('files:unwatch', (_e, key) => { files.unwatchFile(key); return true; });
 ipcMain.handle('files:readImage', (_e, absPath) => files.readImageBase64(absPath));
+// 聊天文件链接右键「在资源管理器中打开」:只定位并选中已存在的文件,不执行它
+ipcMain.handle('files:reveal', async (_e, { cwd, path: p }) => {
+  const r = await files.resolveExisting(cwd, p);
+  if (r.ok) shell.showItemInFolder(r.path);
+  return r;
+});
 ipcMain.handle('files:stat', (_e, absPath) => files.statFile(absPath)); // 媒体附件卡片显示大小用
 ipcMain.handle('files:sample', (_e, absPath) => files.sampleFile(absPath)); // 文本附件二进制检测采样(v0.9.27)
 // 粘贴的文本附件无磁盘路径:落盘 userData/attachments/ 后按路径引用(v0.9.27)

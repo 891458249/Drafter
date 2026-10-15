@@ -390,8 +390,9 @@ function appendThinking(s, parentId, delta) {
 function makeFileLink(text, hit) {
   const span = document.createElement('span');
   span.className = 'file-link';
+  span.dataset.filePath = hit.path; // 右键「在资源管理器中打开」读取(msgmenu.js)
   span.textContent = text;
-  span.title = hit.path + '\n点击在右侧编辑器打开';
+  span.title = hit.path + '\n点击在右侧编辑器打开,右键可在资源管理器中打开';
   // preventDefault:路径若被 AI 写成 [路径](路径) 包在 <a> 里,不拦截会触发就地导航黑屏(v0.12.3)
   span.onclick = (e) => { e.preventDefault(); e.stopPropagation(); emit('open-file', hit); };
   return span;
@@ -404,7 +405,8 @@ function linkifyPaths(el) {
     const hit = parseFilePath(code.textContent || '');
     if (!hit) continue;
     code.classList.add('file-link');
-    code.title = hit.path + '\n点击在右侧编辑器打开';
+    code.dataset.filePath = hit.path;
+    code.title = hit.path + '\n点击在右侧编辑器打开,右键可在资源管理器中打开';
     code.onclick = (e) => { e.preventDefault(); e.stopPropagation(); emit('open-file', hit); };
   }
   // ② 正文文本节点:绝对路径(无反引号)也可点击
@@ -804,6 +806,7 @@ function addToolCard(s, parentId, id, name, input) {
   if (fp) {
     const label = row.querySelector('.act-label');
     label.classList.add('file-link');
+    label.dataset.filePath = fp;
     label.title = fp + '(点击在编辑器面板预览)';
     label.onclick = (e) => { e.preventDefault(); e.stopPropagation(); emit('open-file', fp); };
   }
